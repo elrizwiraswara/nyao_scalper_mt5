@@ -55,7 +55,7 @@ input bool EnableAutoHedge = true;                        // Enable Auto Hedge o
 input int MaxHedgeDurationMinutes = 480;                  // Max Hedge Duration (Minutes)
 input bool EnablePyramiding = true;                       // Enable Pyramiding (Open new position on winning position)
 input int MaxPyramidingPositions = 5;                     // Max Total Pyramiding Positions
-input double PyramidingThresholdMultiplier = 1.5;         // Multiplier for MinBreakEvenProfit to Trigger Pyramiding
+input double PyramidingThresholdMultiplier = 1;           // Multiplier for MinBreakEvenProfit to Trigger Pyramiding
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
