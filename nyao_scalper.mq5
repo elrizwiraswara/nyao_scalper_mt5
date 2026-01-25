@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v12.0      |
+// |                                          Nyao Scalper v13.0      |
 // |              RSI with Reversal, Hedge & Pyramiding Strategy      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "12.0"
+#property version   "13.0"
 #property description "Auto Trading EA Robot with Equity Management + Discord Alerts."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -24,7 +24,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v12.0"
+input group " Nyao Scalper v13.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -101,6 +101,7 @@ input string TradingEndTime = "23:59";                    // Trading End Time (H
 input bool EnableNewsFilter = true;                       // Enable News Filter (Pause Trading During News)
 input int NewsMinutesBefore = 30;                         // Minutes Before News Event
 input int NewsMinutesAfter = 30;                          // Minutes After News Event
+input bool EnableLeveragePause = true;                    // Pause Trading When Leverage Changed
 
 // +------------------------------------------------------------------+
 // | Global Variables                                                 |
@@ -115,10 +116,12 @@ int minEquityTriggerCount = 0;                            // Counter for MinEqui
 bool isPaused = false;                                    // Trading pause state
 int currentPauseDuration = 0;                             // Current pause duration in minutes
 datetime pauseStartTime = 0;                              // Pause start time
-bool wasWithinTradingHours = true;                        // Track trading hours state for alerts
-static ulong lastProcessedNewsEventID = 0;                // Last processed news event ID
+bool isOutsideTradingHours = false;                       // Flag when outside trading hours
+bool isLeverageDiffFromInitial = false;                   // Flag if leverage has changed
+ulong lastProcessedNewsEventID = 0;                       // Last processed news event ID
 string symbolBaseCurrency = "";                           // Base currency of the symbol
 string symbolQuoteCurrency = "";                          // Quote currency of the symbol
+long initialLeverage = 0;                                 // Initial Account Leverage
 
 // RSI Indicator Handle and Buffer
 int rsiHandle;
@@ -127,8 +130,6 @@ double rsi[];
 // Duplicate Signal Filter Variables
 double lastBuyPrice = 0;
 double lastSellPrice = 0;
-int lastBuyBar = -1;
-int lastSellBar = -1;
 datetime lastReverseTime = 0;
 datetime startTime = 0;                                   // EA Start Time
 datetime lastDailyReportTime = 0;                         // Last time daily report was sent
@@ -171,6 +172,32 @@ void DisableAlgoTrading()
 }
 
 // +------------------------------------------------------------------+
+// | Toggle Disable Algo Trading MT5                                  |
+// +------------------------------------------------------------------+
+bool IsAllowedToOpenOrder()
+{
+    if (targetEquityReached || minimumEquityReached || minEquityTriggersExceeded)
+    {
+        Print("+-----------------------------------------+");
+        Print("OPEN ORDER BLOCKED!");
+        Print("Trading Stopped! Opening new order are not allowed!");
+        Print("+-----------------------------------------+");
+        return false;
+    }
+
+    if (isPaused || isOutsideTradingHours || isLeverageDiffFromInitial)
+    {
+        Print("+-----------------------------------------+");
+        Print("OPEN ORDER BLOCKED!");
+        Print("Trading Paused! Opening new order are not allowed during pause period!");
+        Print("+-----------------------------------------+");
+        return false;
+    }
+
+    return true;
+}
+
+// +------------------------------------------------------------------+
 // | Send Discord alert via webhook                                   |
 // +------------------------------------------------------------------+
 bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
@@ -188,7 +215,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v12.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v13.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -238,7 +265,9 @@ void CheckDiscordAlert() {
         // Get current equity
         double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
 
-        string alertMsg = "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+        string alertMsg = "**Instrument:** " + _Symbol + "\n";
+        alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+        alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
         alertMsg += "**Trading Hours:** " + (EnableTradingHours ? TradingStartTime + " - " + TradingEndTime + "\n" : "DISABLED\n");
         alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
         alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
@@ -325,30 +354,20 @@ void SendDailyReport() {
     if(hours > 0) durationStr += IntegerToString(hours) + "h ";
     durationStr += IntegerToString(minutes) + "m";
     
-    string timeFrameStr = EnumToString(_Period);
-    StringReplace(timeFrameStr, "PERIOD_", "");
-
     string alertMsg = "**Instrument:** " + _Symbol + "\n";
-    alertMsg += "**Timeframe:** " + timeFrameStr + "\n";
-    alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n\n";
+    alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+    alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+    alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+    alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n\n";
+    alertMsg += "**Daily Trades:** " + IntegerToString(dailyTrades) + "\n";
+    alertMsg += "**Total Trades:** " + IntegerToString(totalTrades) + "\n";
+    alertMsg += "**Daily Profit:** $" + DoubleToString(dailyProfit, 2) + "\n";
+    alertMsg += "**Total Profit:** $" + DoubleToString(totalProfit, 2) + "\n";
+    alertMsg += "**Daily Loss:** $" + DoubleToString(dailyLoss, 2) + "\n\n";
+    alertMsg += "**Total Loss:** $" + DoubleToString(totalLoss, 2) + "\n\n";
+    alertMsg += "**Running Duration:** " + durationStr;
     
-    alertMsg += "**Equity Info**\n";
-    alertMsg += "• Peak Equity: $" + DoubleToString(peakEquity, 2) + "\n";
-    alertMsg += "• Current Equity: $" + DoubleToString(currentEquity, 2) + "\n\n";
-    
-    alertMsg += "**Daily Stats**\n";
-    alertMsg += "• Trades: " + IntegerToString(dailyTrades) + "\n";
-    alertMsg += "• Profit: $" + DoubleToString(dailyProfit, 2) + "\n";
-    alertMsg += "• Loss: $" + DoubleToString(dailyLoss, 2) + "\n\n";
-    
-    alertMsg += "**Total Stats**\n";
-    alertMsg += "• Trades: " + IntegerToString(totalTrades) + "\n";
-    alertMsg += "• Profit: $" + DoubleToString(totalProfit, 2) + "\n";
-    alertMsg += "• Loss: $" + DoubleToString(totalLoss, 2) + "\n\n";
-    
-    alertMsg += "**⏱Duration:** " + durationStr;
-    
-    SendDiscordAlert("📅 DAILY TRADE REPORT", alertMsg, 16776960); // Yellow/Gold color
+    SendDiscordAlert("📊 DAILY TRADE REPORT", alertMsg, 16776960); // Yellow/Gold color
     
     lastDailyReportTime = TimeCurrent();
 }
@@ -409,15 +428,15 @@ int OnInit()
     minEquityTriggerCount = 0;
     isPaused = false;
     pauseStartTime = 0;
-    wasWithinTradingHours = IsWithinTradingHours();
     lastProcessedNewsEventID = 0;
     startTime = TimeCurrent();
     lastDailyReportTime = 0;
     symbolBaseCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
     symbolQuoteCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
+    initialLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v12.0 Initialized Successfully");
+    Print("Nyao Scalper v13.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -439,373 +458,62 @@ void OnDeinit(const int reason)
 }
 
 // +------------------------------------------------------------------+
-// | Expert tick function - NOW CHECKS SIGNALS ON EVERY TICK          |
+// | Expert tick function - CHECKS SIGNALS ON EVERY TICK              |
 // +------------------------------------------------------------------+
 void OnTick()
-{    
-    // Get current equity
-    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-    
-    // Update peak equity if current is higher
-    if(currentEquity > peakEquity)
-    {
-        peakEquity = currentEquity;
-        lastPeakEquity = currentEquity;
-        
-        // Reset min equity triggers on new peak
-        if (ResetOnNewPeak) minEquityTriggerCount = 0; 
-
-        Print("New Peak Equity reached: $", peakEquity);
-        
-        // Reset pause if equity recovered above peak
-        if(isPaused)
-        {
-            isPaused = false;
-            Print("Trading RESUMED - Equity recovered above peak!");
-        }
-    }
+{   
+    // Check and update peak equity
+    CheckPeakEquity();
     
     // Check if target equity reached
-    if(TargetEquity > 0 && !targetEquityReached && currentEquity >= TargetEquity)
-    {
-        targetEquityReached = true;
-        Print("+-----------------------------------------+");
-        Print("TARGET EQUITY REACHED!");
-        Print("Current Equity: $", currentEquity);
-        Print("Target Equity: $", TargetEquity);
-        Print("Closing ALL positions and stopping trading...");
-        Print("+-----------------------------------------+");
-        
-        // Send Discord alert for target equity reached
-        if(EnableDiscordAlerts)
-        {
-            string alertMsg = "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-            alertMsg += "**Target Equity:** $" + DoubleToString(TargetEquity, 2) + "\n";
-            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-            alertMsg += "**Profit:** $" + DoubleToString(TargetEquity - initialBalance, 2) + "\n";
-            alertMsg += "**Status:** All positions closed, trading stopped";
-            
-            SendDiscordAlert("🎯 TARGET EQUITY REACHED!", alertMsg, 5763719); // Green color
-        }
-
-        Alert("TARGET EQUITY REACHED! Closing all positions and stopping trading.");
-        
-        CloseAllPositions();
-
-        DisableAlgoTrading();
-        return;
-    }
-
+    CheckTargetEquity();
+    
     // Check if minimum equity reached
-    if(MinimumEquity > 0 && !minimumEquityReached && currentEquity <= MinimumEquity)
-    {
-        minimumEquityReached = true;
-        Print("+-----------------------------------------+");
-        Print("MINIMUM TRADEABLE EQUITY REACHED!");
-        Print("Current Equity: $", currentEquity);
-        Print("Minimum Equity: $", MinimumEquity);
-        Print("Closing ALL positions and stopping trading...");
-        Print("+-----------------------------------------+");
-        
-        // Send Discord alert for minimum equity reached
-        if(EnableDiscordAlerts)
-        {
-            string alertMsg = "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-            alertMsg += "**Minimum Equity:** $" + DoubleToString(MinimumEquity, 2) + "\n";
-            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-            alertMsg += "**Loss:** $" + DoubleToString(initialBalance - currentEquity, 2) + "\n";
-            alertMsg += "**Status:** All positions closed, trading stopped";
-            
-            SendDiscordAlert("🔴 MINIMUM TRADEABLE EQUITY REACHED", alertMsg, 15158332); // Red color
-        }
+    CheckMinTradeableEquity();
 
-        Alert("MINIMUM TRADEABLE EQUITY REACHED! Closing all positions and stopping trading.");
-        
-        CloseAllPositions();
-
-        DisableAlgoTrading();
-        return;
-    }
+    // Check equity drawdawn
+    CheckEquityDrawdawn();
     
-    if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded) return;
-    
-    // Calculate allowed drawdown
-    double drawdownFromPercent = lastPeakEquity * ((100.0 - MinEquityPercent) / 100.0);
-
-    // If MaxDrawdownFromPeak is 0 or negative, don't cap it
-    double allowedDrawdown = (MaxDrawdownFromPeak > 0) ? 
-                             MathMin(drawdownFromPercent, MaxDrawdownFromPeak)
-                             : drawdownFromPercent;
-
-    double minAllowedEquity = lastPeakEquity - allowedDrawdown;
-    
-    // Check equity condition and handle pause
-    if(currentEquity < minAllowedEquity)
-    {
-        if(!isPaused)
-        {
-            // Increment trigger counter
-            minEquityTriggerCount++;
-            
-            // Check if max triggers exceeded
-            if(MaxMinEquityTriggers > 0 && minEquityTriggerCount > MaxMinEquityTriggers)
-            {
-                minEquityTriggersExceeded = true;
-                Print("+-----------------------------------------+" );
-                Print("MAX MIN EQUITY TRIGGERS EXCEEDED!");
-                Print("Triggers Used: ", minEquityTriggerCount, " / ", MaxMinEquityTriggers);
-                Print("Closing ALL positions and STOPPING TRADING...");
-                Print("+-----------------------------------------+" );
-                
-                if(EnableDiscordAlerts)
-                {
-                    string alertMsg = "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-                    alertMsg += "**Peak Equity:** $" + DoubleToString(lastPeakEquity, 2) + "\n";
-                    alertMsg += "**Triggers Used:** " + IntegerToString(minEquityTriggerCount) + " / " + IntegerToString(MaxMinEquityTriggers) + "\n";
-                    alertMsg += "**Status:** All positions closed, trading stopped";
-                    
-                    SendDiscordAlert("🔴 MAX MIN EQUITY TRIGGERS EXCEEDED", alertMsg, 15158332); // Red color
-                }
-
-                Alert("MAX MIN EQUITY TRIGGERS EXCEEDED! Closing all positions and stopping trading.");
-                
-                CloseAllPositions();
-
-                DisableAlgoTrading();
-                return;
-            }
-            
-            // First time hitting minimum equity
-            isPaused = true;
-            pauseStartTime = TimeTradeServer();
-
-            // Use the trigger count to calculate exponential pause duration
-            double calculatedDuration = PauseMinutes * MathPow(PauseMinutesMultiplier, minEquityTriggerCount - 1);
-            if(calculatedDuration > INT_MAX) calculatedDuration = INT_MAX;
-            currentPauseDuration = (int)MathMin(calculatedDuration, MaxPauseMinutes > 0 ? MaxPauseMinutes : INT_MAX);
-
-            // Calculate drop peek equity
-            double equityDrop = lastPeakEquity - currentEquity;
-            double equityDropPercent = (equityDrop / lastPeakEquity) * 100.0;
-
-            // Store old peak for Discord alert
-            double oldPeakEquity = lastPeakEquity;
-            
-            // Update peak equity to current balance
-            lastPeakEquity = AccountInfoDouble(ACCOUNT_BALANCE);
-            
-            Print("+-----------------------------------------+");
-            Print("EQUITY PROTECTION TRIGGERED!");
-            Print("Current Equity: $", currentEquity);
-            Print("Peak Equity: $", peakEquity);
-            Print("Old Peak Equity: $", oldPeakEquity);
-            Print("New Peak Equity (Balance): $", lastPeakEquity);
-            Print("Min Allowed (", MinEquityPercent, "%): $", minAllowedEquity);
-            Print("Closing unprofitable positions...");
-            Print("Trading PAUSED for ", currentPauseDuration, " minutes");
-            Print("Resume Time: ", TimeToString(pauseStartTime + currentPauseDuration * 60));
-            Print("+-----------------------------------------+");
-            
-            // Send Discord alert for minimum equity reached
-            if(EnableDiscordAlerts)
-            {
-                string alertMsg = "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-                alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "**Previous Peak:** $" + DoubleToString(oldPeakEquity, 2) + "\n";
-                alertMsg += "**New Peak (Balance):** $" + DoubleToString(lastPeakEquity, 2) + "\n";
-                alertMsg += "**Equity Drop:** $" + DoubleToString(equityDrop, 2) + " (" + DoubleToString(equityDropPercent, 2) + "%)\n";
-                alertMsg += "**Min Allowed (" + DoubleToString(MinEquityPercent, 0) + "%):** $" + DoubleToString(minAllowedEquity, 2) + "\n";
-                alertMsg += "**Trading Paused:** " + IntegerToString(currentPauseDuration) + " minutes\n";
-                alertMsg += "**Resume Time:** " + TimeToString(pauseStartTime + currentPauseDuration * 60) + "\n";
-                alertMsg += "**Action:** Trading Paused & Closing unprofitable positions...";
-                
-                SendDiscordAlert("⚠️ MINIMUM EQUITY PROTECTION TRIGGERED", alertMsg, 16705372); // Yellow color
-            }
-
-            CloseAllPositions(true); // Close only unprofitable positions
-        }
-    }
-
-    // Check for high-impact news events
-    if(EnableNewsFilter)
+    if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded) 
     {   
-        ulong newsEventID = 0;
-        string newsDetails = IsHighImpactNewsTime(NewsMinutesBefore, NewsMinutesAfter, newsEventID);
-        
-        if(!isPaused && newsDetails != "" && lastProcessedNewsEventID != newsEventID)
-        {
-            // Update last processed news event ID
-            lastProcessedNewsEventID = newsEventID;
-
-            // Trigger the pause mechanism
-            isPaused = true;
-            pauseStartTime = TimeTradeServer();
-            
-            // Calculate remaining pause time until event ends
-            datetime eventTime = 0;
-            datetime currentServerTime = TimeTradeServer();
-            MqlCalendarValue values[];
-            if(CalendarValueHistory(values, currentServerTime - 60, currentServerTime + NewsMinutesAfter * 60))
-            {
-                for(int i = 0; i < ArraySize(values); i++)
-                {
-                    if(values[i].event_id == newsEventID)
-                    {
-                        eventTime = values[i].time;
-                        break;
-                    }
-                }
-            }
-
-            if(eventTime > 0)
-            {
-                int secondsUntilEventEnd = (int)((eventTime + NewsMinutesAfter * 60) - currentServerTime);
-                currentPauseDuration = (secondsUntilEventEnd / 60) + 1; // +1 for safety margin
-            }
-            else
-            {
-                currentPauseDuration = NewsMinutesAfter; // Fallback
-            }
-            
-            double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-            
-            Print("+-----------------------------------------+");
-            Print("HIGH-IMPACT NEWS EVENT DETECTED!");
-            Print("Server Time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS));
-            Print("Current Equity: $", currentEquity);
-            Print("Trading PAUSED for ", currentPauseDuration, " minutes");
-            Print("Resume Time: ", TimeToString(pauseStartTime + currentPauseDuration * 60));
-            Print("+-----------------------------------------+");
-            
-            // Send Discord alert with full event details
-            if(EnableDiscordAlerts)
-            {
-                // Add event details
-                string alertMsg =  newsDetails + "\n\n";
-                
-                // Add trading info
-                alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
-                alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-                alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "**Trading Paused:** " + IntegerToString(currentPauseDuration) + " minutes\n";
-                alertMsg += "**Resume Time:** " + TimeToString(pauseStartTime + currentPauseDuration * 60) + "\n";
-                alertMsg += "**Action:** Trading paused during news period & closing unprofitable positions...";
-                
-                SendDiscordAlert("⚠️ HIGH-IMPACT NEWS DETECTED!", alertMsg, 16705372); // Yellow color
-            }
-            
-            CloseAllPositions(true); // Close only unprofitable positions
-        }
+        // Close all positions and completely stop the EA
+        CloseAllPositions();
+        DisableAlgoTrading();
+        Print("[STOPPED] Trading stopped.");
+        return;
     }
 
     // Check if current time is within allowed trading hours
-    if(EnableTradingHours)
-    {
-        bool currentlyWithinHours = IsWithinTradingHours();
-        
-        // Check for transition from outside to inside trading hours (Trading Started)
-        if(!wasWithinTradingHours && currentlyWithinHours)
-        {
-            wasWithinTradingHours = true;
-            
-            Print("+-----------------------------------------+");
-            Print("TRADING HOURS STARTED");
-            Print("Server Time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS));
-            Print("Trading Period: ", TradingStartTime, " - ", TradingEndTime);
-            Print("Current Equity: $", currentEquity);
-            Print("+-----------------------------------------+");
-            
-            // Send Discord alert for trading started
-            if(EnableDiscordAlerts)
-            {
-                string alertMsg = "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
-                alertMsg += "**Trading Period:** " + TradingStartTime + " - " + TradingEndTime + "\n";
-                alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-                alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "**Status:** Now accepting new trading signals";
-                
-                SendDiscordAlert("🟢 TRADING HOURS STARTED!", alertMsg, 5763719); // Green color
-            }
-        }
-        
-        // Check for transition from inside to outside trading hours (Trading Stopped)
-        if(wasWithinTradingHours && !currentlyWithinHours)
-        {
-            wasWithinTradingHours = false;
-            
-            Print("+-----------------------------------------+");
-            Print("TRADING HOURS ENDED");
-            Print("Server Time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS));
-            Print("Trading Period: ", TradingStartTime, " - ", TradingEndTime);
-            Print("Current Equity: $", currentEquity);
-            Print("+-----------------------------------------+");
-            
-            // Send Discord alert for trading stopped
-            if(EnableDiscordAlerts)
-            {
-                string alertMsg = "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
-                alertMsg += "**Trading Period:** " + TradingStartTime + " - " + TradingEndTime + "\n";
-                alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-                alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "⏸**Status:** No new positions until next trading session";
-                
-                
-                SendDiscordAlert("🔴 TRADING HOURS ENDED!", alertMsg, 15158332); // Red color
-                
-                // Send Daily Report
-                SendDailyReport();
-            }
-        }
-        
-        // If currently outside trading hours, prevent new trades
-        if(!currentlyWithinHours)
-        {
-            static datetime lastTradingHoursLog = 0;
-            
-            // Log only once per minute to avoid spam
-            if(TimeTradeServer() - lastTradingHoursLog > 60)
-            {
-                Print("[OUTSIDE TRADING HOURS] Current time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS), 
-                      " | Allowed: ", TradingStartTime, " - ", TradingEndTime);
-                lastTradingHoursLog = TimeTradeServer();
-            }
-            
-            // Don't open new positions, but continue managing existing ones
-            ManagePositions();
-            return;
-        }
+    CheckTradingHours();
+
+    // Check for leverage changes
+    CheckLeverageChange();
+
+    if (isOutsideTradingHours || isLeverageDiffFromInitial)
+    {   
+        // Don't open new positions, but continue managing existing ones
+        ManagePositions();
+        Print("[PAUSED] Trading paused.");
+        return;
     }
     
-    // Check for End of Day Report (if Trading Hours Disabled or missed)
-    // We check if we crossed the day boundary or if it is 23:59
-    datetime serverTime = TimeTradeServer();
-    MqlDateTime dt;
-    TimeToStruct(serverTime, dt);
+    // Check for high-impact news events
+    CheckHighImpactNews();
     
-    if(!EnableTradingHours && dt.hour == 23 && dt.min == 59)
-    {
-        // Check if report already sent today (to avoid spamming in the last minute)
-        // lastDailyReportTime checks full timestamp
-        MqlDateTime lastReportDt;
-        TimeToStruct(lastDailyReportTime, lastReportDt);
-        
-        if(lastReportDt.day != dt.day)
-        {
-             SendDailyReport();
-        }
-    }
+    // Check for End of Day (23:59) Report (if Trading Hours Disabled or missed)
+    CheckDailyReport();
 
     // Check pause duration 
-    if(isPaused)
+    if (isPaused)
     {
         datetime currentTime = TimeTradeServer();
         int elapsedSeconds = (int)(currentTime - pauseStartTime);
         int pauseDurationSeconds = currentPauseDuration * 60;
         
-        if(elapsedSeconds < pauseDurationSeconds)
+        if(currentPauseDuration == 0 || elapsedSeconds < pauseDurationSeconds)
         {
-            // Still in pause period - close unprofitable positions and prevent ALL trading
-            CloseAllPositions(true); // Close only unprofitable positions
+            // Don't open new positions, but continue managing existing ones
+            ManagePositions();
             Print("[PAUSED] Paused. Time remaining: ", (pauseDurationSeconds - elapsedSeconds) / 60, " minute(s)");
             return;  // EXIT - prevent all new orders while paused
         }
@@ -813,6 +521,9 @@ void OnTick()
         {
             // Pause period ended - reset flag and resume trading
             isPaused = false;
+
+            double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
             Print("+-----------------------------------------+");
             Print("PAUSE PERIOD ENDED");
             Print("Trading RESUMED after ", currentPauseDuration, " minutes");
@@ -821,11 +532,14 @@ void OnTick()
             
             // Send Discord alert for trading resumed
             if(EnableDiscordAlerts)
-            {
-                string alertMsg = "**Pause Duration:** " + IntegerToString(currentPauseDuration) + " minutes\n";
+            {   
+                string alertMsg = "**Instrument:** " + _Symbol + "\n";
+                alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+                alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+                alertMsg += "**Pause Duration:** " + IntegerToString(currentPauseDuration) + " minutes\n";
                 alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
                 alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "**Status:** Monitoring for new trading signals...";
+                alertMsg += "**Status:** Monitoring for new trading signals";
                 
                 SendDiscordAlert("▶️ TRADING RESUMED!", alertMsg, 3066993); // Blue color
             }
@@ -947,25 +661,13 @@ bool FakeBreakSell(double resistance)
 // +------------------------------------------------------------------+
 bool AllowNewBuy(double price)
 {
-   static datetime lastBuyCandleTime = 0;
-   datetime currentCandleTime = iTime(_Symbol, _Period, 0);
-
-   if(lastBuyCandleTime == currentCandleTime) return false;
-
    if(MathAbs(price - lastBuyPrice) < ZonePoints * _Point * BuyDuplicateMultiplier) return false;
-
    return true;
 }
 
 bool AllowNewSell(double price)
 {
-   static datetime lastSellCandleTime = 0;
-   datetime currentCandleTime = iTime(_Symbol, _Period, 0);
-
-   if(lastSellCandleTime == currentCandleTime) return false;
-
    if(MathAbs(price - lastSellPrice) < ZonePoints * _Point * SellDuplicateMultiplier) return false;
-
    return true;
 }
 // +------------------------------------------------------------------+
@@ -975,7 +677,7 @@ bool AllowNewSell(double price)
 // +------------------------------------------------------------------+
 bool BuySignal()
 {
-   CopyBuffer(rsiHandle, 0, 0, 3, rsi);
+   if(CopyBuffer(rsiHandle, 0, 0, 3, rsi) <= 0) return false;
 
    double close1  = iClose(_Symbol, _Period, 1);
    double support = GetSupport(1);
@@ -992,7 +694,6 @@ bool BuySignal()
      )
    {
       lastBuyPrice = close1;
-      lastBuyBar = iBars(_Symbol, _Period);
       return true;
    }
 
@@ -1004,7 +705,7 @@ bool BuySignal()
 // +------------------------------------------------------------------+
 bool SellSignal()
 {
-   CopyBuffer(rsiHandle, 0, 0, 3, rsi);
+   if(CopyBuffer(rsiHandle, 0, 0, 3, rsi) <= 0) return false;
 
    double close1 = iClose(_Symbol, _Period, 1);
    double resistance = GetResistance(1);
@@ -1021,7 +722,6 @@ bool SellSignal()
      )
    {
       lastSellPrice = close1;
-      lastSellBar = iBars(_Symbol, _Period);
       return true;
    }
 
@@ -1078,6 +778,9 @@ double CalculateDynamicLotSize()
         double symbolLotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
         double maxAffordableLot = minLot;
         double testMargin = 0;  
+        
+        // Loop safety counter
+        if (symbolLotStep == 0) symbolLotStep = 0.01;
         
         // Linear search is safer and simpler for small lot ranges
         double testLot = minLot;
@@ -1215,7 +918,9 @@ void CheckForTradingSignal()
 // | Open position with dynamic lot sizing AND fixed SL/TP            |
 // +------------------------------------------------------------------+
 void OpenPosition(ENUM_ORDER_TYPE orderType)
-{
+{   
+    if (!IsAllowedToOpenOrder()) return;
+
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
     
@@ -1893,7 +1598,9 @@ void ManageHedgedPositions()
 // | Open Pyramiding Position (Base Lot + Initial Profitable SL)      |
 // +------------------------------------------------------------------+
 void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
-{
+{   
+    if (!IsAllowedToOpenOrder()) return;
+
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
     
@@ -2602,8 +2309,7 @@ double GetPositionRoundTripCommission(ulong positionTicket)
 {
     double entryCommission = 0.0;
     
-    if(!HistorySelectByPosition(positionTicket))
-        return 0.0;
+    if(!HistorySelectByPosition(positionTicket)) return 0.0;
     
     // Get entry commission
     for(int i = 0; i < HistoryDealsTotal(); i++)
@@ -2687,7 +2393,7 @@ string IsHighImpactNewsTime(int minutesBefore, int minutesAfter, ulong &eventID)
                     if(values[i].HasPreviousValue())
                         eventDetails += "**Previous:** " + DoubleToString(values[i].GetPreviousValue(), 2) + "\n";
                     
-                    eventDetails += "**Importance:** High\n";
+                    eventDetails += "**Importance:** " + EnumToString(event.importance) + "\n";
                     eventDetails += "**Pause Window:** " + TimeToString(pauseStart, TIME_SECONDS) + 
                                    " to " + TimeToString(pauseEnd, TIME_SECONDS);
                     
@@ -2757,5 +2463,455 @@ bool IsWithinTradingHours()
     {
         // Normal trading period within same day
         return (currentMinutes >= startMinutes && currentMinutes <= endMinutes);
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check and update peak equity                                     |
+// +------------------------------------------------------------------+
+void CheckPeakEquity()
+{
+    // Get current equity
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    
+    // Update peak equity if current is higher
+    if(currentEquity > peakEquity)
+    {
+        peakEquity = currentEquity;
+        lastPeakEquity = currentEquity;
+        
+        // Reset min equity triggers on new peak
+        if (ResetOnNewPeak) minEquityTriggerCount = 0; 
+        
+        Print("New Peak Equity reached: $", peakEquity);
+        
+        // Reset pause if equity recovered above peak
+        if(isPaused)
+        {
+            isPaused = false;
+            Print("Trading RESUMED - Equity recovered above peak!");
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check target equity and send alert                               |
+// +------------------------------------------------------------------+
+void CheckTargetEquity()
+{   
+    // Get current equity
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+    if(TargetEquity > 0 && !targetEquityReached && currentEquity >= TargetEquity)
+    {
+        targetEquityReached = true;
+        
+        Print("+-----------------------------------------+");
+        Print("TARGET EQUITY REACHED!");
+        Print("Current Equity: $", currentEquity);
+        Print("Target Equity: $", TargetEquity);
+        Print("Closing ALL positions and stopping trading...");
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert for target equity reached
+        if(EnableDiscordAlerts)
+        {
+            string alertMsg = "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Target Equity:** $" + DoubleToString(TargetEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "**Profit:** $" + DoubleToString(TargetEquity - initialBalance, 2) + "\n";
+            alertMsg += "**Status:** All positions closed, trading stopped";
+            
+            SendDiscordAlert("🎯 TARGET EQUITY REACHED!", alertMsg, 5763719); // Green color
+        }
+        
+        Alert("TARGET EQUITY REACHED! Closing all positions and stopping trading.");
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check minimum tradeable equity and send alert                    |
+// +------------------------------------------------------------------+
+void CheckMinTradeableEquity() 
+{   
+    // Get current equity
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+    if(MinimumEquity > 0 && !minimumEquityReached && currentEquity <= MinimumEquity)
+    {
+        minimumEquityReached = true;
+        Print("+-----------------------------------------+");
+        Print("MINIMUM TRADEABLE EQUITY REACHED!");
+        Print("Current Equity: $", currentEquity);
+        Print("Minimum Equity: $", MinimumEquity);
+        Print("Closing ALL positions and stopping trading...");
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert for minimum equity reached
+        if(EnableDiscordAlerts)
+        {   
+            string alertMsg = "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Minimum Equity:** $" + DoubleToString(MinimumEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "**Loss:** $" + DoubleToString(initialBalance - currentEquity, 2) + "\n";
+            alertMsg += "**Status:** All positions closed, trading stopped";
+            
+            SendDiscordAlert("🔴 MINIMUM TRADEABLE EQUITY REACHED", alertMsg, 15158332); // Red color
+        }
+        
+        Alert("MINIMUM TRADEABLE EQUITY REACHED! Closing all positions and stopping trading.");
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check equity drawdawn and send alert                             |
+// +------------------------------------------------------------------+
+void CheckEquityDrawdawn()
+{   
+    // Get current equity
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+    // Calculate allowed drawdown
+    double drawdownFromPercent = lastPeakEquity * ((100.0 - MinEquityPercent) / 100.0);
+    
+    // If MaxDrawdownFromPeak is 0 or negative, don't cap it
+    double allowedDrawdown = (MaxDrawdownFromPeak > 0) ? 
+    MathMin(drawdownFromPercent, MaxDrawdownFromPeak)
+    : drawdownFromPercent;
+    
+    double minAllowedEquity = lastPeakEquity - allowedDrawdown;
+    
+    // Check equity condition and handle pause
+    if(currentEquity < minAllowedEquity)
+    {
+        if(!isPaused)
+        {
+            // Increment trigger counter
+            minEquityTriggerCount++;
+            
+            // Check if max triggers exceeded
+            if(MaxMinEquityTriggers > 0 && minEquityTriggerCount > MaxMinEquityTriggers)
+            {
+                minEquityTriggersExceeded = true;
+                Print("+-----------------------------------------+" );
+                Print("MAX MIN EQUITY TRIGGERS EXCEEDED!");
+                Print("Triggers Used: ", minEquityTriggerCount, " / ", MaxMinEquityTriggers);
+                Print("Closing ALL positions and STOPPING TRADING...");
+                Print("+-----------------------------------------+" );
+                
+                if(EnableDiscordAlerts)
+                {   
+                    string alertMsg = "**Instrument:** " + _Symbol + "\n";
+                    alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+                    alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+                    alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+                    alertMsg += "**Peak Equity:** $" + DoubleToString(lastPeakEquity, 2) + "\n";
+                    alertMsg += "**Triggers Used:** " + IntegerToString(minEquityTriggerCount) + " / " + IntegerToString(MaxMinEquityTriggers) + "\n";
+                    alertMsg += "**Status:** All positions closed, trading stopped";
+                    
+                    SendDiscordAlert("🔴 MAX MIN EQUITY TRIGGERS EXCEEDED", alertMsg, 15158332); // Red color
+                }
+                
+                Alert("MAX MIN EQUITY TRIGGERS EXCEEDED! Closing all positions and stopping trading.");
+                return;
+            }
+            
+            // First time hitting minimum equity
+            isPaused = true;
+            pauseStartTime = TimeTradeServer();
+            
+            // Use the trigger count to calculate exponential pause duration
+            double calculatedDuration = PauseMinutes * MathPow(PauseMinutesMultiplier, minEquityTriggerCount - 1);
+            if(calculatedDuration > INT_MAX) calculatedDuration = INT_MAX;
+            currentPauseDuration = (int)MathMin(calculatedDuration, MaxPauseMinutes > 0 ? MaxPauseMinutes : INT_MAX);
+            
+            // Calculate drop peek equity
+            double equityDrop = lastPeakEquity - currentEquity;
+            double equityDropPercent = (equityDrop / lastPeakEquity) * 100.0;
+            
+            // Store old peak for Discord alert
+            double oldPeakEquity = lastPeakEquity;
+            
+            // Update peak equity to current balance
+            lastPeakEquity = AccountInfoDouble(ACCOUNT_BALANCE);
+            
+            Print("+-----------------------------------------+");
+            Print("EQUITY PROTECTION TRIGGERED!");
+            Print("Current Equity: $", currentEquity);
+            Print("Peak Equity: $", peakEquity);
+            Print("Old Peak Equity: $", oldPeakEquity);
+            Print("New Peak Equity (Balance): $", lastPeakEquity);
+            Print("Min Allowed (", MinEquityPercent, "%): $", minAllowedEquity);
+            Print("Closing unprofitable positions...");
+            Print("Trading PAUSED for ", currentPauseDuration, " minutes");
+            Print("Resume Time: ", TimeToString(pauseStartTime + currentPauseDuration * 60));
+            Print("+-----------------------------------------+");
+            
+            // Send Discord alert for minimum equity reached
+            if(EnableDiscordAlerts)
+            {   
+                string alertMsg = "**Instrument:** " + _Symbol + "\n";
+                alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+                alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+                alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+                alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+                alertMsg += "**Previous Peak:** $" + DoubleToString(oldPeakEquity, 2) + "\n";
+                alertMsg += "**New Peak (Balance):** $" + DoubleToString(lastPeakEquity, 2) + "\n";
+                alertMsg += "**Equity Drop:** $" + DoubleToString(equityDrop, 2) + " (" + DoubleToString(equityDropPercent, 2) + "%)\n";
+                alertMsg += "**Min Allowed (" + DoubleToString(MinEquityPercent, 0) + "%):** $" + DoubleToString(minAllowedEquity, 2) + "\n";
+                alertMsg += "**Trading Paused:** " + IntegerToString(currentPauseDuration) + " minutes\n";
+                alertMsg += "**Resume Time:** " + TimeToString(pauseStartTime + currentPauseDuration * 60) + "\n";
+                alertMsg += "**Action:** Trading Paused & Closing unprofitable positions";
+                
+                SendDiscordAlert("⚠️ MINIMUM EQUITY PROTECTION TRIGGERED", alertMsg, 16705372); // Yellow color
+            }
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check high impact news event and send alert                      |
+// +------------------------------------------------------------------+
+void CheckHighImpactNews()
+{
+    if(!EnableNewsFilter) return;
+
+    ulong newsEventID = 0;
+    string newsDetails = IsHighImpactNewsTime(NewsMinutesBefore, NewsMinutesAfter, newsEventID);
+    
+    if(!isPaused && newsDetails != "" && lastProcessedNewsEventID != newsEventID)
+    {
+        // Update last processed news event ID
+        lastProcessedNewsEventID = newsEventID;
+        
+        // Trigger the pause mechanism
+        isPaused = true;
+        pauseStartTime = TimeTradeServer();
+        
+        // Calculate remaining pause time until event ends
+        datetime eventTime = 0;
+        datetime currentServerTime = TimeTradeServer();
+        MqlCalendarValue values[];
+
+        if(CalendarValueHistory(values, currentServerTime - 60, currentServerTime + NewsMinutesAfter * 60))
+        {
+            for(int i = 0; i < ArraySize(values); i++)
+            {
+                if(values[i].event_id == newsEventID)
+                {
+                    eventTime = values[i].time;
+                    break;
+                }
+            }
+        }
+        
+        if(eventTime > 0)
+        {
+            int secondsUntilEventEnd = (int)((eventTime + NewsMinutesAfter * 60) - currentServerTime);
+            currentPauseDuration = (secondsUntilEventEnd / 60) + 1; // +1 for safety margin
+        }
+        else
+        {
+            currentPauseDuration = NewsMinutesAfter; // Fallback
+        }
+        
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        
+        Print("+-----------------------------------------+");
+        Print("HIGH-IMPACT NEWS EVENT DETECTED!");
+        Print("Server Time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS));
+        Print("Current Equity: $", currentEquity);
+        Print("Trading PAUSED for ", currentPauseDuration, " minutes");
+        Print("Resume Time: ", TimeToString(pauseStartTime + currentPauseDuration * 60));
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert with full event details
+        if(EnableDiscordAlerts)
+        {
+            // Add event details
+            string alertMsg =  newsDetails + "\n\n";
+            
+            // Add trading info
+            alertMsg += "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "**Trading Paused:** " + IntegerToString(currentPauseDuration) + " minutes\n";
+            alertMsg += "**Resume Time:** " + TimeToString(pauseStartTime + currentPauseDuration * 60) + "\n";
+            alertMsg += "**Action:** Trading paused during news period & closing unprofitable positions";
+            
+            SendDiscordAlert("⚠️ HIGH-IMPACT NEWS DETECTED!", alertMsg, 16705372); // Yellow color
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check trading hours and send alert                               |
+// +------------------------------------------------------------------+
+void CheckTradingHours()
+{
+    if(!EnableTradingHours) return;
+    
+    bool currentlyWithinHours = IsWithinTradingHours();
+    
+    // Check for transition from outside to inside trading hours (Trading Started)
+    if(isOutsideTradingHours && currentlyWithinHours)
+    {
+        isOutsideTradingHours = false;
+
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        
+        Print("+-----------------------------------------+");
+        Print("TRADING HOURS STARTED");
+        Print("Server Time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS));
+        Print("Trading Period: ", TradingStartTime, " - ", TradingEndTime);
+        Print("Current Equity: $", currentEquity);
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert for trading started
+        if(EnableDiscordAlerts)
+        {
+            string alertMsg = "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Trading Period:** " + TradingStartTime + " - " + TradingEndTime + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "**Status:** Now accepting new trading signals";
+            
+            SendDiscordAlert("🟢 TRADING HOURS STARTED!", alertMsg, 5763719); // Green color
+        }
+    }
+    // Check for transition from inside to outside trading hours (Trading Paused)
+    else if(!isOutsideTradingHours && !currentlyWithinHours)
+    {
+        isOutsideTradingHours = true;
+
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        
+        Print("+-----------------------------------------+");
+        Print("TRADING HOURS ENDED");
+        Print("Server Time: ", TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS));
+        Print("Trading Period: ", TradingStartTime, " - ", TradingEndTime);
+        Print("Current Equity: $", currentEquity);
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert for trading paused
+        if(EnableDiscordAlerts)
+        {
+            string alertMsg = "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Trading Period:** " + TradingStartTime + " - " + TradingEndTime + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "⏸**Status:** No new positions until next trading session";
+            
+            SendDiscordAlert("🔴 TRADING HOURS ENDED!", alertMsg, 15158332); // Red color
+            
+            // Send Daily Report
+            SendDailyReport();
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check for Leverage Changes                                       |
+// +------------------------------------------------------------------+
+void CheckLeverageChange()
+{
+    // Skip if feature is disabled
+    if(!EnableLeveragePause) return;
+    
+    long currentLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+    
+    // Leverage changed from initial
+    if(currentLeverage != initialLeverage && !isLeverageDiffFromInitial)
+    {
+        isLeverageDiffFromInitial = true;
+        
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        
+        Print("+-----------------------------------------+");
+        Print("LEVERAGE CHANGE DETECTED - TRADING PAUSED");
+        Print("Initial Leverage: 1:", (int)initialLeverage);
+        Print("Current Leverage: 1:", (int)currentLeverage);
+        Print("Current Equity: $", currentEquity);
+        Print("Trading will resume when leverage returns to 1:", (int)initialLeverage);
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert
+        if(EnableDiscordAlerts)
+        {
+            string alertMsg = "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Initial Leverage:** 1:" + IntegerToString((int)initialLeverage) + "\n";
+            alertMsg += "**Current Leverage:** 1:" + IntegerToString((int)currentLeverage) + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "**Status:** Trading paused until leverage returns to initial value";
+            
+            SendDiscordAlert("⚠️ LEVERAGE CHANGE - TRADING PAUSED", alertMsg, 16705372); // Orange color
+        }
+        
+        CloseAllPositions(true); // Close only unprofitable positions
+    }
+    // Leverage returned to initial - check if we're paused due to leverage (currentPauseDuration == 0)
+    else if(currentLeverage == initialLeverage && isLeverageDiffFromInitial && currentPauseDuration == 0)
+    {
+        isLeverageDiffFromInitial = false;
+        
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        
+        Print("+-----------------------------------------+");
+        Print("LEVERAGE RESTORED - TRADING RESUMED");
+        Print("Leverage: 1:", (int)currentLeverage);
+        Print("Current Equity: $", currentEquity);
+        Print("+-----------------------------------------+");
+        
+        // Send Discord alert
+        if(EnableDiscordAlerts)
+        {
+            string alertMsg = "**Instrument:** " + _Symbol + "\n";
+            alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+            alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+            alertMsg += "**Leverage:** 1:" + IntegerToString((int)currentLeverage) + "\n";
+            alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+            alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+            alertMsg += "**Status:** Trading resumed - monitoring for new signals";
+            
+            SendDiscordAlert("▶️ LEVERAGE RESTORED - TRADING RESUMED", alertMsg, 3066993); // Blue color
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Check and send daily report                                      |
+// +------------------------------------------------------------------+
+void CheckDailyReport()
+{
+    datetime serverTime = TimeTradeServer();
+    MqlDateTime dt;
+    TimeToStruct(serverTime, dt);
+    
+    if(!EnableTradingHours && dt.hour == 23 && dt.min == 59)
+    {
+        // Check if report already sent today (to avoid spamming in the last minute)
+        // lastDailyReportTime checks full timestamp
+        MqlDateTime lastReportDt;
+        TimeToStruct(lastDailyReportTime, lastReportDt);
+        
+        if(lastReportDt.day != dt.day)
+        {
+            SendDailyReport();
+        }
     }
 }
