@@ -128,6 +128,7 @@ string symbolBaseCurrency = "";                           // Base currency of th
 string symbolQuoteCurrency = "";                          // Quote currency of the symbol
 long initialLeverage = 0;                                 // Initial Account Leverage
 datetime lastPyramidTime = 0;                             // Last time any pyramid position was opened
+double lastPyramidPrice = 0;                              // Last price where pyramid was triggered
 
 // RSI Indicator Handle and Buffer
 int rsiHandle;
@@ -540,11 +541,11 @@ void ManagePositions()
         if(IsPositionHedged(ticket)) continue;
 
         ManageLosingPositions(ticket);
+
+        ManageWinningPositions(ticket);
         
         if(EnableTrailingStop) ManageTrailingStop(ticket);
     }
-
-    ManageWinningPositions();
 }
 
 // +------------------------------------------------------------------+
@@ -568,7 +569,6 @@ void ManageHedgedPositions()
         // Cache original position data while selected
         double originalProfit = PositionGetDouble(POSITION_PROFIT);
         double originalVolume = PositionGetDouble(POSITION_VOLUME);
-        ENUM_POSITION_TYPE originalType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
         
          // Check if hedge positions still exist
         if(!PositionSelectByTicket(hedgeTicket))
@@ -731,115 +731,53 @@ int FindHedgePairIndex(ulong ticket)
 // +------------------------------------------------------------------+
 // | Manage Pyramiding For Winning Positions                          |
 // +------------------------------------------------------------------+
-void ManageWinningPositions()
+void ManageWinningPositions(ulong ticket)
 {
     if(!EnablePyramiding || MaxPyramidingPositions <= 0) return;
 
-    // Cooldown check, prevent any pyramiding spam
+    // Cooldown check (seconds between pyramids)
     datetime currentTime = TimeCurrent();
     if(currentTime - lastPyramidTime < PyramidCooldownSeconds) return;
 
-    // Find ALL non-hedged positions and check each type
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        ulong ticket = PositionGetTicket(i);
-        if(ticket == 0) continue;
-        
-        if(!PositionSelectByTicket(ticket)) continue;
-        
-        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
-        
-        // Skip hedged positions
-        if(IsPositionHedged(ticket)) continue;
-        
-        double profit = PositionGetDouble(POSITION_PROFIT);
-        
-        // Only check PROFITABLE positions
-        if(profit < MinBreakEvenProfit) continue;
-        
-        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-        
-        // Check if this position should trigger pyramiding
-        if(ShouldPyramidFromPosition(ticket, posType))
-        {
-            // Open pyramiding and update cooldown
-            ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-            OpenPyramidingPosition(orderType);
-            lastPyramidTime = currentTime;
-            
-            // Exit after opening ONE pyramid position
-            return; 
-        }
-    }
-}
+    if(!PositionSelectByTicket(ticket)) return;
 
-// Check if Position Should Trigger Pyramiding
-bool ShouldPyramidFromPosition(ulong ticket, ENUM_POSITION_TYPE posType)
-{   
-    int profitableCount = 0;
-    datetime latestProfitableTime = 0;
-    ulong latestProfitableTicket = 0;
+    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
 
-    // Find latest profitable non-hedged position
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        ulong t = PositionGetTicket(i);
-        if(!PositionSelectByTicket(t)) continue;
-        
-        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
-        if(IsPositionHedged(t)) continue;
-        
-        if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == posType)
-        {
-            double profit = PositionGetDouble(POSITION_PROFIT);
-            
-            // Only count PROFITABLE positions
-            if(profit >= MinBreakEvenProfit)
-            {
-                profitableCount++;
-                datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
-                
-                if(openTime > latestProfitableTime)
-                {
-                    latestProfitableTime = openTime;
-                    latestProfitableTicket = t;
-                }
-            }
-        }
-    }
-
-    // At least one profitable position exists
-    if(latestProfitableTicket == 0) return false;
+    // Only check PROFITABLE positions
+    double profit = PositionGetDouble(POSITION_PROFIT);
+    if(profit < MinBreakEvenProfit * PyramidingThresholdMultiplier) return;
     
-    // Max pyramiding reached
-    if(profitableCount >= MaxPyramidingPositions) return false;
+    // Max pyramiding reached (only counts profitable, non-hedged positions)
+    int pyramidCount = CountProfitOpenOrders(posType);
+    if(pyramidCount >= MaxPyramidingPositions) return;
 
-    // Only pyramid from LATEST profitable position
-    if(ticket != latestProfitableTicket) return false;
-
-    // Double check profit
-    double latestProfit = PositionGetDouble(POSITION_PROFIT);
-    if(latestProfit < MinBreakEvenProfit) return false;
-    
-    // Validate trend safety
-    InvalidationDetails details = GetDetailedInvalidationScore(latestProfitableTicket);
-    
     // Ensure there is no invalidation signal
-    if(details.totalScore > 0) return false;
+    InvalidationDetails details = GetDetailedInvalidationScore(ticket);
+    if(details.totalScore > 0) return;
+
+    // Price distance check
+    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double currentPrice = (posType == POSITION_TYPE_BUY) ? bid : ask;
+    double currentLot = CalculateDynamicLotSize();
+    double pyramidDistancePoints = ConvertToPoints(INPUT_DOLLAR, MinBreakEvenProfit * PyramidingThresholdMultiplier, currentLot);
+    
+    if(lastPyramidPrice > 0 && MathAbs(currentPrice - lastPyramidPrice) < pyramidDistancePoints * _Point) return;
+
+    Print("+-----------------------------------------+");
+    Print("PYRAMIDING TRIGGERED - ", EnumToString(posType));
+    Print("Ticket: ", ticket, " | Profit: $", profit);
+    Print("Positions: ", pyramidCount, "/", MaxPyramidingPositions);
+    Print("+-----------------------------------------+");
 
     // Open pyramiding position
-    LogPrint("+-----------------------------------------+");
-    LogPrint("PYRAMIDING TRIGGERED - ", EnumToString(posType));
-    LogPrint("Latest Ticket: ", latestProfitableTicket, " | Profit: $", latestProfit);
-    LogPrint("Positions: ", profitableCount, "/", MaxPyramidingPositions);
-    LogPrint("Invalidation Score: ", details.totalScore);
-    LogPrint("+-----------------------------------------+");
+    OpenPyramidingPosition(orderType);
 
-    return true;
+    // Update state
+    lastPyramidTime = currentTime;
+    lastPyramidPrice = currentPrice;
 }
-// +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
 // | Manage Losing Positions                                          |
@@ -991,7 +929,7 @@ void ManageTrailingStop(ulong ticket)
 
         if(currentSL != 0 && newSL <= currentSL) return;
         if(newSL >= bid) return;
-        if (currentPrice - newSL < trailingDistancePrice) return;
+        // if (currentPrice - newSL < trailingDistancePrice) return;
     }
     // Sell position trailing logic
     else
@@ -1015,7 +953,7 @@ void ManageTrailingStop(ulong ticket)
 
         if(currentSL != 0 && newSL >= currentSL) return;
         if(newSL <= ask) return;
-        if (newSL - currentPrice < trailingDistancePrice) return;
+        // if (newSL - currentPrice < trailingDistancePrice) return;
     }
 
     // Skip if SL still same with current
@@ -1723,6 +1661,31 @@ int CountOpenOrders()
         {
             if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
                PositionGetInteger(POSITION_MAGIC) == MagicNumber)
+            {
+                count++;
+            }
+        }
+    }
+    
+    return count;
+}
+
+// Helper to count profit open orders by position type (only profitable, non-hedged positions)
+int CountProfitOpenOrders(ENUM_POSITION_TYPE posType)
+{
+    int count = 0;
+    
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+
+        if(PositionSelectByTicket(ticket))
+        {
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+               PositionGetInteger(POSITION_MAGIC) == MagicNumber &&
+               PositionGetInteger(POSITION_TYPE) == posType &&
+               PositionGetDouble(POSITION_PROFIT) >= MinBreakEvenProfit &&
+               !IsPositionHedged(ticket))
             {
                 count++;
             }
