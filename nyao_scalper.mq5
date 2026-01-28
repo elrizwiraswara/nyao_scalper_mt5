@@ -52,14 +52,14 @@ input int MaxOpenOrders = 25;                             // Maximum Consecutive
 input double BuyDuplicateMultiplier  = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
 input double MinBreakEvenProfit = 1.5;                    // Minimum Profit to Trigger Break-Even ($)
+input double BreakEvenThresholdMultiplier = 1.5;          // Threshold Multiplier for Min Break-Even Profit
 input bool EnableAutoReverse = true;                      // Enable Auto Reverse on Opposite Signal
 input int ReverseCooldownMinutes = 2;                     // Cooldown Duration Minutes after Reverse (0 = No Cooldown)
 input bool EnableAutoHedge = true;                        // Enable Auto Hedge on Opposite Signal
 input int MaxHedgeDurationMinutes = 480;                  // Max Hedge Duration (Minutes)
 input bool EnablePyramiding = true;                       // Enable Pyramiding (Open new position on winning position)
 input int MaxPyramidingPositions = 5;                     // Max Total Pyramiding Positions
-input double PyramidingThresholdMultiplier = 1;           // Multiplier for MinBreakEvenProfit to Trigger Pyramiding
-input int PyramidCooldownSeconds = 10;                    // Pyramiding Cooldown Duration (Seconds)
+input int PyramidCooldownSeconds = 3;                     // Pyramiding Cooldown Duration (Seconds)
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -127,8 +127,7 @@ ulong lastProcessedNewsEventID = 0;                       // Last processed news
 string symbolBaseCurrency = "";                           // Base currency of the symbol
 string symbolQuoteCurrency = "";                          // Quote currency of the symbol
 long initialLeverage = 0;                                 // Initial Account Leverage
-datetime lastPyramidTime = 0;                             // Last time any pyramid position was opened
-double lastPyramidPrice = 0;                              // Last price where pyramid was triggered
+bool isOrderSendLocked = false;                           // Flag for locking OrderSend execution
 
 // RSI Indicator Handle and Buffer
 int rsiHandle;
@@ -223,6 +222,7 @@ int OnInit()
     symbolBaseCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
     symbolQuoteCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
     initialLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+    isOrderSendLocked = false;
     
     LogPrint("+-----------------------------------------+");
     LogPrint("Nyao Scalper v14.0 Initialized Successfully");
@@ -524,9 +524,6 @@ double CandleRange(int i)
 // +------------------------------------------------------------------+
 void ManagePositions()
 {   
-    // Manage existing hedge pairs
-    ManageHedgedPositions();
-
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
@@ -536,171 +533,198 @@ void ManagePositions()
         
         if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        
-        // Skip hedged positions
-        if(IsPositionHedged(ticket)) continue;
 
-        ManageLosingPositions(ticket);
+        if(IsPositionHedged(ticket))
+        {
+            ManageHedgedPositions(ticket);
+        }
+        else
+        {
+            ManageLosingPositions(ticket);
 
-        ManageWinningPositions(ticket);
+            ManageWinningPositions(ticket);
         
-        if(EnableTrailingStop) ManageTrailingStop(ticket);
+            if(EnableTrailingStop) ManageTrailingStop(ticket);
+        }
     }
 }
 
 // +------------------------------------------------------------------+
 // | Manage Hedge Pair                                                |
 // +------------------------------------------------------------------+
-void ManageHedgedPositions()
-{
-    for(int i = ArraySize(activePairs) - 1; i >= 0; i--)
+void ManageHedgedPositions(ulong ticket)
+{   
+    int i = FindHedgePairIndex(ticket);
+    if (i == -1)
     {
-        ulong originalTicket = activePairs[i].originalTicket;
-        ulong hedgeTicket = activePairs[i].hedgeTicket;
-        
-        // Check if original positions still exist
-        if(!PositionSelectByTicket(originalTicket))
-        {
-            LogPrint("⚠ Original position ", originalTicket, " no longer exists");
-            RemoveHedgePair(i);
-            continue;
-        }
-        
-        // Cache original position data while selected
-        double originalProfit = PositionGetDouble(POSITION_PROFIT);
-        double originalVolume = PositionGetDouble(POSITION_VOLUME);
-        
-         // Check if hedge positions still exist
-        if(!PositionSelectByTicket(hedgeTicket))
-        {
-            LogPrint("⚠ Hedge position ", hedgeTicket, " no longer exists");
-            RemoveHedgePair(i);
-            continue;
-        }
-        
-        // Cache hedge position data while selected
-        double hedgeProfit = PositionGetDouble(POSITION_PROFIT);
-        double hedgeVolume = PositionGetDouble(POSITION_VOLUME);
-        
-        // Calculate metrics
-        double combinedProfit = originalProfit + hedgeProfit;
-        int hedgeDurationMinutes = (int)((TimeCurrent() - activePairs[i].hedgeOpenTime) / 60);
-        
-        LogPrint("+-----------------------------------------+");
-        LogPrint("HEDGE PAIR STATUS");
-        LogPrint("Original Ticket: ", originalTicket, " | Hedge Ticket: ", hedgeTicket);
-        LogPrint("Original Volume: ", originalVolume, " | Hedge Volume: ", hedgeVolume);
-        LogPrint("Original Profit: $", originalProfit, " | Hedge Profit: $", hedgeProfit);
-        LogPrint("Combined Profit: $", combinedProfit, " | Duration: ", hedgeDurationMinutes, " min");
-        LogPrint("+-----------------------------------------+");
-        
-        // RULE 1: Combined profit sufficient to exit hedge pair
-        if (combinedProfit > 0)
-        {
-            LogPrint("RULE 1: Combined profit sufficient to exit hedge pair");
-            LogPrint("Combined profit: $", combinedProfit);
-            LogPrint("Close to both positions to lock in profit");
-
-            bool isClosed1 = ClosePosition(originalTicket);
-            bool isClosed2 = ClosePosition(hedgeTicket);
-
-            if (isClosed1 || isClosed2) RemoveHedgePair(i);
-            continue;
-        }
-        
-        // RULE 2: Original position recovered
-        if(originalProfit >= MinBreakEvenProfit)
-        {
-            LogPrint("RULE 2: Original position recovered to profit/breakeven");
-
-            int score = GetInvalidationScore(hedgeTicket);
-            
-            if (score >= 4) 
-            {
-                LogPrint("Closing hedge, keeping original");
-                bool isClosed = ClosePosition(hedgeTicket);
-                if (isClosed) RemoveHedgePair(i);
-            }
-            else
-            {
-                LogPrint("Hedge invalidation score = ", score, " (Weak) Keeping hedge");
-            }
-
-            if (EnableTrailingStop) ManageTrailingStop(originalTicket);
-            continue;
-        }
-
-        // RULE 3: Hedge position sufficient
-        if(hedgeProfit >= MinBreakEvenProfit)
-        {
-            LogPrint("RULE 3: Hedge position sufficient to to profit/breakeven");
-
-            int score = GetInvalidationScore(originalTicket);
-
-            if (score >= 4) 
-            {
-                LogPrint("Closing original, keeping hedge");
-                bool isClosed = ClosePosition(originalTicket);
-                if (isClosed) RemoveHedgePair(i);
-            }
-            else
-            {
-                LogPrint("Original invalidation score = ", score, " (Weak) Keeping original");
-            }
-
-            if (EnableTrailingStop) ManageTrailingStop(hedgeTicket);
-            continue;
-        }
-        
-        // RULE 4: Maximum time limit reached
-        if(MaxHedgeDurationMinutes > 0 && hedgeDurationMinutes >= MaxHedgeDurationMinutes)
-        {
-            LogPrint("RULE 4: Maximum hedge duration reached (", MaxHedgeDurationMinutes, " min)");
-            LogPrint("Closing both positions to prevent prolonged exposure");
-
-            bool isClosed1 = ClosePosition(originalTicket);
-            bool isClosed2 = ClosePosition(hedgeTicket);
-
-            if (isClosed1 || isClosed2) RemoveHedgePair(i);
-            continue;
-        }
-        
-        LogPrint("Hedge pair still active, monitoring...");
+        LogPrint("Hedge pair not found or removed, ticket: ", ticket);
+        return;
     }
+
+    ulong originalTicket = activePairs[i].originalTicket;
+    ulong hedgeTicket = activePairs[i].hedgeTicket;
+    
+    // Check if original position still exist
+    if(!PositionSelectByTicket(originalTicket))
+    {
+        LogPrint("⚠ Original position ", originalTicket, " no longer exists");
+        RemoveHedgePair(i);
+        return;
+    }
+    
+    // Cache original position data while selected
+    double originalProfit = PositionGetDouble(POSITION_PROFIT);
+    double originalVolume = PositionGetDouble(POSITION_VOLUME);
+    
+    // Check if hedge position still exist
+    if(!PositionSelectByTicket(hedgeTicket))
+    {
+        LogPrint("⚠ Hedge position ", hedgeTicket, " no longer exists");
+        RemoveHedgePair(i);
+        return;
+    }
+    
+    // Cache hedge position data while selected
+    double hedgeProfit = PositionGetDouble(POSITION_PROFIT);
+    double hedgeVolume = PositionGetDouble(POSITION_VOLUME);
+    
+    // Calculate metrics
+    double combinedProfit = originalProfit + hedgeProfit;
+    int hedgeDurationMinutes = (int)((TimeCurrent() - activePairs[i].hedgeOpenTime) / 60);
+    
+    LogPrint("+-----------------------------------------+");
+    LogPrint("HEDGE PAIR STATUS");
+    LogPrint("Original Ticket: ", originalTicket, " | Hedge Ticket: ", hedgeTicket);
+    LogPrint("Original Volume: ", originalVolume, " | Hedge Volume: ", hedgeVolume);
+    LogPrint("Original Profit: $", originalProfit, " | Hedge Profit: $", hedgeProfit);
+    LogPrint("Combined Profit: $", combinedProfit, " | Duration: ", hedgeDurationMinutes, " min");
+    LogPrint("+-----------------------------------------+");
+    
+    // RULE 1: Combined profit sufficient to exit hedge pair
+    if (combinedProfit > 0)
+    {
+        LogPrint("RULE 1: Combined profit sufficient to exit hedge pair");
+        LogPrint("Combined profit: $", combinedProfit);
+        LogPrint("Close to both positions to lock in profit");
+
+        bool isClosed1 = ClosePosition(originalTicket);
+        bool isClosed2 = ClosePosition(hedgeTicket);
+
+        if (isClosed1 || isClosed2) RemoveHedgePair(i);
+        return;
+    }
+    
+    // RULE 2: Original position recovered
+    if(originalProfit >= MinBreakEvenProfit * BreakEvenThresholdMultiplier)
+    {
+        LogPrint("RULE 2: Original position recovered to profit/breakeven");
+
+        int score = GetInvalidationScore(hedgeTicket);
+        
+        if (score >= 4) 
+        {
+            LogPrint("Closing hedge, keeping original");
+            bool isClosed = ClosePosition(hedgeTicket);
+            if (isClosed) RemoveHedgePair(i);
+        }
+        else
+        {
+            LogPrint("Hedge invalidation score: ", score, " (Weak) Keeping hedge");
+        }
+
+        if (EnableTrailingStop) ManageTrailingStop(originalTicket);
+        return;
+    }
+
+    // RULE 3: Hedge position sufficient
+    if(hedgeProfit >= MinBreakEvenProfit * BreakEvenThresholdMultiplier)
+    {
+        LogPrint("RULE 3: Hedge position sufficient to profit/breakeven");
+
+        int score = GetInvalidationScore(originalTicket);
+
+        if (score >= 4) 
+        {
+            LogPrint("Closing original, keeping hedge");
+            bool isClosed = ClosePosition(originalTicket);
+            if (isClosed) RemoveHedgePair(i);
+        }
+        else
+        {
+            LogPrint("Original invalidation score: ", score, " (Weak) Keeping original");
+        }
+
+        if (EnableTrailingStop) ManageTrailingStop(hedgeTicket);
+        return;
+    }
+    
+    // RULE 4: Maximum time limit reached
+    if(MaxHedgeDurationMinutes > 0 && hedgeDurationMinutes >= MaxHedgeDurationMinutes)
+    {
+        LogPrint("RULE 4: Maximum hedge duration reached (", MaxHedgeDurationMinutes, " min)");
+        LogPrint("Closing both positions to prevent prolonged exposure");
+
+        bool isClosed1 = ClosePosition(originalTicket);
+        bool isClosed2 = ClosePosition(hedgeTicket);
+
+        if (isClosed1 || isClosed2) RemoveHedgePair(i);
+        return;
+    }
+    
+    LogPrint("Hedge pair still active, monitoring...");
 }
 
 void AddHedgePair(ulong originalTicket, ulong hedgeTicket)
 {
-    if(!PositionSelectByTicket(originalTicket)) return;
-    
+    // Validate both positions exist
+    if(!PositionSelectByTicket(originalTicket) || !PositionSelectByTicket(hedgeTicket))
+    {
+        LogPrint("AddHedgePair: one or both tickets not found. Original: ", originalTicket, " Hedge: ", hedgeTicket);
+        return;
+    }
+
+    // Prevent duplicates
+    if(IsPositionHedged(originalTicket) || IsPositionHedged(hedgeTicket))
+    {
+        LogPrint("AddHedgePair: hedge pair already exists for ticket ", originalTicket);
+        return;
+    }
+
     double originalProfit = PositionGetDouble(POSITION_PROFIT);
+
+    PositionSelectByTicket(hedgeTicket);
+    double hedgeProfit = PositionGetDouble(POSITION_PROFIT);
 
     int size = ArraySize(activePairs);
     ArrayResize(activePairs, size + 1);
-    
+
     activePairs[size].originalTicket = originalTicket;
-    activePairs[size].hedgeTicket = hedgeTicket;
-    activePairs[size].hedgeOpenTime = TimeCurrent();
-    
+    activePairs[size].hedgeTicket    = hedgeTicket;
+    activePairs[size].hedgeOpenTime  = (datetime)PositionGetInteger(POSITION_TIME);
+
     LogPrint("+-----------------------------------------+");
     LogPrint("HEDGE PAIR ADDED");
     LogPrint("Original Ticket: ", originalTicket, " | Hedge Ticket: ", hedgeTicket);
-    LogPrint("Initial Combined P/L: $", originalProfit);
-    LogPrint("Open Time: ", activePairs[size].hedgeOpenTime);
+    LogPrint("Initial Combined P/L: $", originalProfit + hedgeProfit);
+    LogPrint("Hedge Open Time: ", activePairs[size].hedgeOpenTime);
     LogPrint("+-----------------------------------------+");
 }
 
 void RemoveHedgePair(int index)
 {
     int size = ArraySize(activePairs);
+
     if(index < 0 || index >= size)
     {
         LogPrint("RemoveHedgePair: invalid index ", index, ", size=", size);
         return;
     }
-    
-    LogPrint("Removing hedge pair at index ", index);
-    
+
+    LogPrint("Removing hedge pair at index ", index,
+                " (Original=", activePairs[index].originalTicket,
+                ", Hedge=", activePairs[index].hedgeTicket, ")");
+
+    // Swap with last element
     activePairs[index] = activePairs[size - 1];
     ArrayResize(activePairs, size - 1);
 }
@@ -708,22 +732,28 @@ void RemoveHedgePair(int index)
 bool IsPositionHedged(ulong ticket)
 {
     int size = ArraySize(activePairs);
+
     for(int i = 0; i < size; i++)
     {
-        if(activePairs[i].originalTicket == ticket || activePairs[i].hedgeTicket == ticket)
+        if(activePairs[i].originalTicket == ticket ||
+            activePairs[i].hedgeTicket == ticket)
             return true;
     }
+
     return false;
 }
 
 int FindHedgePairIndex(ulong ticket)
 {
     int size = ArraySize(activePairs);
+
     for(int i = 0; i < size; i++)
     {
-        if(activePairs[i].originalTicket == ticket || activePairs[i].hedgeTicket == ticket)
+        if(activePairs[i].originalTicket == ticket ||
+            activePairs[i].hedgeTicket == ticket)
             return i;
     }
+
     return -1;
 }
 // +------------------------------------------------------------------+
@@ -735,48 +765,48 @@ void ManageWinningPositions(ulong ticket)
 {
     if(!EnablePyramiding || MaxPyramidingPositions <= 0) return;
 
-    // Cooldown check (seconds between pyramids)
-    datetime currentTime = TimeCurrent();
-    if(currentTime - lastPyramidTime < PyramidCooldownSeconds) return;
-
     if(!PositionSelectByTicket(ticket)) return;
 
+    datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
     ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
     ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
 
+    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    double price = (orderType == ORDER_TYPE_BUY) ? ask : bid;
+
+    // Duplicate filters
+    if (orderType == ORDER_TYPE_BUY && AllowNewBuy(price)) return;
+    if (orderType == ORDER_TYPE_SELL && AllowNewSell(price)) return;
+
+    // Cooldown pyramiding
+    if (TimeCurrent() - openTime >= PyramidCooldownSeconds) return;
+
     // Only check PROFITABLE positions
     double profit = PositionGetDouble(POSITION_PROFIT);
-    if(profit < MinBreakEvenProfit * PyramidingThresholdMultiplier) return;
+    if(profit < MinBreakEvenProfit * BreakEvenThresholdMultiplier) return;
+
+    // Only pyramiding on winning position with profitable SL
+    double currentSL = PositionGetDouble(POSITION_SL);
+    if(currentSL == 0 || currentSL < entryPrice) return;
     
     // Max pyramiding reached (only counts profitable, non-hedged positions)
     int pyramidCount = CountProfitOpenOrders(posType);
     if(pyramidCount >= MaxPyramidingPositions) return;
 
-    // Ensure there is no invalidation signal
+    // Ensure the position has a weak invalidation signal score
     InvalidationDetails details = GetDetailedInvalidationScore(ticket);
-    if(details.totalScore > 0) return;
+    if(details.totalScore > 1) return;
 
-    // Price distance check
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double currentPrice = (posType == POSITION_TYPE_BUY) ? bid : ask;
-    double currentLot = CalculateDynamicLotSize();
-    double pyramidDistancePoints = ConvertToPoints(INPUT_DOLLAR, MinBreakEvenProfit * PyramidingThresholdMultiplier, currentLot);
-    
-    if(lastPyramidPrice > 0 && MathAbs(currentPrice - lastPyramidPrice) < pyramidDistancePoints * _Point) return;
-
-    Print("+-----------------------------------------+");
-    Print("PYRAMIDING TRIGGERED - ", EnumToString(posType));
-    Print("Ticket: ", ticket, " | Profit: $", profit);
-    Print("Positions: ", pyramidCount, "/", MaxPyramidingPositions);
-    Print("+-----------------------------------------+");
+    LogPrint("+-----------------------------------------+");
+    LogPrint("PYRAMIDING TRIGGERED - ", EnumToString(posType));
+    LogPrint("Ticket: ", ticket, " | Profit: $", profit);
+    LogPrint("Positions: ", pyramidCount, "/", MaxPyramidingPositions);
+    LogPrint("+-----------------------------------------+");
 
     // Open pyramiding position
     OpenPyramidingPosition(orderType);
-
-    // Update state
-    lastPyramidTime = currentTime;
-    lastPyramidPrice = currentPrice;
 }
 
 // +------------------------------------------------------------------+
@@ -880,7 +910,7 @@ void ManageTrailingStop(ulong ticket)
 
     double profit = PositionGetDouble(POSITION_PROFIT);
 
-    if(TSOnProfitableOnly && profit <= MinBreakEvenProfit) return;
+    if(TSOnProfitableOnly && profit <= 0) return;
     
     double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
     ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -929,7 +959,6 @@ void ManageTrailingStop(ulong ticket)
 
         if(currentSL != 0 && newSL <= currentSL) return;
         if(newSL >= bid) return;
-        // if (currentPrice - newSL < trailingDistancePrice) return;
     }
     // Sell position trailing logic
     else
@@ -953,7 +982,6 @@ void ManageTrailingStop(ulong ticket)
 
         if(currentSL != 0 && newSL >= currentSL) return;
         if(newSL <= ask) return;
-        // if (newSL - currentPrice < trailingDistancePrice) return;
     }
 
     // Skip if SL still same with current
@@ -1218,6 +1246,8 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
 {   
     if (!IsAllowedToOpenPosition()) return;
 
+    LockOrderSend(true);
+
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
     
@@ -1306,12 +1336,16 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
     {
         LogPrint("OrderSend error: ", GetLastError());
     }
+
+    LockOrderSend(false);
 }
 
 // Open Pyramiding Position
 void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
 {   
     if (!IsAllowedToOpenPosition()) return;
+
+    LockOrderSend(true);
 
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
@@ -1403,12 +1437,16 @@ void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
     {
         LogPrint("Pyramiding OrderSend returned false. Error: ", GetLastError());
     }
+
+    LockOrderSend(false);
 }
 
 // Open Hedge position
 ulong OpenHedgePosition(ENUM_ORDER_TYPE type, double volume)
 {   
     if (!IsAllowedToOpenPosition()) return 0;
+
+    LockOrderSend(true);
 
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
@@ -1450,10 +1488,12 @@ ulong OpenHedgePosition(ENUM_ORDER_TYPE type, double volume)
     if(!OrderSend(request, result))
     {
         LogPrint("Failed to open hedge position. Error: ", GetLastError());
+        LockOrderSend(false);
         return 0;
     }
     
     LogPrint("Hedge position opened: ", result.order);
+    LockOrderSend(false);
     return result.order;
 }
 
@@ -1465,6 +1505,8 @@ bool ClosePosition(ulong ticket)
         LogPrint("Position ", ticket, " not found");
         return false;
     }
+
+    LockOrderSend(true);
     
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
@@ -1485,10 +1527,12 @@ bool ClosePosition(ulong ticket)
     if(!OrderSend(request, result))
     {
         LogPrint("Failed to close position ", ticket, " Error: ", GetLastError());
+        LockOrderSend(false);
         return false;
     }
     
     LogPrint("Position ", ticket, " closed successfully");
+    LockOrderSend(false);
     return true;
 }
 
@@ -1608,7 +1652,21 @@ bool IsAllowedToOpenPosition()
         return false;
     }
 
+    if (isOrderSendLocked) {
+        LogPrint("+-----------------------------------------+");
+        LogPrint("OPEN ORDER BLOCKED!");
+        LogPrint("An order is still being processed!");
+        LogPrint("+-----------------------------------------+");
+        return false;
+    }
+
     return true;
+}
+
+// Helper function to lock/unlock OrderSend execution
+void LockOrderSend(bool isLocked)
+{
+    isOrderSendLocked = isLocked;
 }
 
 // Helper function to validate SL price
