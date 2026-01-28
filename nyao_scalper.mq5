@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v14.0      |
-// |              RSI with Reversal, Hedge & Pyramiding Strategy      |
+// |                                          Nyao Scalper v15.0      |
+// |       Candle Prediction with Reversal, Hedge & Pyramiding        |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "14.0"
+#property version   "15.0"
 #property description "Auto Trading EA Robot with Equity Management + Discord Alerts."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -27,7 +27,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v14.0"
+input group " Nyao Scalper v15.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -36,13 +36,17 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 input group "🚦 Indicator Settings"
-input int RSI_Period = 14;                                // RSI Period
-input int Lookback = 14;                                  // Lookback Period for Signal Confirmation
+input int SR_Lookback = 10;                               // S/R Lookback Period (Shorter = More Signals)
+input int PeakValleyLookback = 3;                         // Peak/Valley Detection Lookback (Smaller = More Sensitive)
+input int Lookback = 7;                                   // Lookback Period for Signal Confirmation
 input double ZonePoints = 10000;                          // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
-input double BuyRSIMax  = 80;                             // Overbought Value - Buy when RSI is below this
-input double SellRSIMin = 20;                             // Oversold Value - Sell when RSI is above this
-input double MinCandleRangeMultiplier = 0.5;              // Minimum Candle Size (Aggressiveness)
-input double MaxCandleRangeMultiplier = 5.0;              // Maximum Candle Size (Spike filter)
+input double SR_TouchTolerance = 1.0;                     // S/R Touch Tolerance (Multiplier of ZonePoints)
+input int SR_MinTouches = 1;                              // Minimum Touches to Validate S/R Level (1 = Most Signals)
+input double SR_BreakoutConfirmation = 1.0;               // S/R Breakout Confirmation (Multiplier of ZonePoints)
+input double MinCandleRangeMultiplier = 0.3;              // Minimum Candle Size (Lower = More Signals)
+input double MaxCandleRangeMultiplier = 8.0;              // Maximum Candle Size (Spike filter)
+
+
 
 input group "📝 Order Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
@@ -129,9 +133,6 @@ string symbolQuoteCurrency = "";                          // Quote currency of t
 long initialLeverage = 0;                                 // Initial Account Leverage
 bool isOrderSendLocked = false;                           // Flag for locking OrderSend execution
 
-// RSI Indicator Handle and Buffer
-int rsiHandle;
-double rsi[];
 
 // Duplicate Signal Filter Variables
 double lastBuyPrice = 0;
@@ -154,7 +155,7 @@ struct InvalidationDetails
 {
     bool immediateReversal;      // Price moves sharply against position
     bool keyLevelBroken;         // Support/Resistance broken
-    bool momentumShift;          // RSI momentum flip
+    bool momentumShift;          // S/R breakout momentum shift
     bool microStructureFlip;     // Recent swing structure breaks
     int totalScore;
     string reason;
@@ -197,14 +198,6 @@ int OnInit()
         return(INIT_PARAMETERS_INCORRECT);
     }
 
-    rsiHandle = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE);
-    if(rsiHandle == INVALID_HANDLE)
-    {
-        Alert("ERROR: Error creating RSI indicator");
-        return(INIT_FAILED);
-    }
-
-    ArraySetAsSeries(rsi, true);
     ArrayResize(activePairs, 0);
     
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -225,7 +218,7 @@ int OnInit()
     isOrderSendLocked = false;
     
     LogPrint("+-----------------------------------------+");
-    LogPrint("Nyao Scalper v14.0 Initialized Successfully");
+    LogPrint("Nyao Scalper v15.0 Initialized Successfully");
     LogPrint("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -238,9 +231,6 @@ int OnInit()
 // +------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {   
-    if(rsiHandle != INVALID_HANDLE) IndicatorRelease(rsiHandle);
-
-    ArrayFree(rsi);
     ArrayFree(activePairs);
     
     LogPrint("Nyao Scalper EA Deinitialized");
@@ -372,24 +362,40 @@ void CheckForTradingSignal()
     }
 }
 
-// Buy Signal
+// Buy Signal - Simple Candle-Based Prediction (Maximum Signal Frequency)
+// Predicts next candle will go UP based on current candle patterns
 bool BuySignal()
 {
-   if(CopyBuffer(rsiHandle, 0, 0, 3, rsi) <= 0) return false;
-
    double close1  = iClose(_Symbol, _Period, 1);
-   double support = GetSupport(1);
-
-   bool nearSupport = MathAbs(close1 - support) <= ZonePoints * _Point;
-
-   if(!IsTradableCandle(1)) return false;
-
-   if(
-      nearSupport &&
-      rsi[1] < BuyRSIMax &&                     
-      (HigherLow() || FakeBreakBuy(support) || iClose(_Symbol, _Period, 1) > iOpen(_Symbol,_Period, 1)) &&
-      AllowNewBuy(close1)
-     )
+   double open1   = iOpen(_Symbol, _Period, 1);
+   double high1   = iHigh(_Symbol, _Period, 1);
+   double low1    = iLow(_Symbol, _Period, 1);
+   double close2  = iClose(_Symbol, _Period, 2);
+   double open2   = iOpen(_Symbol, _Period, 2);
+   
+   if(!AllowNewBuy(close1)) return false;
+   
+   // PREDICTION SIGNALS (any one triggers buy):
+   
+   // 1. Bullish candle - expect continuation up
+   bool bullishCandle = close1 > open1;
+   
+   // 2. Bullish reversal - bearish candle followed by price holding (potential bottom)
+   bool bearishThenHold = (close2 < open2) && (close1 >= close2);
+   
+   // 3. Lower wick rejection - price rejected lower prices (buyers stepping in)
+   double lowerWick = MathMin(open1, close1) - low1;
+   double body = MathAbs(close1 - open1);
+   bool lowerWickRejection = (lowerWick > body * 0.5) && (body > 0);
+   
+   // 4. Higher low pattern - uptrend structure
+   bool higherLow = (low1 > iLow(_Symbol, _Period, 2));
+   
+   // 5. Doji at support zone (indecision after down move = potential reversal)
+   bool dojiAfterDown = (body < (high1 - low1) * 0.3) && (close2 < open2);
+   
+   // Trigger on ANY bullish signal
+   if(bullishCandle || bearishThenHold || lowerWickRejection || higherLow || dojiAfterDown)
    {
       lastBuyPrice = close1;
       return true;
@@ -398,24 +404,41 @@ bool BuySignal()
    return false;
 }
 
-// Sell Signal
+
+// Sell Signal - Simple Candle-Based Prediction (Maximum Signal Frequency)
+// Predicts next candle will go DOWN based on current candle patterns
 bool SellSignal()
 {
-   if(CopyBuffer(rsiHandle, 0, 0, 3, rsi) <= 0) return false;
-
-   double close1 = iClose(_Symbol, _Period, 1);
-   double resistance = GetResistance(1);
-
-   bool nearResistance = MathAbs(close1 - resistance) <= ZonePoints * _Point;
-
-   if(!IsTradableCandle(1)) return false;
-
-   if(
-      nearResistance &&
-      rsi[1] > SellRSIMin &&                     
-      (LowerHigh() || FakeBreakSell(resistance) || iClose(_Symbol, _Period, 1) < iOpen(_Symbol, _Period, 1)) &&
-      AllowNewSell(close1)
-     )
+   double close1  = iClose(_Symbol, _Period, 1);
+   double open1   = iOpen(_Symbol, _Period, 1);
+   double high1   = iHigh(_Symbol, _Period, 1);
+   double low1    = iLow(_Symbol, _Period, 1);
+   double close2  = iClose(_Symbol, _Period, 2);
+   double open2   = iOpen(_Symbol, _Period, 2);
+   
+   if(!AllowNewSell(close1)) return false;
+   
+   // PREDICTION SIGNALS (any one triggers sell):
+   
+   // 1. Bearish candle - expect continuation down
+   bool bearishCandle = close1 < open1;
+   
+   // 2. Bearish reversal - bullish candle followed by price holding (potential top)
+   bool bullishThenHold = (close2 > open2) && (close1 <= close2);
+   
+   // 3. Upper wick rejection - price rejected higher prices (sellers stepping in)
+   double upperWick = high1 - MathMax(open1, close1);
+   double body = MathAbs(close1 - open1);
+   bool upperWickRejection = (upperWick > body * 0.5) && (body > 0);
+   
+   // 4. Lower high pattern - downtrend structure
+   bool lowerHigh = (high1 < iHigh(_Symbol, _Period, 2));
+   
+   // 5. Doji at resistance zone (indecision after up move = potential reversal)
+   bool dojiAfterUp = (body < (high1 - low1) * 0.3) && (close2 > open2);
+   
+   // Trigger on ANY bearish signal
+   if(bearishCandle || bullishThenHold || upperWickRejection || lowerHigh || dojiAfterUp)
    {
       lastSellPrice = close1;
       return true;
@@ -423,6 +446,8 @@ bool SellSignal()
 
    return false;
 }
+
+
 
 // Duplicate buy filters
 bool AllowNewBuy(double price)
@@ -480,7 +505,84 @@ bool LowerHigh()
    return (h1 < h2);
 }
 
-// Get Support & Resistance
+// Peak/Valley Detection for 1-Minute Scalping
+// Valley = Swing Low - Lower than surrounding candles (buy signal zone)
+bool IsValley(int shift)
+{
+   double low = iLow(_Symbol, _Period, shift);
+   
+   // Check if this low is lower than candles on both sides
+   for(int i = 1; i <= PeakValleyLookback; i++)
+   {
+      if(iLow(_Symbol, _Period, shift - i) <= low) return false;  // Left side check
+      if(iLow(_Symbol, _Period, shift + i) <= low) return false;  // Right side check
+   }
+   
+   return true;
+}
+
+// Peak = Swing High - Higher than surrounding candles (sell signal zone)
+bool IsPeak(int shift)
+{
+   double high = iHigh(_Symbol, _Period, shift);
+   
+   // Check if this high is higher than candles on both sides
+   for(int i = 1; i <= PeakValleyLookback; i++)
+   {
+      if(iHigh(_Symbol, _Period, shift - i) >= high) return false;  // Left side check
+      if(iHigh(_Symbol, _Period, shift + i) >= high) return false;  // Right side check
+   }
+   
+   return true;
+}
+
+// Get the most recent valley (swing low) price level
+double GetRecentValley(int maxLookback)
+{
+   for(int i = PeakValleyLookback + 1; i <= maxLookback; i++)
+   {
+      if(IsValley(i))
+         return iLow(_Symbol, _Period, i);
+   }
+   return 0;  // No valley found
+}
+
+// Get the most recent peak (swing high) price level
+double GetRecentPeak(int maxLookback)
+{
+   for(int i = PeakValleyLookback + 1; i <= maxLookback; i++)
+   {
+      if(IsPeak(i))
+         return iHigh(_Symbol, _Period, i);
+   }
+   return 0;  // No peak found
+}
+
+// Check if price is near a recent valley (for buy signals)
+bool IsNearValley()
+{
+   double close1 = iClose(_Symbol, _Period, 1);
+   double valley = GetRecentValley(SR_Lookback);
+   
+   if(valley <= 0) return false;
+   
+   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
+   return MathAbs(close1 - valley) <= tolerance;
+}
+
+// Check if price is near a recent peak (for sell signals)
+bool IsNearPeak()
+{
+   double close1 = iClose(_Symbol, _Period, 1);
+   double peak = GetRecentPeak(SR_Lookback);
+   
+   if(peak <= 0) return false;
+   
+   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
+   return MathAbs(close1 - peak) <= tolerance;
+}
+
+// Get Support & Resistance (Basic)
 double GetSupport(int shift)
 {
    int index = iLowest(_Symbol, _Period, MODE_LOW, Lookback, shift);
@@ -491,6 +593,118 @@ double GetResistance(int shift)
 {
    int index = iHighest(_Symbol, _Period, MODE_HIGH, Lookback, shift);
    return iHigh(_Symbol, _Period, index);
+}
+
+// Get Validated Support - Returns support level only if it has sufficient touches
+double GetValidatedSupport(int shift)
+{
+   int index = iLowest(_Symbol, _Period, MODE_LOW, SR_Lookback, shift);
+   double support = iLow(_Symbol, _Period, index);
+   
+   int touches = CountSupportTouches(support, shift);
+   
+   if(touches >= SR_MinTouches)
+      return support;
+   
+   return 0;  // No valid support found
+}
+
+// Get Validated Resistance - Returns resistance level only if it has sufficient touches
+double GetValidatedResistance(int shift)
+{
+   int index = iHighest(_Symbol, _Period, MODE_HIGH, SR_Lookback, shift);
+   double resistance = iHigh(_Symbol, _Period, index);
+   
+   int touches = CountResistanceTouches(resistance, shift);
+   
+   if(touches >= SR_MinTouches)
+      return resistance;
+   
+   return 0;  // No valid resistance found
+}
+
+// Count how many times price touched the support level
+int CountSupportTouches(double level, int shift)
+{
+   int touches = 0;
+   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
+   
+   for(int i = shift; i < SR_Lookback + shift; i++)
+   {
+      double low = iLow(_Symbol, _Period, i);
+      double close = iClose(_Symbol, _Period, i);
+      
+      // Count touch: low is near the level
+      if(MathAbs(low - level) <= tolerance)
+         touches++;
+      // Also count close near level as a touch
+      else if(MathAbs(close - level) <= tolerance)
+         touches++;
+   }
+   
+   return touches;
+}
+
+// Count how many times price touched the resistance level
+int CountResistanceTouches(double level, int shift)
+{
+   int touches = 0;
+   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
+   
+   for(int i = shift; i < SR_Lookback + shift; i++)
+   {
+      double high = iHigh(_Symbol, _Period, i);
+      double close = iClose(_Symbol, _Period, i);
+      
+      // Count touch: high is near the level
+      if(MathAbs(high - level) <= tolerance)
+         touches++;
+      // Also count close near level as a touch
+      else if(MathAbs(close - level) <= tolerance)
+         touches++;
+   }
+   
+   return touches;
+}
+
+// Check for bullish momentum: price action is shifting bullish
+bool IsBullishMomentum()
+{
+   double close1 = iClose(_Symbol, _Period, 1);
+   double close2 = iClose(_Symbol, _Period, 2);
+   double open1 = iOpen(_Symbol, _Period, 1);
+   double open2 = iOpen(_Symbol, _Period, 2);
+   
+   // Current candle is bullish
+   bool currentBullish = close1 > open1;
+   
+   // Check for momentum shift pattern: previous bearish, current bullish (reversal)
+   bool reversalPattern = (close2 < open2) && currentBullish;
+   
+   // Or consecutive bullish pattern
+   bool consecutiveBullish = (close1 > close2);
+   
+   return reversalPattern || consecutiveBullish;
+}
+
+// Check for bearish momentum: price action is shifting bearish
+bool IsBearishMomentum()
+{
+   double close1 = iClose(_Symbol, _Period, 1);
+   double close2 = iClose(_Symbol, _Period, 2);
+   double open1 = iOpen(_Symbol, _Period, 1);
+   double open2 = iOpen(_Symbol, _Period, 2);
+   
+   // Current candle is bearish
+   bool currentBearish = close1 < open1;
+   
+   // Check for momentum shift pattern: previous bullish, current bearish (reversal)
+   bool reversalPattern = (close2 > open2) && currentBearish;
+   
+   // Or consecutive bearish pattern
+   bool consecutiveBearish = (close1 < close2);
+   
+   return reversalPattern || consecutiveBearish;
 }
 
 // Soft volatility sanity
@@ -1053,7 +1267,7 @@ InvalidationDetails GetDetailedInvalidationScore(ulong ticket)
     }
     
     // 3. MOMENTUM SHIFT (Weight: 2) - MEDIUM PRIORITY
-    // RSI divergence from position direction
+    // S/R breakout momentum shift
     details.momentumShift = CheckMomentumShift(posType);
     if(details.momentumShift) 
     {
@@ -1157,34 +1371,52 @@ bool CheckKeyLevelBroken(ENUM_POSITION_TYPE type)
     return false;
 }
 
-// 3. MOMENTUM SHIFT - RSI Reversal
+// 3. MOMENTUM SHIFT - S/R Breakout Detection
 bool CheckMomentumShift(ENUM_POSITION_TYPE type)
 {
-    double rsiBuffer[3];
-    if(CopyBuffer(rsiHandle, 0, 0, 3, rsiBuffer) <= 0) return false;
+    double close1 = iClose(_Symbol, _Period, 1);
+    double close2 = iClose(_Symbol, _Period, 2);
+    double close3 = iClose(_Symbol, _Period, 3);
+    double open1 = iOpen(_Symbol, _Period, 1);
     
-    double rsi1 = rsiBuffer[0];
-    double rsi2 = rsiBuffer[1];
-    double rsi3 = rsiBuffer[2];
+    if(close1 == 0 || close2 == 0) return false;
+    
+    double breakoutDistance = ZonePoints * _Point * SR_BreakoutConfirmation;
 
     if(type == POSITION_TYPE_BUY)
     {
-        // BUY invalidation: RSI declining + below midpoint
-        bool rsiWeakening = (rsi1 < rsi2) && (rsi2 < rsi3);
-        bool rsiBelowMid = rsi1 < 45;
-        bool rsiOverbought = rsi1 > 70; // Extreme reversal signal
+        // BUY invalidation: Price breaking below support with momentum
+        double support = GetSupport(1);
+        if(support <= 0) return false;
         
-        return (rsiWeakening && rsiBelowMid) || rsiOverbought;
+        // Check for decisive breakdown: price moved below support by breakout distance
+        bool breakdownConfirmed = close1 < (support - breakoutDistance);
+        
+        // Consecutive closes below support
+        bool consecutiveBreakdown = (close1 < support) && (close2 < support);
+        
+        // Momentum shift: consecutive bearish candles
+        bool bearishMomentum = (close1 < close2) && (close2 < close3);
+        
+        return breakdownConfirmed || (consecutiveBreakdown && bearishMomentum);
     }
 
     if(type == POSITION_TYPE_SELL)
     {
-        // SELL invalidation: RSI rising + above midpoint
-        bool rsiStrengthening = (rsi1 > rsi2) && (rsi2 > rsi3);
-        bool rsiAboveMid = rsi1 > 55;
-        bool rsiOversold = rsi1 < 30; // Extreme reversal signal
+        // SELL invalidation: Price breaking above resistance with momentum
+        double resistance = GetResistance(1);
+        if(resistance <= 0) return false;
         
-        return (rsiStrengthening && rsiAboveMid) || rsiOversold;
+        // Check for decisive breakout: price moved above resistance by breakout distance
+        bool breakoutConfirmed = close1 > (resistance + breakoutDistance);
+        
+        // Consecutive closes above resistance
+        bool consecutiveBreakout = (close1 > resistance) && (close2 > resistance);
+        
+        // Momentum shift: consecutive bullish candles
+        bool bullishMomentum = (close1 > close2) && (close2 > close3);
+        
+        return breakoutConfirmed || (consecutiveBreakout && bullishMomentum);
     }
 
     return false;
@@ -2733,7 +2965,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v14.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v15.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
