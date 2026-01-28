@@ -36,16 +36,8 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 input group "🚦 Indicator Settings"
-input int SR_Lookback = 10;                               // S/R Lookback Period (Shorter = More Signals)
-input int PeakValleyLookback = 3;                         // Peak/Valley Detection Lookback (Smaller = More Sensitive)
-input int Lookback = 7;                                   // Lookback Period for Signal Confirmation
+input int Lookback = 10;                                  // Lookback Period for S/R Detection
 input double ZonePoints = 10000;                          // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
-input double SR_TouchTolerance = 1.0;                     // S/R Touch Tolerance (Multiplier of ZonePoints)
-input int SR_MinTouches = 1;                              // Minimum Touches to Validate S/R Level (1 = Most Signals)
-input double SR_BreakoutConfirmation = 1.0;               // S/R Breakout Confirmation (Multiplier of ZonePoints)
-input double MinCandleRangeMultiplier = 0.3;              // Minimum Candle Size (Lower = More Signals)
-input double MaxCandleRangeMultiplier = 8.0;              // Maximum Candle Size (Spike filter)
-
 
 
 input group "📝 Order Settings"
@@ -56,7 +48,8 @@ input int MaxOpenOrders = 25;                             // Maximum Consecutive
 input double BuyDuplicateMultiplier  = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
 input double MinBreakEvenProfit = 1.5;                    // Minimum Profit to Trigger Break-Even ($)
-input double BreakEvenThresholdMultiplier = 1.5;          // Threshold Multiplier for Min Break-Even Profit
+input double ProfitThresholdMultiplier = 2;               // Threshold Multiplier for Min Break-Even Profit
+input double LossThresholdMultiplier = 5;                 // Threshold Multiplier for Max Break-Even Loss
 input bool EnableAutoReverse = true;                      // Enable Auto Reverse on Opposite Signal
 input int ReverseCooldownMinutes = 2;                     // Cooldown Duration Minutes after Reverse (0 = No Cooldown)
 input bool EnableAutoHedge = true;                        // Enable Auto Hedge on Opposite Signal
@@ -362,40 +355,17 @@ void CheckForTradingSignal()
     }
 }
 
-// Buy Signal - Simple Candle-Based Prediction (Maximum Signal Frequency)
-// Predicts next candle will go UP based on current candle patterns
+// Buy Signal - Candle Prediction for M1 Scalping
+// Triggers on each bullish candle (predicts continuation UP)
 bool BuySignal()
 {
-   double close1  = iClose(_Symbol, _Period, 1);
-   double open1   = iOpen(_Symbol, _Period, 1);
-   double high1   = iHigh(_Symbol, _Period, 1);
-   double low1    = iLow(_Symbol, _Period, 1);
-   double close2  = iClose(_Symbol, _Period, 2);
-   double open2   = iOpen(_Symbol, _Period, 2);
+   double close1 = iClose(_Symbol, _Period, 1);
+   double open1  = iOpen(_Symbol, _Period, 1);
    
    if(!AllowNewBuy(close1)) return false;
    
-   // PREDICTION SIGNALS (any one triggers buy):
-   
-   // 1. Bullish candle - expect continuation up
-   bool bullishCandle = close1 > open1;
-   
-   // 2. Bullish reversal - bearish candle followed by price holding (potential bottom)
-   bool bearishThenHold = (close2 < open2) && (close1 >= close2);
-   
-   // 3. Lower wick rejection - price rejected lower prices (buyers stepping in)
-   double lowerWick = MathMin(open1, close1) - low1;
-   double body = MathAbs(close1 - open1);
-   bool lowerWickRejection = (lowerWick > body * 0.5) && (body > 0);
-   
-   // 4. Higher low pattern - uptrend structure
-   bool higherLow = (low1 > iLow(_Symbol, _Period, 2));
-   
-   // 5. Doji at support zone (indecision after down move = potential reversal)
-   bool dojiAfterDown = (body < (high1 - low1) * 0.3) && (close2 < open2);
-   
-   // Trigger on ANY bullish signal
-   if(bullishCandle || bearishThenHold || lowerWickRejection || higherLow || dojiAfterDown)
+   // Bullish candle = Buy signal (predict next candle goes UP)
+   if(close1 > open1)
    {
       lastBuyPrice = close1;
       return true;
@@ -405,40 +375,17 @@ bool BuySignal()
 }
 
 
-// Sell Signal - Simple Candle-Based Prediction (Maximum Signal Frequency)
-// Predicts next candle will go DOWN based on current candle patterns
+// Sell Signal - Candle Prediction for M1 Scalping
+// Triggers on each bearish candle (predicts continuation DOWN)
 bool SellSignal()
 {
-   double close1  = iClose(_Symbol, _Period, 1);
-   double open1   = iOpen(_Symbol, _Period, 1);
-   double high1   = iHigh(_Symbol, _Period, 1);
-   double low1    = iLow(_Symbol, _Period, 1);
-   double close2  = iClose(_Symbol, _Period, 2);
-   double open2   = iOpen(_Symbol, _Period, 2);
+   double close1 = iClose(_Symbol, _Period, 1);
+   double open1  = iOpen(_Symbol, _Period, 1);
    
    if(!AllowNewSell(close1)) return false;
    
-   // PREDICTION SIGNALS (any one triggers sell):
-   
-   // 1. Bearish candle - expect continuation down
-   bool bearishCandle = close1 < open1;
-   
-   // 2. Bearish reversal - bullish candle followed by price holding (potential top)
-   bool bullishThenHold = (close2 > open2) && (close1 <= close2);
-   
-   // 3. Upper wick rejection - price rejected higher prices (sellers stepping in)
-   double upperWick = high1 - MathMax(open1, close1);
-   double body = MathAbs(close1 - open1);
-   bool upperWickRejection = (upperWick > body * 0.5) && (body > 0);
-   
-   // 4. Lower high pattern - downtrend structure
-   bool lowerHigh = (high1 < iHigh(_Symbol, _Period, 2));
-   
-   // 5. Doji at resistance zone (indecision after up move = potential reversal)
-   bool dojiAfterUp = (body < (high1 - low1) * 0.3) && (close2 > open2);
-   
-   // Trigger on ANY bearish signal
-   if(bearishCandle || bullishThenHold || upperWickRejection || lowerHigh || dojiAfterUp)
+   // Bearish candle = Sell signal (predict next candle goes DOWN)
+   if(close1 < open1)
    {
       lastSellPrice = close1;
       return true;
@@ -463,126 +410,7 @@ bool AllowNewSell(double price)
    return true;
 }
 
-// Fake break (wick + close back)
-bool FakeBreakBuy(double support)
-{
-   double low1   = iLow(_Symbol, _Period, 1);
-   double close1 = iClose(_Symbol, _Period, 1);
-   double open1  = iOpen(_Symbol, _Period, 1);
-
-   bool swept    = low1 < support;
-   bool closedIn = close1 > support;
-   bool wick     = (MathMin(open1, close1) - low1) > CandleBody(1);
-
-   return (swept && closedIn && wick);
-}
-
-bool FakeBreakSell(double resistance)
-{
-   double high1  = iHigh(_Symbol, _Period, 1);
-   double close1 = iClose(_Symbol, _Period, 1);
-   double open1  = iOpen(_Symbol, _Period, 1);
-
-   bool swept    = high1 > resistance;
-   bool closedIn = close1 < resistance;
-   bool wick     = (high1 - MathMax(open1, close1)) > CandleBody(1);
-
-   return (swept && closedIn && wick);
-}
-
-// Micro Structures
-bool HigherLow()
-{
-   double l1 = iLow(_Symbol, _Period, 1);
-   double l2 = iLow(_Symbol,_Period, 2);
-   return (l1 > l2);
-}
-
-bool LowerHigh()
-{
-   double h1 = iHigh(_Symbol, _Period, 1);
-   double h2 = iHigh(_Symbol, _Period, 2);
-   return (h1 < h2);
-}
-
-// Peak/Valley Detection for 1-Minute Scalping
-// Valley = Swing Low - Lower than surrounding candles (buy signal zone)
-bool IsValley(int shift)
-{
-   double low = iLow(_Symbol, _Period, shift);
-   
-   // Check if this low is lower than candles on both sides
-   for(int i = 1; i <= PeakValleyLookback; i++)
-   {
-      if(iLow(_Symbol, _Period, shift - i) <= low) return false;  // Left side check
-      if(iLow(_Symbol, _Period, shift + i) <= low) return false;  // Right side check
-   }
-   
-   return true;
-}
-
-// Peak = Swing High - Higher than surrounding candles (sell signal zone)
-bool IsPeak(int shift)
-{
-   double high = iHigh(_Symbol, _Period, shift);
-   
-   // Check if this high is higher than candles on both sides
-   for(int i = 1; i <= PeakValleyLookback; i++)
-   {
-      if(iHigh(_Symbol, _Period, shift - i) >= high) return false;  // Left side check
-      if(iHigh(_Symbol, _Period, shift + i) >= high) return false;  // Right side check
-   }
-   
-   return true;
-}
-
-// Get the most recent valley (swing low) price level
-double GetRecentValley(int maxLookback)
-{
-   for(int i = PeakValleyLookback + 1; i <= maxLookback; i++)
-   {
-      if(IsValley(i))
-         return iLow(_Symbol, _Period, i);
-   }
-   return 0;  // No valley found
-}
-
-// Get the most recent peak (swing high) price level
-double GetRecentPeak(int maxLookback)
-{
-   for(int i = PeakValleyLookback + 1; i <= maxLookback; i++)
-   {
-      if(IsPeak(i))
-         return iHigh(_Symbol, _Period, i);
-   }
-   return 0;  // No peak found
-}
-
-// Check if price is near a recent valley (for buy signals)
-bool IsNearValley()
-{
-   double close1 = iClose(_Symbol, _Period, 1);
-   double valley = GetRecentValley(SR_Lookback);
-   
-   if(valley <= 0) return false;
-   
-   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
-   return MathAbs(close1 - valley) <= tolerance;
-}
-
-// Check if price is near a recent peak (for sell signals)
-bool IsNearPeak()
-{
-   double close1 = iClose(_Symbol, _Period, 1);
-   double peak = GetRecentPeak(SR_Lookback);
-   
-   if(peak <= 0) return false;
-   
-   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
-   return MathAbs(close1 - peak) <= tolerance;
-}
-
-// Get Support & Resistance (Basic)
+// Get Support & Resistance (Basic) - Used by invalidation checks
 double GetSupport(int shift)
 {
    int index = iLowest(_Symbol, _Period, MODE_LOW, Lookback, shift);
@@ -595,133 +423,7 @@ double GetResistance(int shift)
    return iHigh(_Symbol, _Period, index);
 }
 
-// Get Validated Support - Returns support level only if it has sufficient touches
-double GetValidatedSupport(int shift)
-{
-   int index = iLowest(_Symbol, _Period, MODE_LOW, SR_Lookback, shift);
-   double support = iLow(_Symbol, _Period, index);
-   
-   int touches = CountSupportTouches(support, shift);
-   
-   if(touches >= SR_MinTouches)
-      return support;
-   
-   return 0;  // No valid support found
-}
-
-// Get Validated Resistance - Returns resistance level only if it has sufficient touches
-double GetValidatedResistance(int shift)
-{
-   int index = iHighest(_Symbol, _Period, MODE_HIGH, SR_Lookback, shift);
-   double resistance = iHigh(_Symbol, _Period, index);
-   
-   int touches = CountResistanceTouches(resistance, shift);
-   
-   if(touches >= SR_MinTouches)
-      return resistance;
-   
-   return 0;  // No valid resistance found
-}
-
-// Count how many times price touched the support level
-int CountSupportTouches(double level, int shift)
-{
-   int touches = 0;
-   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
-   
-   for(int i = shift; i < SR_Lookback + shift; i++)
-   {
-      double low = iLow(_Symbol, _Period, i);
-      double close = iClose(_Symbol, _Period, i);
-      
-      // Count touch: low is near the level
-      if(MathAbs(low - level) <= tolerance)
-         touches++;
-      // Also count close near level as a touch
-      else if(MathAbs(close - level) <= tolerance)
-         touches++;
-   }
-   
-   return touches;
-}
-
-// Count how many times price touched the resistance level
-int CountResistanceTouches(double level, int shift)
-{
-   int touches = 0;
-   double tolerance = ZonePoints * _Point * SR_TouchTolerance;
-   
-   for(int i = shift; i < SR_Lookback + shift; i++)
-   {
-      double high = iHigh(_Symbol, _Period, i);
-      double close = iClose(_Symbol, _Period, i);
-      
-      // Count touch: high is near the level
-      if(MathAbs(high - level) <= tolerance)
-         touches++;
-      // Also count close near level as a touch
-      else if(MathAbs(close - level) <= tolerance)
-         touches++;
-   }
-   
-   return touches;
-}
-
-// Check for bullish momentum: price action is shifting bullish
-bool IsBullishMomentum()
-{
-   double close1 = iClose(_Symbol, _Period, 1);
-   double close2 = iClose(_Symbol, _Period, 2);
-   double open1 = iOpen(_Symbol, _Period, 1);
-   double open2 = iOpen(_Symbol, _Period, 2);
-   
-   // Current candle is bullish
-   bool currentBullish = close1 > open1;
-   
-   // Check for momentum shift pattern: previous bearish, current bullish (reversal)
-   bool reversalPattern = (close2 < open2) && currentBullish;
-   
-   // Or consecutive bullish pattern
-   bool consecutiveBullish = (close1 > close2);
-   
-   return reversalPattern || consecutiveBullish;
-}
-
-// Check for bearish momentum: price action is shifting bearish
-bool IsBearishMomentum()
-{
-   double close1 = iClose(_Symbol, _Period, 1);
-   double close2 = iClose(_Symbol, _Period, 2);
-   double open1 = iOpen(_Symbol, _Period, 1);
-   double open2 = iOpen(_Symbol, _Period, 2);
-   
-   // Current candle is bearish
-   bool currentBearish = close1 < open1;
-   
-   // Check for momentum shift pattern: previous bullish, current bearish (reversal)
-   bool reversalPattern = (close2 > open2) && currentBearish;
-   
-   // Or consecutive bearish pattern
-   bool consecutiveBearish = (close1 < close2);
-   
-   return reversalPattern || consecutiveBearish;
-}
-
-// Soft volatility sanity
-bool IsTradableCandle(int i)
-{
-   double range = CandleRange(i);
-
-   double minRange = ZonePoints * _Point * MinCandleRangeMultiplier;
-   double maxRange = ZonePoints * _Point * MaxCandleRangeMultiplier;
-
-   if(range < minRange) return false;   // Too small (dead / chop)
-   if(range > maxRange) return false;   // Too big (news / spike)
-
-   return true;
-}
-
-// Candle utils
+// Candle utils - Used by invalidation checks
 double CandleBody(int i)
 {
    return MathAbs(iClose(_Symbol,_Period, i) - iOpen(_Symbol, _Period, i));
@@ -829,7 +531,7 @@ void ManageHedgedPositions(ulong ticket)
     }
     
     // RULE 2: Original position recovered
-    if(originalProfit >= MinBreakEvenProfit * BreakEvenThresholdMultiplier)
+    if(originalProfit >= MinBreakEvenProfit * ProfitThresholdMultiplier)
     {
         LogPrint("RULE 2: Original position recovered to profit/breakeven");
 
@@ -851,7 +553,7 @@ void ManageHedgedPositions(ulong ticket)
     }
 
     // RULE 3: Hedge position sufficient
-    if(hedgeProfit >= MinBreakEvenProfit * BreakEvenThresholdMultiplier)
+    if(hedgeProfit >= MinBreakEvenProfit * ProfitThresholdMultiplier)
     {
         LogPrint("RULE 3: Hedge position sufficient to profit/breakeven");
 
@@ -981,8 +683,6 @@ void ManageWinningPositions(ulong ticket)
 
     if(!PositionSelectByTicket(ticket)) return;
 
-    datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
-    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
     ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
     ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
 
@@ -991,19 +691,23 @@ void ManageWinningPositions(ulong ticket)
     double price = (orderType == ORDER_TYPE_BUY) ? ask : bid;
 
     // Duplicate filters
-    if (orderType == ORDER_TYPE_BUY && AllowNewBuy(price)) return;
-    if (orderType == ORDER_TYPE_SELL && AllowNewSell(price)) return;
+    if (orderType == ORDER_TYPE_BUY && !AllowNewBuy(price)) return;
+    if (orderType == ORDER_TYPE_SELL && !AllowNewSell(price)) return;
 
     // Cooldown pyramiding
+    datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
     if (TimeCurrent() - openTime >= PyramidCooldownSeconds) return;
 
     // Only check PROFITABLE positions
     double profit = PositionGetDouble(POSITION_PROFIT);
-    if(profit < MinBreakEvenProfit * BreakEvenThresholdMultiplier) return;
+    if(profit < MinBreakEvenProfit * ProfitThresholdMultiplier) return;
 
     // Only pyramiding on winning position with profitable SL
+    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+    double volume = PositionGetDouble(POSITION_VOLUME);
     double currentSL = PositionGetDouble(POSITION_SL);
-    if(currentSL == 0 || currentSL < entryPrice) return;
+    double breakEvenPrice = CalculateBreakEvenPrice(ticket, posType, entryPrice, volume);
+    if(currentSL == 0 || currentSL < breakEvenPrice) return;
     
     // Max pyramiding reached (only counts profitable, non-hedged positions)
     int pyramidCount = CountProfitOpenOrders(posType);
@@ -1011,7 +715,7 @@ void ManageWinningPositions(ulong ticket)
 
     // Ensure the position has a weak invalidation signal score
     InvalidationDetails details = GetDetailedInvalidationScore(ticket);
-    if(details.totalScore > 1) return;
+    if(details.totalScore > 0) return;
 
     LogPrint("+-----------------------------------------+");
     LogPrint("PYRAMIDING TRIGGERED - ", EnumToString(posType));
@@ -1040,7 +744,7 @@ void ManageLosingPositions(ulong ticket)
     double profit = PositionGetDouble(POSITION_PROFIT);
 
     // Only manage losing positions
-    if(profit >= MinBreakEvenProfit) return;
+    if(profit >= -(MinBreakEvenProfit * LossThresholdMultiplier)) return;
 
     ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
     double volume = PositionGetDouble(POSITION_VOLUME);
@@ -1371,100 +1075,87 @@ bool CheckKeyLevelBroken(ENUM_POSITION_TYPE type)
     return false;
 }
 
-// 3. MOMENTUM SHIFT - S/R Breakout Detection
+// 3. MOMENTUM SHIFT - Candle-Based Invalidation (Aligned with Signal Logic)
+// Checks if candle pattern suggests opposite direction from position
 bool CheckMomentumShift(ENUM_POSITION_TYPE type)
 {
-    double close1 = iClose(_Symbol, _Period, 1);
-    double close2 = iClose(_Symbol, _Period, 2);
-    double close3 = iClose(_Symbol, _Period, 3);
-    double open1 = iOpen(_Symbol, _Period, 1);
-    
-    if(close1 == 0 || close2 == 0) return false;
-    
-    double breakoutDistance = ZonePoints * _Point * SR_BreakoutConfirmation;
+   // Cache OHLC data once for efficiency
+   double close1 = iClose(_Symbol, _Period, 1);
+   double open1 = iOpen(_Symbol, _Period, 1);
+   double high1 = iHigh(_Symbol, _Period, 1);
+   double low1 = iLow(_Symbol, _Period, 1);
+   
+   if(close1 == 0 || open1 == 0) return false;
+   
+   double body = close1 - open1;  // Positive = bullish, negative = bearish
+   double range = high1 - low1;
+   
+   if(range <= 0) return false;
 
-    if(type == POSITION_TYPE_BUY)
-    {
-        // BUY invalidation: Price breaking below support with momentum
-        double support = GetSupport(1);
-        if(support <= 0) return false;
-        
-        // Check for decisive breakdown: price moved below support by breakout distance
-        bool breakdownConfirmed = close1 < (support - breakoutDistance);
-        
-        // Consecutive closes below support
-        bool consecutiveBreakdown = (close1 < support) && (close2 < support);
-        
-        // Momentum shift: consecutive bearish candles
-        bool bearishMomentum = (close1 < close2) && (close2 < close3);
-        
-        return breakdownConfirmed || (consecutiveBreakdown && bearishMomentum);
-    }
+   if(type == POSITION_TYPE_BUY)
+   {
+      // BUY position invalidation: Opposite signal detected (sell signal pattern)
+      // Bearish candle with upper wick rejection = momentum shifting down
+      double upperWick = high1 - MathMax(open1, close1);
+      bool bearishWithRejection = (body < 0) && (upperWick > range * 0.3);
+      
+      return bearishWithRejection;
+   }
 
-    if(type == POSITION_TYPE_SELL)
-    {
-        // SELL invalidation: Price breaking above resistance with momentum
-        double resistance = GetResistance(1);
-        if(resistance <= 0) return false;
-        
-        // Check for decisive breakout: price moved above resistance by breakout distance
-        bool breakoutConfirmed = close1 > (resistance + breakoutDistance);
-        
-        // Consecutive closes above resistance
-        bool consecutiveBreakout = (close1 > resistance) && (close2 > resistance);
-        
-        // Momentum shift: consecutive bullish candles
-        bool bullishMomentum = (close1 > close2) && (close2 > close3);
-        
-        return breakoutConfirmed || (consecutiveBreakout && bullishMomentum);
-    }
+   if(type == POSITION_TYPE_SELL)
+   {
+      // SELL position invalidation: Opposite signal detected (buy signal pattern)
+      // Bullish candle with lower wick rejection = momentum shifting up
+      double lowerWick = MathMin(open1, close1) - low1;
+      bool bullishWithRejection = (body > 0) && (lowerWick > range * 0.3);
+      
+      return bullishWithRejection;
+   }
 
-    return false;
+   return false;
 }
 
 // 4. MICRO STRUCTURE FLIP - Quick Swing Changes on M1
+// Simplified: Just check for opposite wick rejection (reversal setup forming)
 bool CheckMicroStructureFlip(ENUM_POSITION_TYPE type)
 {
-    // Look at very recent highs/lows (last 5 candles)
-    double high1 = iHigh(_Symbol, _Period, 1);
-    double high2 = iHigh(_Symbol, _Period, 2);
-    double high3 = iHigh(_Symbol, _Period, 3);
-    double low1 = iLow(_Symbol, _Period, 1);
-    double low2 = iLow(_Symbol, _Period, 2);
-    double low3 = iLow(_Symbol, _Period, 3);
-    
-    if(high1 == 0 || low1 == 0) return false;
+   // Cache OHLC data once for efficiency
+   double close1 = iClose(_Symbol, _Period, 1);
+   double open1 = iOpen(_Symbol, _Period, 1);
+   double high1 = iHigh(_Symbol, _Period, 1);
+   double low1 = iLow(_Symbol, _Period, 1);
+   
+   if(high1 == 0 || low1 == 0) return false;
+   
+   double body = MathAbs(close1 - open1);
+   double range = high1 - low1;
+   
+   if(range <= 0) return false;
 
-    if(type == POSITION_TYPE_BUY)
-    {
-        // BUY invalidation: Lower high formed
-        bool lowerHigh = (high1 < high2) && (high2 >= high3);
-        bool breakingLow = low1 < low2;
-        
-        return lowerHigh && breakingLow;
-    }
+   if(type == POSITION_TYPE_BUY)
+   {
+      // BUY invalidation: Strong upper wick rejection forming (reversal signal)
+      double upperWick = high1 - MathMax(open1, close1);
+      return upperWick > body * 1.5;
+   }
 
-    if(type == POSITION_TYPE_SELL)
-    {
-        // SELL invalidation: Higher low formed
-        bool higherLow = (low1 > low2) && (low2 <= low3);
-        bool breakingHigh = high1 > high2;
-        
-        return higherLow && breakingHigh;
-    }
+   if(type == POSITION_TYPE_SELL)
+   {
+      // SELL invalidation: Strong lower wick rejection forming (reversal signal)
+      double lowerWick = MathMin(open1, close1) - low1;
+      return lowerWick > body * 1.5;
+   }
 
-    return false;
+   return false;
 }
 
-// Helper: Get Average Candle Body Size
+// Helper: Get Average Candle Body Size - Used by CheckImmediateReversal
 double GetAverageCandleBody(int periods)
 {
     double totalBody = 0;
     for(int i = 1; i <= periods; i++)
     {
-        double open = iOpen(_Symbol, _Period, i);
-        double close = iClose(_Symbol, _Period, i);
-        totalBody += MathAbs(close - open);
+        totalBody += CandleBody(i);  // Reuse CandleBody function
     }
     return totalBody / periods;
 }
