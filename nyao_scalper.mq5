@@ -1,12 +1,12 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v16.0      |
-// |         Candle Prediction with Reversal, Hedge & Pyramiding      |
+// |                                          Nyao Scalper v17.0      |
+// |             Candle Prediction with Smart Multi-Entry System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "16.0"
-#property description "Auto Trading EA Robot with Equity Management + Discord Alerts."
+#property version   "17.0"
+#property description "Auto Trading EA Robot with Smart Multi-Entry & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
 
@@ -27,7 +27,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v16.0"
+input group " Nyao Scalper v17.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -37,33 +37,34 @@ input group "+-----------------------------------------+"
 // +------------------------------------------------------------------+
 input group "🚦 Indicator Settings"
 input int Lookback = 10;                                  // Lookback Period for S/R Detection
-input double ZonePoints = 10000;                          // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
-
-input group "⚡ Fast Market Detection & Protection"
-input bool EnableFastMarketProtection = true;             // Enable Fast Market Protection
-input int FastMarketPeriodMinutes = 10;                   // Detection Period (Minutes)
-input double FastMarketMovementPoints = 10000;            // Min Price Movement (Points) in Period
-input int FastMarketMinLosses = 5;                        // Min Losing Orders in Period to Trigger
-input double FastMarketMinLossAmount = 15;                // Min Total Loss ($) in Period to Trigger
-input int FastMarketPauseDuration = 30;                   // Pause Duration When Triggered (Minutes)
+input double ZonePoints = 1000;                           // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
 
 input group "📝 Order Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
 input int MaxOpenOrders = 25;                             // Maximum Consecutive Open Orders
-input double BuyDuplicateMultiplier  = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
-input double SellDuplicateMultiplier = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
-input double MinBreakEvenProfit = 1.5;                    // Minimum Profit to Trigger Break-Even ($)
-input double ProfitThresholdMultiplier = 2;               // Threshold Multiplier for Min Break-Even Profit
-input double LossThresholdMultiplier = 5;                 // Threshold Multiplier for Max Break-Even Loss
-input bool EnableAutoReverse = true;                      // Enable Auto Reverse on Opposite Signal
-input int ReverseCooldownMinutes = 2;                     // Cooldown Duration Minutes after Reverse (0 = No Cooldown)
-input bool EnableAutoHedge = true;                        // Enable Auto Hedge on Opposite Signal
-input int MaxHedgeDurationMinutes = 480;                  // Max Hedge Duration (Minutes)
-input bool EnablePyramiding = true;                       // Enable Pyramiding (Open new position on winning position)
-input int MaxPyramidingPositions = 5;                     // Max Total Pyramiding Positions
-input int PyramidCooldownSeconds = 3;                     // Pyramiding Cooldown Duration (Seconds)
+input double BuyDuplicateMultiplier  = 1.0;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
+input double SellDuplicateMultiplier = 1.0;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
+input double MinBreakEvenProfit = 1.0;                    // Minimum Profit to Trigger Break-Even ($)
+input double ProfitThresholdMultiplier = 1.0;             // Threshold Multiplier for Min Break-Even Profit
+input double LossThresholdMultiplier = 5.0;               // Threshold Multiplier for Max Break-Even Loss
+
+input group "🚀 Smart Multi-Entry Settings"
+input bool EnableMultiEntry = true;                       // Enable Multi-Entry on Strong Signals
+input int MaxMultiEntryPositions = 5;                     // Max Total Multi-Entry Positions per Direction
+input double MultiEntryMinDistance = 5.0;                 // Min Distance Between Entries (Points)
+input int MultiEntryMinStrength = 5;                      // Min Signal Strength to Allow Multi-Entry (1-5)
+input double MultiEntryProfitThreshold = 1;               // Min Profit ($) of Winning Positions to Add
+input int MultiEntryCooldownSeconds = 1;                  // Cooldown Between Multi-Entries (Seconds)
+
+input group "🛡️ Position Loss Management"
+input bool EnableLossManagement = true;                   // Enable Independent Loss Management
+input int MaxHoldingLossPositions = 5;                    // Max Losing Positions to Hold (0 = Close Immediately)
+input int StrongInvalidationThreshold = 5;                // Strong Invalidation Score Threshold (Close Immediately)
+input int MediumInvalidationThreshold = 1;                // Medium Invalidation Score (Can Hold If Recoverable)
+input double MaxRecoverableLoss = 5.0;                    // Max Loss ($) Considered Recoverable
+input bool CloseFromMostLosing = true;                    // Close from Most Losing Position First
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -142,29 +143,38 @@ datetime lastReverseTime = 0;
 datetime startTime = 0;                                   // EA Start Time
 datetime lastDailyReportTime = 0;                         // Last time daily report was sent
 
-// Hedge pair structure
-struct HedgePair
+// Multi-Entry tracking
+datetime lastMultiEntryTime = 0;
+
+// Signal Strength structure (1-5 scale)
+struct SignalStrength
 {
-    ulong originalTicket;
-    ulong hedgeTicket;
-    datetime hedgeOpenTime;
+    int trendScore;              // Trend direction confirmation (0-2)
+    int momentumScore;           // Momentum/candle body strength (0-2)
+    int confirmationScore;       // Additional confirmations (0-1)
+    int totalScore;              // Total strength (0-5)
+    string reasoning;            // Explanation of score
 };
-HedgePair activePairs[];
 
-// Fast market detection
-datetime lastFastMarketCheck = 0;
-int cachedLossCount = 0;
-double cachedTotalLoss = 0;
-double cachedPriceMovement = 0;
-datetime cacheValidUntil = 0;
-
-// Invalidation details structure for logging
+// Position Invalidation structure
 struct InvalidationDetails
 {
-    bool momentumShift;          // Opposite candle detected (Weight: 4 = Hedge)
-    bool immediateReversal;      // Consecutive opposite candles (Weight: 6 = Reverse)
-    int totalScore;
-    string reason;
+    bool trendReversal;          // Trend has reversed
+    bool strongMomentum;         // Strong opposite momentum
+    bool priceAction;            // Price action invalidation
+    bool beyondSL;               // Price moved significantly against
+    int totalScore;              // Total invalidation score (0-5)
+    string reason;               // Explanation
+    bool isRecoverable;          // Can the position recover?
+};
+
+// Losing Position Info structure for sorting
+struct LosingPositionInfo
+{
+    ulong ticket;
+    double profit;
+    int invalidationScore;
+    bool isRecoverable;
 };
 
 // +------------------------------------------------------------------+
@@ -204,7 +214,6 @@ int OnInit()
         return(INIT_PARAMETERS_INCORRECT);
     }
 
-    ArrayResize(activePairs, 0);
     
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -224,7 +233,7 @@ int OnInit()
     isOrderSendLocked = false;
     
     LogPrint("+-----------------------------------------+");
-    LogPrint("Nyao Scalper v16.0 Initialized Successfully");
+    LogPrint("Nyao Scalper v17.0 Initialized Successfully");
     LogPrint("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -237,14 +246,11 @@ int OnInit()
 // +------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {   
-    ArrayFree(activePairs);
-    
     LogPrint("Nyao Scalper EA Deinitialized");
 }
 
 // +------------------------------------------------------------------+
 // | Expert Tick Function                                             |
-// +------------------------------------------------------------------+
 void OnTick()
 {   
     // Check and update peak equity
@@ -259,9 +265,6 @@ void OnTick()
     // Check equity drawdawn
     CheckEquityDrawdawn();
 
-    // Check for fast market with losses
-    DetectFastMarketWithLosses();
-    
     if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded) 
     {   
         // Close all positions and completely stop the EA
@@ -424,19 +427,6 @@ bool AllowNewSell(double price)
    return true;
 }
 
-// Get Support & Resistance (Basic) - Used by invalidation checks
-double GetSupport(int shift)
-{
-   int index = iLowest(_Symbol, _Period, MODE_LOW, Lookback, shift);
-   return iLow(_Symbol, _Period, index);
-}
-
-double GetResistance(int shift)
-{
-   int index = iHighest(_Symbol, _Period, MODE_HIGH, Lookback, shift);
-   return iHigh(_Symbol, _Period, index);
-}
-
 // Candle utils - Used by invalidation checks
 double CandleBody(int i)
 {
@@ -450,10 +440,17 @@ double CandleRange(int i)
 // +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
-// | Manage Positions                                                 |
+// | Manage Positions - Unified Position Management System            |
 // +------------------------------------------------------------------+
 void ManagePositions()
 {   
+    // Step 1: Manage all losing positions (independent - no pairing)
+    ManageAllLosingPositions();
+    
+    // Step 2: Process Multi-Entry for winning positions
+    ManageMultiEntry();
+    
+    // Step 3: Manage trailing stops for all positions
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
@@ -464,421 +461,532 @@ void ManagePositions()
         if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
 
-        if(IsPositionHedged(ticket))
-        {
-            ManageHedgedPositions(ticket);
-        }
-        else
-        {
-            ManageLosingPositions(ticket);
+        if(EnableTrailingStop) ManageTrailingStop(ticket);
+    }
+}
 
-            ManageWinningPositions(ticket);
+// +------------------------------------------------------------------+
+// | Signal Strength Analysis (1-5 Scale)                             |
+// +------------------------------------------------------------------+
+SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
+{
+    SignalStrength strength;
+    strength.trendScore = 0;
+    strength.momentumScore = 0;
+    strength.confirmationScore = 0;
+    strength.totalScore = 0;
+    strength.reasoning = "";
+    
+    // Get candle data for analysis
+    double close1 = iClose(_Symbol, _Period, 1);
+    double open1 = iOpen(_Symbol, _Period, 1);
+    double close2 = iClose(_Symbol, _Period, 2);
+    double open2 = iOpen(_Symbol, _Period, 2);
+    double close3 = iClose(_Symbol, _Period, 3);
+    double open3 = iOpen(_Symbol, _Period, 3);
+    
+    double high1 = iHigh(_Symbol, _Period, 1);
+    double low1 = iLow(_Symbol, _Period, 1);
+    double high2 = iHigh(_Symbol, _Period, 2);
+    double low2 = iLow(_Symbol, _Period, 2);
+    
+    if(close1 == 0 || open1 == 0) return strength;
+    
+    // Candle direction checks
+    bool isBullish1 = close1 > open1;
+    bool isBullish2 = close2 > open2;
+    bool isBullish3 = close3 > open3;
+    bool isBearish1 = close1 < open1;
+    bool isBearish2 = close2 < open2;
+    bool isBearish3 = close3 < open3;
+    
+    // Calculate body sizes for momentum
+    double body1 = CandleBody(1);
+    double body2 = CandleBody(2);
+    double range1 = CandleRange(1);
+    double avgBody = (body1 + body2) / 2;
+    
+    if(orderType == ORDER_TYPE_BUY)
+    {
+        // TREND SCORE (0-2): Check trend direction
+        if(isBullish1)
+        {
+            strength.trendScore++;
+            strength.reasoning += "[Bullish Candle] ";
+        }
+        if(isBullish1 && isBullish2)
+        {
+            strength.trendScore++;
+            strength.reasoning += "[Consecutive Bullish] ";
+        }
         
-            if(EnableTrailingStop) ManageTrailingStop(ticket);
+        // MOMENTUM SCORE (0-2): Check candle strength
+        if(body1 > avgBody * 1.2)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[Strong Body] ";
         }
-    }
-}
-
-// +------------------------------------------------------------------+
-// | Manage Hedge Pair                                                |
-// +------------------------------------------------------------------+
-void ManageHedgedPositions(ulong ticket)
-{   
-    int i = FindHedgePairIndex(ticket);
-    if (i == -1)
-    {
-        LogPrint("Hedge pair not found or removed, ticket: ", ticket);
-        return;
-    }
-
-    ulong originalTicket = activePairs[i].originalTicket;
-    ulong hedgeTicket = activePairs[i].hedgeTicket;
-    
-    // Check if original position still exist
-    if(!PositionSelectByTicket(originalTicket))
-    {
-        LogPrint("⚠ Original position ", originalTicket, " no longer exists");
-        RemoveHedgePair(i);
-        return;
-    }
-    
-    // Cache original position data while selected
-    double originalProfit = PositionGetDouble(POSITION_PROFIT);
-    double originalVolume = PositionGetDouble(POSITION_VOLUME);
-    
-    // Check if hedge position still exist
-    if(!PositionSelectByTicket(hedgeTicket))
-    {
-        LogPrint("⚠ Hedge position ", hedgeTicket, " no longer exists");
-        RemoveHedgePair(i);
-        return;
-    }
-    
-    // Cache hedge position data while selected
-    double hedgeProfit = PositionGetDouble(POSITION_PROFIT);
-    double hedgeVolume = PositionGetDouble(POSITION_VOLUME);
-    
-    // Calculate metrics
-    double combinedProfit = originalProfit + hedgeProfit;
-    int hedgeDurationMinutes = (int)((TimeCurrent() - activePairs[i].hedgeOpenTime) / 60);
-    
-    LogPrint("+-----------------------------------------+");
-    LogPrint("HEDGE PAIR STATUS");
-    LogPrint("Original Ticket: ", originalTicket, " | Hedge Ticket: ", hedgeTicket);
-    LogPrint("Original Volume: ", originalVolume, " | Hedge Volume: ", hedgeVolume);
-    LogPrint("Original Profit: $", originalProfit, " | Hedge Profit: $", hedgeProfit);
-    LogPrint("Combined Profit: $", combinedProfit, " | Duration: ", hedgeDurationMinutes, " min");
-    LogPrint("+-----------------------------------------+");
-    
-    // RULE 1: Combined profit sufficient to exit hedge pair
-    if (combinedProfit > 0)
-    {
-        LogPrint("RULE 1: Combined profit sufficient to exit hedge pair");
-        LogPrint("Combined profit: $", combinedProfit);
-        LogPrint("Close to both positions to lock in profit");
-
-        bool isClosed1 = ClosePosition(originalTicket);
-        bool isClosed2 = ClosePosition(hedgeTicket);
-
-        if (isClosed1 || isClosed2) RemoveHedgePair(i);
-        return;
-    }
-    
-    // RULE 2: Original position recovered
-    if(originalProfit >= MinBreakEvenProfit * ProfitThresholdMultiplier)
-    {
-        LogPrint("RULE 2: Original position recovered to profit/breakeven");
-
-        int score = GetInvalidationScore(hedgeTicket);
+        if(range1 > 0 && body1 / range1 > 0.6) // Body > 60% of range = strong
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[High Body Ratio] ";
+        }
         
-        if (score >= 4) 
+        // CONFIRMATION SCORE (0-1): Higher low or break resistance
+        if(isBullish1 && low1 > low2)
         {
-            LogPrint("Closing hedge, keeping original");
-            bool isClosed = ClosePosition(hedgeTicket);
-            if (isClosed) RemoveHedgePair(i);
+            strength.confirmationScore++;
+            strength.reasoning += "[Higher Low] ";
         }
-        else
-        {
-            LogPrint("Hedge invalidation score: ", score, " (Weak) Keeping hedge");
-        }
-
-        if (EnableTrailingStop) ManageTrailingStop(originalTicket);
-        return;
     }
-
-    // RULE 3: Hedge position sufficient
-    if(hedgeProfit >= MinBreakEvenProfit * ProfitThresholdMultiplier)
+    else // ORDER_TYPE_SELL
     {
-        LogPrint("RULE 3: Hedge position sufficient to profit/breakeven");
-
-        int score = GetInvalidationScore(originalTicket);
-
-        if (score >= 4) 
+        // TREND SCORE (0-2): Check trend direction
+        if(isBearish1)
         {
-            LogPrint("Closing original, keeping hedge");
-            bool isClosed = ClosePosition(originalTicket);
-            if (isClosed) RemoveHedgePair(i);
+            strength.trendScore++;
+            strength.reasoning += "[Bearish Candle] ";
         }
-        else
+        if(isBearish1 && isBearish2)
         {
-            LogPrint("Original invalidation score: ", score, " (Weak) Keeping original");
+            strength.trendScore++;
+            strength.reasoning += "[Consecutive Bearish] ";
         }
+        
+        // MOMENTUM SCORE (0-2): Check candle strength
+        if(body1 > avgBody * 1.2)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[Strong Body] ";
+        }
+        if(range1 > 0 && body1 / range1 > 0.6)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[High Body Ratio] ";
+        }
+        
+        // CONFIRMATION SCORE (0-1): Lower high or break support
+        if(isBearish1 && high1 < high2)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[Lower High] ";
+        }
+    }
+    
+    // Calculate total (max 5)
+    strength.totalScore = strength.trendScore + strength.momentumScore + strength.confirmationScore;
+    
+    return strength;
+}
 
-        if (EnableTrailingStop) ManageTrailingStop(hedgeTicket);
+// +------------------------------------------------------------------+
+// | Multi-Entry Management for Winning Positions                     |
+// +------------------------------------------------------------------+
+void ManageMultiEntry()
+{
+    if(!EnableMultiEntry || MaxMultiEntryPositions <= 0) return;
+    
+    // Check cooldown
+    if(TimeCurrent() - lastMultiEntryTime < MultiEntryCooldownSeconds)
+    {
         return;
     }
     
-    // RULE 4: Maximum time limit reached
-    if(MaxHedgeDurationMinutes > 0 && hedgeDurationMinutes >= MaxHedgeDurationMinutes)
+    // Find best direction to add (based on current winning positions)
+    int buyCount = 0;
+    int sellCount = 0;
+    double buyProfit = 0;
+    double sellProfit = 0;
+    double lastBuyEntryPrice = 0;
+    double lastSellEntryPrice = 0;
+    
+    // Count winning positions and calculate profits
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
-        LogPrint("RULE 4: Maximum hedge duration reached (", MaxHedgeDurationMinutes, " min)");
-        LogPrint("Closing both positions to prevent prolonged exposure");
-
-        bool isClosed1 = ClosePosition(originalTicket);
-        bool isClosed2 = ClosePosition(hedgeTicket);
-
-        if (isClosed1 || isClosed2) RemoveHedgePair(i);
-        return;
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+        
+        if(!PositionSelectByTicket(ticket)) continue;
+        
+        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+        
+        double profit = PositionGetDouble(POSITION_PROFIT);
+        double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        
+        if(profit >= MultiEntryProfitThreshold)
+        {
+            if(posType == POSITION_TYPE_BUY)
+            {
+                buyCount++;
+                buyProfit += profit;
+                if(entryPrice > lastBuyEntryPrice) lastBuyEntryPrice = entryPrice;
+            }
+            else
+            {
+                sellCount++;
+                sellProfit += profit;
+                if(lastSellEntryPrice == 0 || entryPrice < lastSellEntryPrice) 
+                    lastSellEntryPrice = entryPrice;
+            }
+        }
     }
     
-    LogPrint("Hedge pair still active, monitoring...");
-}
-
-void AddHedgePair(ulong originalTicket, ulong hedgeTicket)
-{
-    // Validate both positions exist
-    if(!PositionSelectByTicket(originalTicket) || !PositionSelectByTicket(hedgeTicket))
-    {
-        LogPrint("AddHedgePair: one or both tickets not found. Original: ", originalTicket, " Hedge: ", hedgeTicket);
-        return;
-    }
-
-    // Prevent duplicates
-    if(IsPositionHedged(originalTicket) || IsPositionHedged(hedgeTicket))
-    {
-        LogPrint("AddHedgePair: hedge pair already exists for ticket ", originalTicket);
-        return;
-    }
-
-    double originalProfit = PositionGetDouble(POSITION_PROFIT);
-
-    PositionSelectByTicket(hedgeTicket);
-    double hedgeProfit = PositionGetDouble(POSITION_PROFIT);
-
-    int size = ArraySize(activePairs);
-    ArrayResize(activePairs, size + 1);
-
-    activePairs[size].originalTicket = originalTicket;
-    activePairs[size].hedgeTicket    = hedgeTicket;
-    activePairs[size].hedgeOpenTime  = (datetime)PositionGetInteger(POSITION_TIME);
-
-    LogPrint("+-----------------------------------------+");
-    LogPrint("HEDGE PAIR ADDED");
-    LogPrint("Original Ticket: ", originalTicket, " | Hedge Ticket: ", hedgeTicket);
-    LogPrint("Initial Combined P/L: $", originalProfit + hedgeProfit);
-    LogPrint("Hedge Open Time: ", activePairs[size].hedgeOpenTime);
-    LogPrint("+-----------------------------------------+");
-}
-
-void RemoveHedgePair(int index)
-{
-    int size = ArraySize(activePairs);
-
-    if(index < 0 || index >= size)
-    {
-        LogPrint("RemoveHedgePair: invalid index ", index, ", size=", size);
-        return;
-    }
-
-    LogPrint("Removing hedge pair at index ", index,
-                " (Original=", activePairs[index].originalTicket,
-                ", Hedge=", activePairs[index].hedgeTicket, ")");
-
-    // Swap with last element
-    activePairs[index] = activePairs[size - 1];
-    ArrayResize(activePairs, size - 1);
-}
-
-bool IsPositionHedged(ulong ticket)
-{
-    int size = ArraySize(activePairs);
-
-    for(int i = 0; i < size; i++)
-    {
-        if(activePairs[i].originalTicket == ticket ||
-            activePairs[i].hedgeTicket == ticket)
-            return true;
-    }
-
-    return false;
-}
-
-int FindHedgePairIndex(ulong ticket)
-{
-    int size = ArraySize(activePairs);
-
-    for(int i = 0; i < size; i++)
-    {
-        if(activePairs[i].originalTicket == ticket ||
-            activePairs[i].hedgeTicket == ticket)
-            return i;
-    }
-
-    return -1;
-}
-// +------------------------------------------------------------------+
-
-// +------------------------------------------------------------------+
-// | Manage Pyramiding For Winning Positions                          |
-// +------------------------------------------------------------------+
-void ManageWinningPositions(ulong ticket)
-{
-    if(!EnablePyramiding || MaxPyramidingPositions <= 0) return;
-
-    if(!PositionSelectByTicket(ticket)) return;
-
-    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-    ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-
+    // Get current prices
     double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double price = (orderType == ORDER_TYPE_BUY) ? ask : bid;
-
-    // Check 1: Duplicate filters
-    if (orderType == ORDER_TYPE_BUY && !AllowNewBuy(price))
-    {
-        LogPrint("[PYRAMID BLOCKED] Duplicate buy filter. Price: ", price, ", Last: ", lastBuyPrice);
-        return;
-    }
-    if (orderType == ORDER_TYPE_SELL && !AllowNewSell(price))
-    {
-        LogPrint("[PYRAMID BLOCKED] Duplicate sell filter. Price: ", price, ", Last: ", lastSellPrice);
-        return;
-    }
-
-    // Check 2: Cooldown pyramiding
-    datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
-    int secondsSinceOpen = (int)(TimeCurrent() - openTime);
     
-    if (secondsSinceOpen < PyramidCooldownSeconds)
+    // Check for BUY multi-entry
+    if(buyCount > 0 && buyCount < MaxMultiEntryPositions && EnableBuyOrders)
     {
-        LogPrint("[PYRAMID BLOCKED] Cooldown not met. Ticket: ", ticket, 
-                 ", Seconds since open: ", secondsSinceOpen, 
-                 "/", PyramidCooldownSeconds);
-        return;
-    }
-
-    // Check 3: Only check PROFITABLE positions
-    double profit = PositionGetDouble(POSITION_PROFIT);
-    if(profit < MinBreakEvenProfit * ProfitThresholdMultiplier)
-    {
-        LogPrint("[PYRAMID BLOCKED] Not profitable enough. Ticket: ", ticket,
-                 ", Profit: $", profit, 
-                 ", Required: $", MinBreakEvenProfit * ProfitThresholdMultiplier);
-        return;
-    }
-
-    // Check 4: Only pyramiding on winning position with profitable SL
-    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-    double volume = PositionGetDouble(POSITION_VOLUME);
-    double currentSL = PositionGetDouble(POSITION_SL);
-    double breakEvenPrice = CalculateBreakEvenPrice(ticket, posType, entryPrice, volume);
-    
-    // SL should be BETTER than breakeven
-    bool slIsProfitable = false;
-    if(posType == POSITION_TYPE_BUY)
-    {
-        slIsProfitable = (currentSL > 0 && currentSL >= breakEvenPrice);
-    }
-    else
-    {
-        slIsProfitable = (currentSL > 0 && currentSL <= breakEvenPrice);
+        // Check distance from last entry
+        double distanceBuy = (ask - lastBuyEntryPrice) / _Point;
+        
+        if(distanceBuy >= MultiEntryMinDistance)
+        {
+            // Check signal strength
+            SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY);
+            
+            if(strength.totalScore >= MultiEntryMinStrength)
+            {
+                // Get invalidation to ensure signal is still valid
+                InvalidationDetails details = GetBuyInvalidation();
+                
+                if(details.totalScore < MediumInvalidationThreshold)
+                {
+                    LogPrint("+-----------------------------------------+");
+                    LogPrint("MULTI-ENTRY BUY TRIGGERED");
+                    LogPrint("Winning Positions: ", buyCount, "/", MaxMultiEntryPositions);
+                    LogPrint("Total Profit: $", buyProfit);
+                    LogPrint("Signal Strength: ", strength.totalScore, "/5 - ", strength.reasoning);
+                    LogPrint("Distance: ", distanceBuy, " points");
+                    LogPrint("+-----------------------------------------+");
+                    
+                    OpenMultiEntryPosition(ORDER_TYPE_BUY);
+                    lastMultiEntryTime = TimeCurrent();
+                    return;
+                }
+                else
+                {
+                    LogPrint("[MULTI-ENTRY BLOCKED] Signal invalidated. Score: ", details.totalScore);
+                }
+            }
+            else
+            {
+                LogPrint("[MULTI-ENTRY BLOCKED] Signal too weak. Strength: ", strength.totalScore, "/", MultiEntryMinStrength);
+            }
+        }
     }
     
-    if(!slIsProfitable)
+    // Check for SELL multi-entry
+    if(sellCount > 0 && sellCount < MaxMultiEntryPositions && EnableSellOrders)
     {
-        LogPrint("[PYRAMID BLOCKED] SL not profitable. Ticket: ", ticket,
-                 ", Current SL: ", currentSL, 
-                 ", Break-even: ", breakEvenPrice);
-        return;
+        // Check distance from last entry
+        double distanceSell = (lastSellEntryPrice - bid) / _Point;
+        
+        if(distanceSell >= MultiEntryMinDistance)
+        {
+            // Check signal strength
+            SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL);
+            
+            if(strength.totalScore >= MultiEntryMinStrength)
+            {
+                // Get invalidation to ensure signal is still valid
+                InvalidationDetails details = GetSellInvalidation();
+                
+                if(details.totalScore < MediumInvalidationThreshold)
+                {
+                    LogPrint("+-----------------------------------------+");
+                    LogPrint("MULTI-ENTRY SELL TRIGGERED");
+                    LogPrint("Winning Positions: ", sellCount, "/", MaxMultiEntryPositions);
+                    LogPrint("Total Profit: $", sellProfit);
+                    LogPrint("Signal Strength: ", strength.totalScore, "/5 - ", strength.reasoning);
+                    LogPrint("Distance: ", distanceSell, " points");
+                    LogPrint("+-----------------------------------------+");
+                    
+                    OpenMultiEntryPosition(ORDER_TYPE_SELL);
+                    lastMultiEntryTime = TimeCurrent();
+                    return;
+                }
+                else
+                {
+                    LogPrint("[MULTI-ENTRY BLOCKED] Signal invalidated. Score: ", details.totalScore);
+                }
+            }
+            else
+            {
+                LogPrint("[MULTI-ENTRY BLOCKED] Signal too weak. Strength: ", strength.totalScore, "/", MultiEntryMinStrength);
+            }
+        }
     }
-    
-    // Check 5: Max pyramiding reached (only counts profitable, non-hedged positions)
-    int pyramidCount = CountProfitOpenOrders(posType);
-    if(pyramidCount >= MaxPyramidingPositions)
-    {
-        LogPrint("[PYRAMID BLOCKED] Max positions reached. Count: ", pyramidCount, 
-                 "/", MaxPyramidingPositions);
-        return;
-    }
-
-    // Check 6: Ensure the position has a weak invalidation signal score
-    InvalidationDetails details = GetDetailedInvalidationScore(ticket);
-    if(details.totalScore > 0)
-    {
-        LogPrint("[PYRAMID BLOCKED] Invalidation detected. Ticket: ", ticket,
-                 ", Score: ", details.totalScore,
-                 ", Reason: ", details.reason);
-        return;
-    }
-
-    LogPrint("+-----------------------------------------+");
-    LogPrint("PYRAMIDING TRIGGERED - ", EnumToString(posType));
-    LogPrint("Ticket: ", ticket, " | Profit: $", profit);
-    LogPrint("Positions: ", pyramidCount, "/", MaxPyramidingPositions);
-    LogPrint("Seconds since open: ", secondsSinceOpen);
-    LogPrint("SL: ", currentSL, " | Break-even: ", breakEvenPrice);
-    LogPrint("+-----------------------------------------+");
-
-    // Open pyramiding position
-    OpenPyramidingPosition(orderType);
 }
 
 // +------------------------------------------------------------------+
-// | Manage Losing Positions                                          |
+// | Get Buy Direction Invalidation                                   |
 // +------------------------------------------------------------------+
-void ManageLosingPositions(ulong ticket)
-{   
-    // Check cooldown
-    if(ReverseCooldownMinutes > 0 && EnableAutoReverse)
+InvalidationDetails GetBuyInvalidation()
+{
+    InvalidationDetails details;
+    details.trendReversal = false;
+    details.strongMomentum = false;
+    details.priceAction = false;
+    details.beyondSL = false;
+    details.totalScore = 0;
+    details.reason = "";
+    details.isRecoverable = true;
+    
+    // Get candle data
+    double close1 = iClose(_Symbol, _Period, 1);
+    double open1 = iOpen(_Symbol, _Period, 1);
+    double close2 = iClose(_Symbol, _Period, 2);
+    double open2 = iOpen(_Symbol, _Period, 2);
+    double close3 = iClose(_Symbol, _Period, 3);
+    double open3 = iOpen(_Symbol, _Period, 3);
+    
+    if(close1 == 0 || open1 == 0) return details;
+    
+    bool isBearish1 = close1 < open1;
+    bool isBearish2 = close2 < open2;
+    bool isBearish3 = close3 < open3;
+    
+    double body1 = CandleBody(1);
+    double body2 = CandleBody(2);
+    double avgBody = (body1 + body2) / 2;
+    
+    // Single bearish candle = 1 point
+    if(isBearish1)
     {
-        if(TimeTradeServer() - lastReverseTime < ReverseCooldownMinutes * 60)
-            return;
+        details.totalScore += 1;
+        details.reason += "[Bearish Candle] ";
     }
-
-    if(!PositionSelectByTicket(ticket)) return;
-
-    double profit = PositionGetDouble(POSITION_PROFIT);
-
-    // Only manage losing positions
-    if(profit >= -(MinBreakEvenProfit * LossThresholdMultiplier)) return;
-
-    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-    double volume = PositionGetDouble(POSITION_VOLUME);
-
-    // Get detailed invalidation analysis
-    InvalidationDetails details = GetDetailedInvalidationScore(ticket);
-
-    LogPrint("+-----------------------------------------+");
-    LogPrint("POSITION INVALIDATION ANALYSIS");
-    LogPrint("Ticket: ", ticket, " | Type: ", EnumToString(posType));
-    LogPrint("Profit: $", profit, " | Volume: ", volume);
-    LogPrint("+-----------------------------------------+");
-    LogPrint("SIGNALS DETECTED:");
-    LogPrint("[", details.momentumShift ? "✓" : " ", "] Momentum Shift - Single Opposite Candle (Score: 4 = HEDGE)");
-    LogPrint("[", details.immediateReversal ? "✓" : " ", "] Immediate Reversal - Consecutive Opposite (Score: 6 = REVERSE)");
-    LogPrint("TOTAL SCORE: ", details.totalScore, " | REASON: ", details.reason);
-    LogPrint("+-----------------------------------------+");
-
-    // Decision based on score thresholds
-    // Score: 0 (no invalidation), 4 (hedge), 6 (reverse)
-    if(details.totalScore >= 6 && EnableAutoReverse)
+    
+    // Consecutive bearish = additional 2 points
+    if(isBearish1 && isBearish2)
     {
-        // IMMEDIATE REVERSAL (6) → REVERSE
-        LogPrint("DECISION: IMMEDIATE REVERSAL - REVERSING POSITION");
+        details.trendReversal = true;
+        details.totalScore += 2;
+        details.reason += "[Consecutive Bearish] ";
+    }
+    
+    // 3 consecutive bearish = strong reversal
+    if(isBearish1 && isBearish2 && isBearish3)
+    {
+        details.totalScore += 1;
+        details.reason += "[Triple Bearish] ";
+        details.isRecoverable = false;
+    }
+    
+    // Strong bearish momentum = 1 point
+    if(isBearish1 && body1 > avgBody * 1.5)
+    {
+        details.strongMomentum = true;
+        details.totalScore += 1;
+        details.reason += "[Strong Bearish Momentum] ";
+    }
+    
+    return details;
+}
+
+// +------------------------------------------------------------------+
+// | Get Sell Direction Invalidation                                  |
+// +------------------------------------------------------------------+
+InvalidationDetails GetSellInvalidation()
+{
+    InvalidationDetails details;
+    details.trendReversal = false;
+    details.strongMomentum = false;
+    details.priceAction = false;
+    details.beyondSL = false;
+    details.totalScore = 0;
+    details.reason = "";
+    details.isRecoverable = true;
+    
+    // Get candle data
+    double close1 = iClose(_Symbol, _Period, 1);
+    double open1 = iOpen(_Symbol, _Period, 1);
+    double close2 = iClose(_Symbol, _Period, 2);
+    double open2 = iOpen(_Symbol, _Period, 2);
+    double close3 = iClose(_Symbol, _Period, 3);
+    double open3 = iOpen(_Symbol, _Period, 3);
+    
+    if(close1 == 0 || open1 == 0) return details;
+    
+    bool isBullish1 = close1 > open1;
+    bool isBullish2 = close2 > open2;
+    bool isBullish3 = close3 > open3;
+    
+    double body1 = CandleBody(1);
+    double body2 = CandleBody(2);
+    double avgBody = (body1 + body2) / 2;
+    
+    // Single bullish candle = 1 point
+    if(isBullish1)
+    {
+        details.totalScore += 1;
+        details.reason += "[Bullish Candle] ";
+    }
+    
+    // Consecutive bullish = additional 2 points
+    if(isBullish1 && isBullish2)
+    {
+        details.trendReversal = true;
+        details.totalScore += 2;
+        details.reason += "[Consecutive Bullish] ";
+    }
+    
+    // 3 consecutive bullish = strong reversal
+    if(isBullish1 && isBullish2 && isBullish3)
+    {
+        details.totalScore += 1;
+        details.reason += "[Triple Bullish] ";
+        details.isRecoverable = false;
+    }
+    
+    // Strong bullish momentum = 1 point
+    if(isBullish1 && body1 > avgBody * 1.5)
+    {
+        details.strongMomentum = true;
+        details.totalScore += 1;
+        details.reason += "[Strong Bullish Momentum] ";
+    }
+    
+    return details;
+}
+
+// +------------------------------------------------------------------+
+// | Manage All Losing Positions - Independent (No Pairing)          |
+// +------------------------------------------------------------------+
+void ManageAllLosingPositions()
+{
+    if(!EnableLossManagement) return;
+    
+    // Collect all losing positions
+    LosingPositionInfo losingPositions[];
+    int losingCount = 0;
+    
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
         
-        lastReverseTime = TimeTradeServer();
+        if(!PositionSelectByTicket(ticket)) continue;
         
-        if(!ClosePosition(ticket))
+        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+        
+        double profit = PositionGetDouble(POSITION_PROFIT);
+        
+        // Only process losing positions
+        if(profit < 0)
         {
-            LogPrint("Failed to close position for reversal");
-            return;
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            // Get invalidation for this position's direction
+            InvalidationDetails details;
+            if(posType == POSITION_TYPE_BUY)
+            {
+                details = GetBuyInvalidation();
+            }
+            else
+            {
+                details = GetSellInvalidation();
+            }
+            
+            // Check if loss is recoverable
+            bool isRecoverable = (MathAbs(profit) <= MaxRecoverableLoss) && details.isRecoverable;
+            
+            // Add to array
+            ArrayResize(losingPositions, losingCount + 1);
+            losingPositions[losingCount].ticket = ticket;
+            losingPositions[losingCount].profit = profit;
+            losingPositions[losingCount].invalidationScore = details.totalScore;
+            losingPositions[losingCount].isRecoverable = isRecoverable;
+            losingCount++;
+            
+            LogPrint("+-----------------------------------------+");
+            LogPrint("LOSING POSITION ANALYSIS");
+            LogPrint("Ticket: ", ticket, " | Type: ", EnumToString(posType));
+            LogPrint("Profit: $", profit);
+            LogPrint("Invalidation Score: ", details.totalScore, "/5");
+            LogPrint("Reason: ", details.reason);
+            LogPrint("Recoverable: ", isRecoverable ? "YES" : "NO");
+            LogPrint("+-----------------------------------------+");
+        }
+    }
+    
+    if(losingCount == 0) return;
+    
+    // Sort by profit (most losing first) if CloseFromMostLosing is enabled
+    if(CloseFromMostLosing && losingCount > 1)
+    {
+        for(int i = 0; i < losingCount - 1; i++)
+        {
+            for(int j = i + 1; j < losingCount; j++)
+            {
+                if(losingPositions[j].profit < losingPositions[i].profit)
+                {
+                    LosingPositionInfo temp = losingPositions[i];
+                    losingPositions[i] = losingPositions[j];
+                    losingPositions[j] = temp;
+                }
+            }
+        }
+    }
+    
+    // Process each losing position
+    int holdCount = 0;
+    
+    for(int i = 0; i < losingCount; i++)
+    {
+        ulong ticket = losingPositions[i].ticket;
+        double profit = losingPositions[i].profit;
+        int score = losingPositions[i].invalidationScore;
+        bool isRecoverable = losingPositions[i].isRecoverable;
+        
+        // Decision logic:
+        // 1. Strong invalidation (>= threshold) = Close immediately
+        // 2. Not recoverable = Close immediately
+        // 3. Over max hold count = Close (starting from most losing)
+        // 4. Otherwise = Hold
+        
+        bool shouldClose = false;
+        string closeReason = "";
+        
+        // Check 1: Strong invalidation
+        if(score >= StrongInvalidationThreshold)
+        {
+            shouldClose = true;
+            closeReason = "Strong Invalidation (Score: " + IntegerToString(score) + ")";
+        }
+        // Check 2: Not recoverable
+        else if(!isRecoverable)
+        {
+            shouldClose = true;
+            closeReason = "Not Recoverable (Loss: $" + DoubleToString(MathAbs(profit), 2) + ")";
+        }
+        // Check 3: Over max hold count
+        else if(holdCount >= MaxHoldingLossPositions)
+        {
+            shouldClose = true;
+            closeReason = "Max Hold Limit Exceeded (" + IntegerToString(holdCount) + "/" + IntegerToString(MaxHoldingLossPositions) + ")";
         }
         
-        ENUM_ORDER_TYPE reverseType = (posType == POSITION_TYPE_BUY) ? 
-                                       ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-        
-        LogPrint("Opening reversed position: ", EnumToString(reverseType));
-        
-        if(posType == POSITION_TYPE_BUY && EnableSellOrders)
-            OpenPosition(ORDER_TYPE_SELL);
-        else if(posType == POSITION_TYPE_SELL && EnableBuyOrders)
-            OpenPosition(ORDER_TYPE_BUY);
-    }
-    else if(details.totalScore >= 4 && EnableAutoHedge)
-    {
-        // MOMENTUM SHIFT (4) → HEDGE
-        LogPrint("DECISION: MOMENTUM SHIFT - HEDGING POSITION");
-        
-        ENUM_ORDER_TYPE hedgeType = (posType == POSITION_TYPE_BUY) ? 
-                                     ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-        
-        ulong hedgeTicket = OpenHedgePosition(hedgeType, volume);
-        
-        if(hedgeTicket > 0)
+        if(shouldClose)
         {
-            AddHedgePair(ticket, hedgeTicket);
-            LogPrint("Hedge created: ", ticket, " ↔ ", hedgeTicket);
+            LogPrint("+-----------------------------------------+");
+            LogPrint("CLOSING LOSING POSITION");
+            LogPrint("Ticket: ", ticket, " | Profit: $", profit);
+            LogPrint("Reason: ", closeReason);
+            LogPrint("+-----------------------------------------+");
+            
+            ClosePosition(ticket);
         }
         else
         {
-            LogPrint("Hedge failed for position ", ticket);
+            holdCount++;
+            LogPrint("HOLDING position ", ticket, " (Recoverable, Score: ", score, ", Hold: ", holdCount, "/", MaxHoldingLossPositions, ")");
         }
-    }
-    else
-    {
-        // NO invalidation (0) → MONITOR
-        LogPrint("DECISION: NO INVALIDATION - MONITORING");
     }
 }
 // +------------------------------------------------------------------+
@@ -994,139 +1102,6 @@ void ManageTrailingStop(ulong ticket)
 }
 
 // +------------------------------------------------------------------+
-// | Position Invalidation Analysis                                   |
-// +------------------------------------------------------------------+
-// Only 2 reliable invalidation signals:
-// - momentumShift: Single opposite candle detected (Score: 4 = HEDGE)
-// - immediateReversal: Consecutive opposite candles (Score: 6 = REVERSE)
-InvalidationDetails GetDetailedInvalidationScore(ulong ticket)
-{
-    InvalidationDetails details;
-    details.momentumShift = false;
-    details.immediateReversal = false;
-    details.totalScore = 0;
-    details.reason = "";
-    
-    if(!PositionSelectByTicket(ticket)) return details;
-    
-    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-    double currentSL = PositionGetDouble(POSITION_SL);
-    double profit = PositionGetDouble(POSITION_PROFIT);
-    
-    // Get current price
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double currentPrice = (posType == POSITION_TYPE_BUY) ? bid : ask;
-    
-    // Check if SL is set and calculate distance to SL
-    if(EnableStopLoss && currentSL != 0)
-    {
-        double distanceToSL = 0;
-        if(posType == POSITION_TYPE_BUY)
-        {
-            distanceToSL = MathAbs(currentPrice - currentSL) / _Point;
-        }
-        else
-        {
-            distanceToSL = MathAbs(currentSL - currentPrice) / _Point;
-        }
-        
-        // Calculate profit distance in points
-        double volume = PositionGetDouble(POSITION_VOLUME);
-        double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-        double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-        
-        double profitInPoints = 0;
-        if(tickValue > 0 && volume > 0)
-        {
-            double valuePerPoint = (tickValue * volume) / (tickSize / _Point);
-            if(valuePerPoint > 0)
-            {
-                profitInPoints = MathAbs(profit / valuePerPoint);
-            }
-        }
-        
-        // If profit distance is Beyond SL. high invalidation
-        if(profitInPoints > distanceToSL)
-        {
-            details.immediateReversal = true;
-            details.totalScore = 6;
-            details.reason = "[Price Beyond SL]";
-            return details;
-        }
-    }
-    
-    // Get last 2 candles (efficient - only what we need)
-    double close1 = iClose(_Symbol, _Period, 1);
-    double open1 = iOpen(_Symbol, _Period, 1);
-    double close2 = iClose(_Symbol, _Period, 2);
-    double open2 = iOpen(_Symbol, _Period, 2);
-    
-    if(close1 == 0 || open1 == 0) return details;
-    
-    // Simple candle direction (aligned with BuySignal/SellSignal)
-    bool isBullish1 = close1 > open1;
-    bool isBearish1 = close1 < open1;
-    bool isBullish2 = close2 > open2;
-    bool isBearish2 = close2 < open2;
-    
-    if(posType == POSITION_TYPE_BUY)
-    {
-        // BUY invalidation: Bearish candle(s) = opposite signal
-        
-        // momentumShift: Single bearish candle (Score: 4 = HEDGE)
-        if(isBearish1)
-        {
-            details.momentumShift = true;
-            details.totalScore = 4;
-            details.reason = "[Bearish Candle]";
-        }
-        
-        // immediateReversal: Consecutive bearish (Score: 6 = REVERSE)
-        if(isBearish1 && isBearish2)
-        {
-            details.immediateReversal = true;
-            details.totalScore = 6;
-            details.reason = "[Consecutive Bearish]";
-        }
-    }
-    else // POSITION_TYPE_SELL
-    {
-        // SELL invalidation: Bullish candle(s) = opposite signal
-        
-        // momentumShift: Single bullish candle (Score: 4 = HEDGE)
-        if(isBullish1)
-        {
-            details.momentumShift = true;
-            details.totalScore = 4;
-            details.reason = "[Bullish Candle]";
-        }
-        
-        // immediateReversal: Consecutive bullish (Score: 6 = REVERSE)
-        if(isBullish1 && isBullish2)
-        {
-            details.immediateReversal = true;
-            details.totalScore = 6;
-            details.reason = "[Consecutive Bullish]";
-        }
-    }
-    
-    // Score interpretation:
-    // 0: No invalidation (same direction candle)
-    // 4: momentumShift (single opposite) -> HEDGE
-    // 6: immediateReversal (consecutive opposite OR price far beyond SL) -> REVERSE
-    return details;
-}
-
-// Backward compatible simple version
-int GetInvalidationScore(ulong ticket)
-{
-    InvalidationDetails details = GetDetailedInvalidationScore(ticket);
-    return details.totalScore;
-}
-// +------------------------------------------------------------------+
-
-// +------------------------------------------------------------------+
 // | Position Management Functions                                    |
 // +------------------------------------------------------------------+
 // Open position with dynamic lot sizing AND fixed SL/TP
@@ -1228,8 +1203,8 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
     LockOrderSend(false);
 }
 
-// Open Pyramiding Position
-void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
+// Open Multi-Entry Position (with tight SL for additional entries)
+void OpenMultiEntryPosition(ENUM_ORDER_TYPE orderType)
 {   
     if (!IsAllowedToOpenPosition()) return;
 
@@ -1251,7 +1226,7 @@ void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
     request.price = price;
     request.deviation = 10;
     request.magic = MagicNumber;
-    request.comment = "Pyramiding Position by Nyao Scalper";
+    request.comment = "Multi-Entry Position by Nyao Scalper";
 
     // Calculate and set Take Profit (Standard)
     if(EnableTakeProfit)
@@ -1268,7 +1243,7 @@ void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
         }
     }
     
-    // Calculate closest stop loss price
+    // Calculate closest stop loss price (tighter SL for multi-entry)
     long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
     long freezeLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
     
@@ -1291,7 +1266,7 @@ void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
     // Fallback Check in case SL is invalid
     if(!IsSLValid((orderType == ORDER_TYPE_BUY ? POSITION_TYPE_BUY : POSITION_TYPE_SELL), request.sl))
     {
-        LogPrint("Pyramiding: Tightest Calculated SL invalid (", request.sl, "). Using Standard SL.");
+        LogPrint("Multi-Entry: Tightest Calculated SL invalid (", request.sl, "). Using Standard SL.");
         // Fallback to standard
         if(EnableStopLoss)
         {
@@ -1314,76 +1289,31 @@ void OpenPyramidingPosition(ENUM_ORDER_TYPE orderType)
     {
         if(result.retcode == TRADE_RETCODE_DONE)
         {   
-            LogPrint("Pyramiding Order Opened. Ticket: ", result.order, ", SL: ", request.sl);
+            LogPrint("Multi-Entry Order Opened. Ticket: ", result.order, ", SL: ", request.sl);
+            
+            // Update last entry price
+            if(orderType == ORDER_TYPE_BUY)
+            {
+                lastBuyPrice = price;
+            }
+            else
+            {
+                lastSellPrice = price;
+            }
         }
         else
         {
-            LogPrint("Pyramiding OrderSend failed. Retcode: ", result.retcode, " - ", result.comment);
+            LogPrint("Multi-Entry OrderSend failed. Retcode: ", result.retcode, " - ", result.comment);
         }
     }
     else
     {
-        LogPrint("Pyramiding OrderSend returned false. Error: ", GetLastError());
+        LogPrint("Multi-Entry OrderSend returned false. Error: ", GetLastError());
     }
 
     LockOrderSend(false);
 }
 
-// Open Hedge position
-ulong OpenHedgePosition(ENUM_ORDER_TYPE type, double volume)
-{   
-    if (!IsAllowedToOpenPosition()) return 0;
-
-    LockOrderSend(true);
-
-    MqlTradeRequest request = {};
-    MqlTradeResult result = {};
-
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double price = (type == ORDER_TYPE_BUY) ? ask : bid;
-    
-    request.action = TRADE_ACTION_DEAL;
-    request.symbol = _Symbol;
-    request.volume = volume;
-    request.type = type;
-    request.price = price;
-    request.deviation = 10;
-    request.magic = MagicNumber;
-    request.comment = "Hedge Position by Nyao Scalper";
-
-    // Add SL/TP like OpenPosition() does
-    if(EnableTakeProfit)
-    {
-        double tpPoints = ConvertToPoints(TPInputType, TPValue, volume);
-        
-        if(type == ORDER_TYPE_BUY)
-            request.tp = NormalizeDouble(price + (tpPoints * _Point), _Digits); 
-        else
-            request.tp = NormalizeDouble(price - (tpPoints * _Point), _Digits); 
-    }
-    
-    if(EnableStopLoss)
-    {
-        double slPoints = ConvertToPoints(SLInputType, SLValue, volume);
-        
-        if(type == ORDER_TYPE_BUY)
-            request.sl = NormalizeDouble(price - (slPoints * _Point), _Digits);
-        else
-            request.sl = NormalizeDouble(price + (slPoints * _Point), _Digits);
-    }
-    
-    if(!OrderSend(request, result))
-    {
-        LogPrint("Failed to open hedge position. Error: ", GetLastError());
-        LockOrderSend(false);
-        return 0;
-    }
-    
-    LogPrint("Hedge position opened: ", result.order);
-    LockOrderSend(false);
-    return result.order;
-}
 
 // Close Position
 bool ClosePosition(ulong ticket)
@@ -1617,31 +1547,6 @@ int CountOpenOrders()
         {
             if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
                PositionGetInteger(POSITION_MAGIC) == MagicNumber)
-            {
-                count++;
-            }
-        }
-    }
-    
-    return count;
-}
-
-// Helper to count profit open orders by position type (only profitable, non-hedged positions)
-int CountProfitOpenOrders(ENUM_POSITION_TYPE posType)
-{
-    int count = 0;
-    
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        ulong ticket = PositionGetTicket(i);
-
-        if(PositionSelectByTicket(ticket))
-        {
-            if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
-               PositionGetInteger(POSITION_MAGIC) == MagicNumber &&
-               PositionGetInteger(POSITION_TYPE) == posType &&
-               PositionGetDouble(POSITION_PROFIT) >= MinBreakEvenProfit &&
-               !IsPositionHedged(ticket))
             {
                 count++;
             }
@@ -2551,176 +2456,6 @@ void CheckLeverageChange()
         }
     }
 }
-
-// +------------------------------------------------------------------+
-// | Fast Market Detection & Protection                               |
-// +------------------------------------------------------------------+
-bool DetectFastMarketWithLosses()
-{
-    if(!EnableFastMarketProtection) return false;
-    
-    datetime currentTime = TimeCurrent();
-    
-    // Use cached result if still valid (cache for 30 seconds)
-    if(currentTime < cacheValidUntil)
-    {
-        // Just check if thresholds met using cached data
-        if(cachedLossCount >= FastMarketMinLosses && 
-           cachedTotalLoss >= FastMarketMinLossAmount &&
-           cachedPriceMovement >= FastMarketMovementPoints)
-        {
-            TriggerFastMarketPause();
-            return true;
-        }
-        return false;
-    }
-    
-    // Only do full check once per minute
-    if(currentTime - lastFastMarketCheck < 60) return false;
-    
-    lastFastMarketCheck = currentTime;
-    cacheValidUntil = currentTime + 30; // Cache valid for 30 seconds
-    
-    // OPTIMIZED: Check price movement first (fastest check)
-    cachedPriceMovement = GetPriceMovementInPeriod(FastMarketPeriodMinutes);
-    
-    // Early exit if movement not fast enough
-    if(cachedPriceMovement < FastMarketMovementPoints)
-    {
-        return false;
-    }
-    
-    // OPTIMIZED: Only count recent losses if price movement is fast
-    CountRecentLosses(FastMarketPeriodMinutes, cachedLossCount, cachedTotalLoss);
-    
-    // Check thresholds
-    if(cachedLossCount >= FastMarketMinLosses && cachedTotalLoss >= FastMarketMinLossAmount)
-    {
-        TriggerFastMarketPause();
-        return true;
-    }
-    
-    return false;
-}
-
-// Optimized price movement calculation
-double GetPriceMovementInPeriod(int minutes)
-{
-    datetime periodStart = TimeCurrent() - (minutes * 60);
-    
-    // Use iHighest/iLowest instead of loop (MUCH faster)
-    int bars = iBarShift(_Symbol, _Period, periodStart);
-    
-    if(bars <= 0) return 0;
-    
-    // Limit bars to prevent excessive processing
-    if(bars > 1000) bars = 1000;
-    
-    int highestBar = iHighest(_Symbol, _Period, MODE_HIGH, bars, 0);
-    int lowestBar = iLowest(_Symbol, _Period, MODE_LOW, bars, 0);
-    
-    double highestPrice = iHigh(_Symbol, _Period, highestBar);
-    double lowestPrice = iLow(_Symbol, _Period, lowestBar);
-    
-    return (highestPrice - lowestPrice) / _Point;
-}
-
-// Optimized loss counting - limit iterations
-void CountRecentLosses(int minutes, int &lossCount, double &totalLoss)
-{
-    lossCount = 0;
-    totalLoss = 0;
-    
-    datetime periodStart = TimeCurrent() - (minutes * 60);
-    datetime currentTime = TimeCurrent();
-    
-    if(!HistorySelect(periodStart, currentTime)) return;
-    
-    int totalDeals = HistoryDealsTotal();
-    
-    // Limit to last 100 deals to prevent lag
-    int startIndex = (totalDeals > 100) ? (totalDeals - 100) : 0;
-    
-    for(int i = totalDeals - 1; i >= startIndex; i--) // Reverse loop is faster for recent data
-    {
-        ulong ticket = HistoryDealGetTicket(i);
-        if(ticket <= 0) continue;
-        
-        // Quick filters first
-        if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
-        if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
-        
-        long entryType = HistoryDealGetInteger(ticket, DEAL_ENTRY);
-        if(entryType != DEAL_ENTRY_OUT && entryType != DEAL_ENTRY_INOUT) continue;
-        
-        // Check if within time period
-        datetime dealTime = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
-        if(dealTime < periodStart) continue;
-        
-        // Calculate P/L
-        double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
-        double swap = HistoryDealGetDouble(ticket, DEAL_SWAP);
-        double commission = HistoryDealGetDouble(ticket, DEAL_COMMISSION);
-        double totalPL = profit + swap + commission;
-        
-        if(totalPL < 0)
-        {
-            lossCount++;
-            totalLoss += MathAbs(totalPL);
-            
-            // Early exit if thresholds already met
-            if(lossCount >= FastMarketMinLosses && totalLoss >= FastMarketMinLossAmount)
-            {
-                return;
-            }
-        }
-    }
-}
-
-// Separate trigger function to avoid code duplication
-void TriggerFastMarketPause()
-{
-    // Only trigger once
-    static datetime lastTriggerTime = 0;
-    datetime currentTime = TimeCurrent();
-    
-    if(currentTime - lastTriggerTime < FastMarketPauseDuration * 60)
-    {
-        return; // Already triggered recently
-    }
-    
-    lastTriggerTime = currentTime;
-    
-    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-    
-    LogPrint("+-----------------------------------------+");
-    LogPrint("FAST MARKET WITH LOSSES DETECTED!");
-    LogPrint("Period: ", FastMarketPeriodMinutes, " minutes");
-    LogPrint("Price Movement: ", (int)cachedPriceMovement, " points");
-    LogPrint("Losing Orders: ", cachedLossCount);
-    LogPrint("Total Loss: $", cachedTotalLoss);
-    LogPrint("Triggering pause for ", FastMarketPauseDuration, " minutes...");
-    LogPrint("+-----------------------------------------+");
-    
-    if(EnableDiscordAlerts)
-    {
-        string alertMsg = "**Instrument:** " + _Symbol + "\n";
-        alertMsg += "**Period:** " + IntegerToString(FastMarketPeriodMinutes) + " min\n";
-        alertMsg += "**Price Movement:** " + DoubleToString(cachedPriceMovement, 0) + " pts\n";
-        alertMsg += "**Losing Orders:** " + IntegerToString(cachedLossCount) + "\n";
-        alertMsg += "**Total Loss:** $" + DoubleToString(cachedTotalLoss, 2) + "\n";
-        alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-        alertMsg += "**Pause:** " + IntegerToString(FastMarketPauseDuration) + " min";
-        
-        SendDiscordAlert("⚡ FAST MARKET PROTECTION!", alertMsg, 15158332);
-    }
-    
-    isPaused = true;
-    pauseStartTime = currentTime;
-    currentPauseDuration = FastMarketPauseDuration;
-    CloseAllPositions();
-}
-// +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
 // | Check and Send Daily Report                                      |
