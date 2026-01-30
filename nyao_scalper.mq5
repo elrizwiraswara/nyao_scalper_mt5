@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v17.0      |
+// |                                          Nyao Scalper v18.0      |
 // |             Candle Prediction with Smart Multi-Entry System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "17.0"
+#property version   "18.0"
 #property description "Auto Trading EA Robot with Smart Multi-Entry & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -27,7 +27,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v17.0"
+input group " Nyao Scalper v18.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -35,24 +35,21 @@ input group "+-----------------------------------------+"
 // +------------------------------------------------------------------+
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
-input group "🚦 Indicator Settings"
-input int Lookback = 10;                                  // Lookback Period for S/R Detection
-input double ZonePoints = 1000;                           // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
-
 input group "📝 Order Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
 input int MaxOpenOrders = 25;                             // Maximum Consecutive Open Orders
+input double ZonePoints = 1000;                           // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
 input double BuyDuplicateMultiplier  = 1.0;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 1.0;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
 input double MinBreakEvenProfit = 1.0;                    // Minimum Profit to Trigger Break-Even ($)
 input double ProfitThresholdMultiplier = 1.0;             // Threshold Multiplier for Min Break-Even Profit
-input double LossThresholdMultiplier = 5.0;               // Threshold Multiplier for Max Break-Even Loss
+input double LossThresholdMultiplier = 1.0;               // Threshold Multiplier for Max Break-Even Loss
 
 input group "🚀 Smart Multi-Entry Settings"
 input bool EnableMultiEntry = true;                       // Enable Multi-Entry on Strong Signals
-input int MaxMultiEntryPositions = 5;                     // Max Total Multi-Entry Positions per Direction
+input int MaxMultiEntryPositions = 10;                    // Max Total Multi-Entry Positions per Direction
 input double MultiEntryMinDistance = 5.0;                 // Min Distance Between Entries (Points)
 input int MultiEntryMinStrength = 5;                      // Min Signal Strength to Allow Multi-Entry (1-5)
 input double MultiEntryProfitThreshold = 1;               // Min Profit ($) of Winning Positions to Add
@@ -60,7 +57,7 @@ input int MultiEntryCooldownSeconds = 1;                  // Cooldown Between Mu
 
 input group "🛡️ Position Loss Management"
 input bool EnableLossManagement = true;                   // Enable Independent Loss Management
-input int MaxHoldingLossPositions = 5;                    // Max Losing Positions to Hold (0 = Close Immediately)
+input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
 input int StrongInvalidationThreshold = 5;                // Strong Invalidation Score Threshold (Close Immediately)
 input int MediumInvalidationThreshold = 1;                // Medium Invalidation Score (Can Hold If Recoverable)
 input double MaxRecoverableLoss = 5.0;                    // Max Loss ($) Considered Recoverable
@@ -93,7 +90,7 @@ input bool EnableTrailingStop = true;                     // Enable Trailing Sto
 input bool TSEnableBreakEvenLock = true;                  // Enable Break-Even Lock Point
 input bool TSOnProfitableOnly = true;                     // TS on Profitable Position Only
 input ENUM_INPUT_TYPE TSInputType = INPUT_DOLLAR;         // TS Input Type
-input double TSValue = 0.05;                              // TS Initial Value
+input double TSValue = 0.01;                              // TS Initial Value
 
 input group "📉 Stop Loss Settings"
 input bool EnableStopLoss = true;                         // Enable Stop Loss
@@ -107,7 +104,10 @@ input string DiscordWebhookURL = "";                      // Discord Webhook URL
 input bool EnableTradingHours = false;                    // Enable Trading Hours
 input string TradingStartTime = "00:00";                  // Trading Start Time (HH:MM)
 input string TradingEndTime = "23:59";                    // Trading End Time (HH:MM)
-input int MinutesBeforeClose = 60;                        // Minutes Before Market Close - Stop Opening New Positions
+input bool EnableReports = true;                          // Enable Trading Reports
+input int SendReportEveryHour = 60;                       // Send Report Every n Hours 
+input bool EnableMarketCloseFilter = true;                // Stop Opening New Positions Near Market Close Hour
+input int MinutesBeforeClose = 60;                        // Stop Opening Minutes Before Market Close
 input bool EnableNewsFilter = true;                       // Enable News Filter (Pause Trading During News)
 input int NewsMinutesBefore = 30;                         // Minutes Before News Event
 input int NewsMinutesAfter = 30;                          // Minutes After News Event
@@ -142,6 +142,11 @@ double lastSellPrice = 0;
 datetime lastReverseTime = 0;
 datetime startTime = 0;                                   // EA Start Time
 datetime lastDailyReportTime = 0;                         // Last time daily report was sent
+double lastReportEquity = 0;                              // Equity at last report
+
+// Pause Tracking
+int totalPauseCount = 0;                                  // Total number of times trading was paused
+double totalPauseDurationMinutes = 0;                     // Total duration of pauses in minutes
 
 // Multi-Entry tracking
 datetime lastMultiEntryTime = 0;
@@ -175,6 +180,22 @@ struct LosingPositionInfo
     double profit;
     int invalidationScore;
     bool isRecoverable;
+};
+
+// Trade Statistics Structure
+struct TradeStats
+{
+    int count;
+    int won;
+    int lost;
+    double profit;            // Total net profit
+    double loss;              // Total net loss (sum of negative profits)
+    double avgProfit;         // Average of winning trades
+    double maxProfit;         // Largest single profit
+    double minProfit;         // Smallest single profit
+    double avgLoss;           // Average of losing trades
+    double maxLoss;           // Largest single loss (most negative)
+    double minLoss;           // Smallest single loss (closest to 0)
 };
 
 // +------------------------------------------------------------------+
@@ -227,13 +248,16 @@ int OnInit()
     lastProcessedNewsEventID = 0;
     startTime = TimeCurrent();
     lastDailyReportTime = 0;
+    lastReportEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    totalPauseCount = 0;
+    totalPauseDurationMinutes = 0;
     symbolBaseCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
     symbolQuoteCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
     initialLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     isOrderSendLocked = false;
     
     LogPrint("+-----------------------------------------+");
-    LogPrint("Nyao Scalper v17.0 Initialized Successfully");
+    LogPrint("Nyao Scalper v18.0 Initialized Successfully");
     LogPrint("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -291,8 +315,8 @@ void OnTick()
     // Check for high-impact news events
     CheckHighImpactNews();
     
-    // Check for End of Day (23:59) Report (if Trading Hours Disabled or missed)
-    CheckDailyReport();
+    // Check for Trade Report
+    CheckTradeReport();
 
     // Check pause duration 
     if (isPaused)
@@ -663,7 +687,7 @@ void ManageMultiEntry()
                     LogPrint("Distance: ", distanceBuy, " points");
                     LogPrint("+-----------------------------------------+");
                     
-                    OpenMultiEntryPosition(ORDER_TYPE_BUY);
+                    OpenPosition(ORDER_TYPE_BUY);
                     lastMultiEntryTime = TimeCurrent();
                     return;
                 }
@@ -705,7 +729,7 @@ void ManageMultiEntry()
                     LogPrint("Distance: ", distanceSell, " points");
                     LogPrint("+-----------------------------------------+");
                     
-                    OpenMultiEntryPosition(ORDER_TYPE_SELL);
+                    OpenPosition(ORDER_TYPE_SELL);
                     lastMultiEntryTime = TimeCurrent();
                     return;
                 }
@@ -1202,118 +1226,6 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
 
     LockOrderSend(false);
 }
-
-// Open Multi-Entry Position (with tight SL for additional entries)
-void OpenMultiEntryPosition(ENUM_ORDER_TYPE orderType)
-{   
-    if (!IsAllowedToOpenPosition()) return;
-
-    LockOrderSend(true);
-
-    MqlTradeRequest request = {};
-    MqlTradeResult result = {};
-    
-    double currentLot = CalculateDynamicLotSize();
-    
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double price = (orderType == ORDER_TYPE_BUY) ? ask : bid;
-    
-    request.action = TRADE_ACTION_DEAL;
-    request.symbol = _Symbol;
-    request.volume = currentLot;
-    request.type = orderType;
-    request.price = price;
-    request.deviation = 10;
-    request.magic = MagicNumber;
-    request.comment = "Multi-Entry Position by Nyao Scalper";
-
-    // Calculate and set Take Profit (Standard)
-    if(EnableTakeProfit)
-    {
-        double tpPoints = ConvertToPoints(TPInputType, TPValue, currentLot);
-        
-        if(orderType == ORDER_TYPE_BUY)
-        {
-            request.tp = NormalizeDouble(price + (tpPoints * _Point), _Digits); 
-        }
-        else
-        {
-            request.tp = NormalizeDouble(price - (tpPoints * _Point), _Digits); 
-        }
-    }
-    
-    // Calculate closest stop loss price (tighter SL for multi-entry)
-    long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-    long freezeLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-    
-    // Minimum distance in points required by broker
-    long minDistancePoints = MathMax(stopLevel, freezeLevel);
-
-    // Add trailing distance to minimum distance
-    double trailingDistancePoints = ConvertToPoints(TSInputType, TSValue, currentLot);
-    double minDistancePrice = (minDistancePoints + trailingDistancePoints) * _Point; 
-    
-    if(orderType == ORDER_TYPE_BUY)
-    {
-        request.sl = NormalizeDouble(price - minDistancePrice, _Digits);
-    }
-    else
-    {
-        request.sl = NormalizeDouble(price + minDistancePrice, _Digits);
-    }
-    
-    // Fallback Check in case SL is invalid
-    if(!IsSLValid((orderType == ORDER_TYPE_BUY ? POSITION_TYPE_BUY : POSITION_TYPE_SELL), request.sl))
-    {
-        LogPrint("Multi-Entry: Tightest Calculated SL invalid (", request.sl, "). Using Standard SL.");
-        // Fallback to standard
-        if(EnableStopLoss)
-        {
-            double slPoints = ConvertToPoints(SLInputType, SLValue, currentLot);
-
-            if(orderType == ORDER_TYPE_BUY)
-                 request.sl = NormalizeDouble(price - (slPoints * _Point), _Digits);
-            else
-                 request.sl = NormalizeDouble(price + (slPoints * _Point), _Digits);
-        }
-        else
-        {
-             request.sl = 0; // No SL
-        }
-    }
-    
-    bool orderResult = OrderSend(request, result);
-    
-    if(orderResult)
-    {
-        if(result.retcode == TRADE_RETCODE_DONE)
-        {   
-            LogPrint("Multi-Entry Order Opened. Ticket: ", result.order, ", SL: ", request.sl);
-            
-            // Update last entry price
-            if(orderType == ORDER_TYPE_BUY)
-            {
-                lastBuyPrice = price;
-            }
-            else
-            {
-                lastSellPrice = price;
-            }
-        }
-        else
-        {
-            LogPrint("Multi-Entry OrderSend failed. Retcode: ", result.retcode, " - ", result.comment);
-        }
-    }
-    else
-    {
-        LogPrint("Multi-Entry OrderSend returned false. Error: ", GetLastError());
-    }
-
-    LockOrderSend(false);
-}
-
 
 // Close Position
 bool ClosePosition(ulong ticket)
@@ -2126,6 +2038,10 @@ void CheckEquityDrawdawn()
             if(calculatedDuration > INT_MAX) calculatedDuration = INT_MAX;
             currentPauseDuration = (int)MathMin(calculatedDuration, MaxPauseMinutes > 0 ? MaxPauseMinutes : INT_MAX);
             
+            // Update Pause Stats
+            totalPauseCount++;
+            totalPauseDurationMinutes += currentPauseDuration;
+            
             // Calculate drop peek equity
             double equityDrop = lastPeakEquity - currentEquity;
             double equityDropPercent = (equityDrop / lastPeakEquity) * 100.0;
@@ -2215,6 +2131,10 @@ void CheckHighImpactNews()
         {
             currentPauseDuration = NewsMinutesAfter; // Fallback
         }
+        
+        // Update Pause Stats
+        totalPauseCount++;
+        totalPauseDurationMinutes += currentPauseDuration;
         
         double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
         
@@ -2312,7 +2232,7 @@ void CheckTradingHours()
             SendDiscordAlert("🔴 TRADING HOURS ENDED!", alertMsg, 15158332); // Red color
             
             // Send Daily Report
-            SendDailyReport();
+            SendTradeReport();
         }
     }
 }
@@ -2320,7 +2240,7 @@ void CheckTradingHours()
 // Check is near market close time
 bool IsNearMarketClose()
 {
-    if(MinutesBeforeClose <= 0) return false;
+    if(!EnableMarketCloseFilter || MinutesBeforeClose <= 0) return false;
     
     MqlDateTime dt;
     TimeCurrent(dt);
@@ -2458,14 +2378,32 @@ void CheckLeverageChange()
 }
 
 // +------------------------------------------------------------------+
-// | Check and Send Daily Report                                      |
+// | Check and Send Trade Report                                      |
 // +------------------------------------------------------------------+
-void CheckDailyReport()
-{
+void CheckTradeReport()
+{   
+    if (!EnableReports) return;
+    
     datetime serverTime = TimeTradeServer();
     MqlDateTime dt;
     TimeToStruct(serverTime, dt);
     
+    bool sendReport = false;
+    
+    // Check for hourly report
+    if (SendReportEveryHour > 0)
+    {
+        if (lastDailyReportTime == 0)
+        {
+            lastDailyReportTime = serverTime;
+        }
+        else if (serverTime - lastDailyReportTime >= SendReportEveryHour * 3600)
+        {
+            sendReport = true;
+        }
+    }
+    
+    // Check for End of Day (23:59) Report
     if(!EnableTradingHours && dt.hour == 23 && dt.min == 59)
     {
         // Check if report already sent today (to avoid spamming in the last minute)
@@ -2475,101 +2413,170 @@ void CheckDailyReport()
         
         if(lastReportDt.day != dt.day)
         {
-            SendDailyReport();
+            sendReport = true;
         }
+    }
+    
+    if (sendReport)
+    {
+        SendTradeReport();
     }
 }
 
-// Get Daily Statistics
-void GetDailyStats(int& dailyTrades, int& totalTrades, double& dailyProfit, double& totalProfit, double& dailyLoss, double& totalLoss) 
+// Get Trade Statistics
+void GetTradeStats(TradeStats& daily, TradeStats& allTime) 
 {
-    dailyTrades = 0;
-    totalTrades = 0;
-    dailyProfit = 0;
-    totalProfit = 0;
-    dailyLoss = 0;
-    totalLoss = 0;
+    // Initialize
+    daily.count = 0; daily.won = 0; daily.lost = 0;
+    daily.profit = 0; daily.loss = 0;
+    daily.maxProfit = 0; daily.minProfit = DBL_MAX;
+    daily.maxLoss = 0; daily.minLoss = -DBL_MAX; // maxLoss is most negative, minLoss is closest to 0 (-0.01)
+
+    allTime.count = 0; allTime.won = 0; allTime.lost = 0;
+    allTime.profit = 0; allTime.loss = 0;
+    allTime.maxProfit = 0; allTime.minProfit = DBL_MAX;
+    allTime.maxLoss = 0; allTime.minLoss = -DBL_MAX;
 
     datetime now = TimeCurrent();
-    datetime startOfDay = iTime(_Symbol, PERIOD_D1, 0); // Start of current day
+    
+    // Trade Stats Session Start Time
+    // Start from last report generated, or from start of bot started if no last report
+    datetime sessionStartTime = (lastDailyReportTime > 0) ? lastDailyReportTime : startTime;
 
-    // Select history
     if(HistorySelect(0, now)) {
         int deals = HistoryDealsTotal();
         for(int i = 0; i < deals; i++) {
             ulong ticket = HistoryDealGetTicket(i);
             long entryType = HistoryDealGetInteger(ticket, DEAL_ENTRY);
             
-            // Filter by symbol and magic number
             if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol || 
                HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
 
-            // We only care about exits (deals that finalize profit/loss)
-            // DEAL_ENTRY_OUT or DEAL_ENTRY_INOUT for reversing? 
-            // Usually profit is realized on OUT or INOUT.
-            // Check profit != 0 to be sure, or just sum profit.
-            
             double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT) + 
                             HistoryDealGetDouble(ticket, DEAL_SWAP) + 
                             HistoryDealGetDouble(ticket, DEAL_COMMISSION);
 
-            datetime dealTime = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
-            
-            // Total Stats
+            // Filter for exits
             if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT) {
-                totalTrades++;
-                totalProfit += profit; // Net profit
-                if(profit < 0) totalLoss += profit;
-                
-                // Daily Stats
-                if(dealTime >= startOfDay) {
-                    dailyTrades++;
-                    dailyProfit += profit;
-                    if(profit < 0) dailyLoss += profit;
+                // ALL TIME STATS
+                allTime.count++;
+                if(profit >= 0) {
+                    allTime.won++;
+                    allTime.profit += profit;
+                    if(profit > allTime.maxProfit) allTime.maxProfit = profit;
+                    if(profit < allTime.minProfit) allTime.minProfit = profit;
+                } else {
+                    allTime.lost++;
+                    allTime.loss += profit;
+                    // Loss is negative. Max loss = most negative (smallest value). Min loss = least negative (largest value).
+                    // "Largest Loss" -> -100. "Smallest Loss" -> -1.
+                    if(profit < allTime.maxLoss) allTime.maxLoss = profit; // e.g. -100 < 0
+                    if(profit > allTime.minLoss) allTime.minLoss = profit; // e.g. -1 > -DBL_MAX
+                }
+
+                // SESSION STATS (Since Last Report or Start)
+                datetime dealTime = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+                if(dealTime >= sessionStartTime) {
+                    daily.count++;
+                    if(profit >= 0) {
+                        daily.won++;
+                        daily.profit += profit;
+                        if(profit > daily.maxProfit) daily.maxProfit = profit;
+                        if(profit < daily.minProfit) daily.minProfit = profit;
+                    } else {
+                        daily.lost++;
+                        daily.loss += profit;
+                        if(profit < daily.maxLoss) daily.maxLoss = profit;
+                        if(profit > daily.minLoss) daily.minLoss = profit;
+                    }
                 }
             }
         }
     }
+    
+    // Calculate Averages and fix Min/Max initialization if no trades
+    // All Time
+    if(allTime.won > 0) allTime.avgProfit = allTime.profit / allTime.won; else { allTime.avgProfit = 0; allTime.minProfit = 0; }
+    if(allTime.lost > 0) allTime.avgLoss = allTime.loss / allTime.lost; else { allTime.avgLoss = 0; allTime.minLoss = 0; allTime.maxLoss = 0; }
+    
+    // Daily
+    if(daily.won > 0) daily.avgProfit = daily.profit / daily.won; else { daily.avgProfit = 0; daily.minProfit = 0; }
+    if(daily.lost > 0) daily.avgLoss = daily.loss / daily.lost; else { daily.avgLoss = 0; daily.minLoss = 0; daily.maxLoss = 0; }
 }
 
 // Send Daily Report
-void SendDailyReport() 
+void SendTradeReport() 
 {
     if(!EnableDiscordAlerts) return;
 
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-    int dailyTrades, totalTrades;
-    double dailyProfit, totalProfit, dailyLoss, totalLoss;
+    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
     
-    GetDailyStats(dailyTrades, totalTrades, dailyProfit, totalProfit, dailyLoss, totalLoss);
+    TradeStats dailyStats;
+    TradeStats allTimeStats;
+    GetTradeStats(dailyStats, allTimeStats);
+    
+    // Calculate Percentages
+    double profitPercent = (balance > 0) ? (allTimeStats.profit / balance) * 100.0 : 0.0;
+    double lossPercent = (balance > 0) ? (allTimeStats.loss / balance) * 100.0 : 0.0;
     
     // Duration
     long durationSeconds = TimeCurrent() - startTime;
     int days = (int)(durationSeconds / 86400);
     int hours = (int)((durationSeconds % 86400) / 3600);
     int minutes = (int)((durationSeconds % 3600) / 60);
-    
     string durationStr = "";
     if(days > 0) durationStr += IntegerToString(days) + "d ";
     if(hours > 0) durationStr += IntegerToString(hours) + "h ";
     durationStr += IntegerToString(minutes) + "m";
     
+    // Report Interval Duration
+    long reportInterval = (lastDailyReportTime > 0) ? (TimeCurrent() - lastDailyReportTime) : durationSeconds;
+    int rHours = (int)(reportInterval / 3600);
+    int rMinutes = (int)((reportInterval % 3600) / 60);
+    string reportDurationStr = "";
+    if(rHours > 0) reportDurationStr += IntegerToString(rHours) + "h ";
+    reportDurationStr += IntegerToString(rMinutes) + "m";
+
     string alertMsg = "**Instrument:** " + _Symbol + "\n";
     alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
     alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
     alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+    alertMsg += "**Previous Report Equity:** $" + DoubleToString(lastReportEquity, 2) + "\n";
     alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-    alertMsg += "**Daily Trades:** " + IntegerToString(dailyTrades) + "\n";
-    alertMsg += "**Total Trades:** " + IntegerToString(totalTrades) + "\n";
-    alertMsg += "**Daily Profit:** $" + DoubleToString(dailyProfit, 2) + "\n";
-    alertMsg += "**Total Profit:** $" + DoubleToString(totalProfit, 2) + "\n";
-    alertMsg += "**Daily Loss:** $" + DoubleToString(dailyLoss, 2) + "\n";
-    alertMsg += "**Total Loss:** $" + DoubleToString(totalLoss, 2) + "\n";
-    alertMsg += "**Running Duration:** " + durationStr;
+    alertMsg += "**Report Generated For:** " + reportDurationStr + "\n";
+    alertMsg += "**Run Duration:** " + durationStr + "\n\n";
     
-    SendDiscordAlert("📊 DAILY TRADE REPORT", alertMsg, 16776960); // Yellow/Gold color
+    alertMsg += "**TRADES (THIS SESSION)**\n";
+    alertMsg += "**Trades:** " + IntegerToString(dailyStats.count) + "\n";
+    alertMsg += "**Won:** " + IntegerToString(dailyStats.won) + "\n";
+    alertMsg += "**Lost:** " + IntegerToString(dailyStats.lost) + "\n";
+    alertMsg += "**Profit:** $" + DoubleToString(dailyStats.profit, 2) + "\n";
+    alertMsg += "**Loss:** $" + DoubleToString(dailyStats.loss, 2) + "\n\n";
+    
+    alertMsg += "**ALL TIME TRADES**\n";
+    alertMsg += "**All Time Trades:** " + IntegerToString(allTimeStats.count) + "\n";
+    alertMsg += "**All Time Won:** " + IntegerToString(allTimeStats.won) + "\n";
+    alertMsg += "**All Time Lost:** " + IntegerToString(allTimeStats.lost) + "\n";
+    alertMsg += "**All Time Profit:** $" + DoubleToString(allTimeStats.profit, 2) + " (" + DoubleToString(profitPercent, 2) + "%)\n";
+    alertMsg += "**All Time Loss:** $" + DoubleToString(allTimeStats.loss, 2) + " (" + DoubleToString(lossPercent, 2) + "%)\n";
+    
+    alertMsg += "**Average Profit:** $" + DoubleToString(allTimeStats.avgProfit, 2) + "\n";
+    alertMsg += "**Largest Profit:** $" + DoubleToString(allTimeStats.maxProfit, 2) + "\n";
+    alertMsg += "**Smallest Profit:** $" + DoubleToString(allTimeStats.minProfit, 2) + "\n";
+    
+    alertMsg += "**Average Loss:** $" + DoubleToString(allTimeStats.avgLoss, 2) + "\n";
+    alertMsg += "**Largest Loss:** $" + DoubleToString(allTimeStats.maxLoss, 2) + "\n";
+    alertMsg += "**Smallest Loss:** $" + DoubleToString(allTimeStats.minLoss, 2) + "\n\n";
+    
+    alertMsg += "**PAUSE STATISTICS**\n";
+    alertMsg += "**Pauses Triggered:** " + IntegerToString(totalPauseCount) + "\n";
+    alertMsg += "**Total Paused Duration:** " + DoubleToString(totalPauseDurationMinutes, 0) + " minutes";
+    
+    SendDiscordAlert("📊 TRADE REPORT", alertMsg, 16776960); // Yellow/Gold color
     
     lastDailyReportTime = TimeCurrent();
+    lastReportEquity = currentEquity;
 }
 // +------------------------------------------------------------------+
 
@@ -2605,7 +2612,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v16.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v18.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
