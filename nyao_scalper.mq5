@@ -60,7 +60,7 @@ input bool EnableLossManagement = true;                   // Enable Independent 
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
 input int StrongInvalidationThreshold = 5;                // Strong Invalidation Score Threshold (Close Immediately)
 input int MediumInvalidationThreshold = 1;                // Medium Invalidation Score (Can Hold If Recoverable)
-input double MaxRecoverableLoss = 5.0;                    // Max Loss ($) Considered Recoverable
+input double MaxRecoverableLoss = 15.0;                   // Max Loss ($) Considered Recoverable
 input bool CloseFromMostLosing = true;                    // Close from Most Losing Position First
 
 input group "🧮 Dynamic Lot Sizing Settings"
@@ -90,7 +90,7 @@ input bool EnableTrailingStop = true;                     // Enable Trailing Sto
 input bool TSEnableBreakEvenLock = true;                  // Enable Break-Even Lock Point
 input bool TSOnProfitableOnly = true;                     // TS on Profitable Position Only
 input ENUM_INPUT_TYPE TSInputType = INPUT_DOLLAR;         // TS Input Type
-input double TSValue = 0.01;                              // TS Initial Value
+input double TSValue = 0.05;                              // TS Initial Value
 
 input group "📉 Stop Loss Settings"
 input bool EnableStopLoss = true;                         // Enable Stop Loss
@@ -105,7 +105,7 @@ input bool EnableTradingHours = false;                    // Enable Trading Hour
 input string TradingStartTime = "00:00";                  // Trading Start Time (HH:MM)
 input string TradingEndTime = "23:59";                    // Trading End Time (HH:MM)
 input bool EnableReports = true;                          // Enable Trading Reports
-input int SendReportEveryHour = 60;                       // Send Report Every n Hours 
+input int SendReportEveryHour = 1;                        // Send Report Every n Hours 
 input bool EnableMarketCloseFilter = true;                // Stop Opening New Positions Near Market Close Hour
 input int MinutesBeforeClose = 60;                        // Stop Opening Minutes Before Market Close
 input bool EnableNewsFilter = true;                       // Enable News Filter (Pause Trading During News)
@@ -315,9 +315,6 @@ void OnTick()
     // Check for high-impact news events
     CheckHighImpactNews();
     
-    // Check for Trade Report
-    CheckTradeReport();
-
     // Check pause duration 
     if (isPaused)
     {
@@ -366,6 +363,9 @@ void OnTick()
 
     // Check for trading signals
     CheckForTradingSignal();
+
+    // Check for Trade Report
+    CheckTradeReport();
 }
 
 // +------------------------------------------------------------------+
