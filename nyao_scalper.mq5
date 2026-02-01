@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v18.0      |
+// |                                          Nyao Scalper v19.0      |
 // |             Candle Prediction with Smart Multi-Entry System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "18.0"
+#property version   "19.0"
 #property description "Auto Trading EA Robot with Smart Multi-Entry & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -27,7 +27,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v18.0"
+input group " Nyao Scalper v19.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -128,13 +128,15 @@ bool isPaused = false;                                    // Trading pause state
 int currentPauseDuration = 0;                             // Current pause duration in minutes
 datetime pauseStartTime = 0;                              // Pause start time
 bool isOutsideTradingHours = false;                       // Flag when outside trading hours
-bool isLeverageDiffFromInitial = false;                   // Flag if leverage has changed
+bool isLeverageDiffFromInitial = false;                   // Flag for leverage changed
+bool isNearMarketClose = false;                           // Flag for near market close time
 ulong lastProcessedNewsEventID = 0;                       // Last processed news event ID
 string symbolBaseCurrency = "";                           // Base currency of the symbol
 string symbolQuoteCurrency = "";                          // Quote currency of the symbol
 long initialLeverage = 0;                                 // Initial Account Leverage
 bool isOrderSendLocked = false;                           // Flag for locking OrderSend execution
 bool marketCloseAlertSent = false;                        // Flag for near market close time
+bool algoTradingStatus = false;                           // Flag for algo trading status
 
 // Duplicate Signal Filter Variables
 double lastBuyPrice = 0;
@@ -255,9 +257,10 @@ int OnInit()
     symbolQuoteCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
     initialLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     isOrderSendLocked = false;
+    algoTradingStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
     LogPrint("+-----------------------------------------+");
-    LogPrint("Nyao Scalper v18.0 Initialized Successfully");
+    LogPrint("Nyao Scalper v19.0 Initialized Successfully");
     LogPrint("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -277,6 +280,9 @@ void OnDeinit(const int reason)
 // | Expert Tick Function                                             |
 void OnTick()
 {   
+    // Check Algo Trading status
+    CheckAlgoTradingStatus();
+
     // Check and update peak equity
     CheckPeakEquity();
     
@@ -304,7 +310,10 @@ void OnTick()
     // Check for leverage changes
     CheckLeverageChange();
 
-    if (isOutsideTradingHours || isLeverageDiffFromInitial)
+    // Check for market close time
+    CheckMarketClose();
+
+    if (isOutsideTradingHours || isLeverageDiffFromInitial || isNearMarketClose)
     {   
         // Don't open new positions, but continue managing existing ones
         ManagePositions();
@@ -351,7 +360,7 @@ void OnTick()
                 alertMsg += "**Pause Duration:** " + IntegerToString(currentPauseDuration) + " minutes\n";
                 alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
                 alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "**Status:** Monitoring for new trading signals";
+                alertMsg += "**Action:** Trading Resumed";
                 
                 SendDiscordAlert("▶️ TRADING RESUMED!", alertMsg, 3066993); // Blue color
             }
@@ -1373,11 +1382,11 @@ bool IsAllowedToOpenPosition()
         return false;
     }
     
-    if(IsNearMarketClose())
+    if(isNearMarketClose)
     {
         LogPrint("+-----------------------------------------+");
         LogPrint("OPEN ORDER BLOCKED!");
-        LogPrint("Market closing soon! Not opening new positions.");
+        LogPrint("Market closing soon! No opening new positions.");
         LogPrint("+-----------------------------------------+");
         return false;
     }
@@ -1930,7 +1939,7 @@ void CheckTargetEquity()
             alertMsg += "**Target Equity:** $" + DoubleToString(TargetEquity, 2) + "\n";
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
             alertMsg += "**Profit:** $" + DoubleToString(TargetEquity - initialBalance, 2) + "\n";
-            alertMsg += "**Status:** All positions closed, trading stopped";
+            alertMsg += "**Action:** All Positions Closed, Trading Stopped!";
             
             SendDiscordAlert("🎯 TARGET EQUITY REACHED!", alertMsg, 5763719); // Green color
         }
@@ -1967,7 +1976,7 @@ void CheckMinTradeableEquity()
             alertMsg += "**Minimum Equity:** $" + DoubleToString(MinimumEquity, 2) + "\n";
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
             alertMsg += "**Loss:** $" + DoubleToString(initialBalance - currentEquity, 2) + "\n";
-            alertMsg += "**Status:** All positions closed, trading stopped";
+            alertMsg += "**Action:** All Positions Closed, Trading Stopped!";
             
             SendDiscordAlert("🔴 MINIMUM TRADEABLE EQUITY REACHED", alertMsg, 15158332); // Red color
         }
@@ -2020,7 +2029,7 @@ void CheckEquityDrawdawn()
                     alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
                     alertMsg += "**Peak Equity:** $" + DoubleToString(lastPeakEquity, 2) + "\n";
                     alertMsg += "**Triggers Used:** " + IntegerToString(minEquityTriggerCount) + " / " + IntegerToString(MaxMinEquityTriggers) + "\n";
-                    alertMsg += "**Status:** All positions closed, trading stopped";
+                    alertMsg += "**Action:** All Positions Closed, Trading Stopped!";
                     
                     SendDiscordAlert("🔴 MAX MIN EQUITY TRIGGERS EXCEEDED", alertMsg, 15158332); // Red color
                 }
@@ -2059,7 +2068,6 @@ void CheckEquityDrawdawn()
             LogPrint("Old Peak Equity: $", oldPeakEquity);
             LogPrint("New Peak Equity (Balance): $", lastPeakEquity);
             LogPrint("Min Allowed (", MinEquityPercent, "%): $", minAllowedEquity);
-            LogPrint("Closing unprofitable positions...");
             LogPrint("Trading PAUSED for ", currentPauseDuration, " minutes");
             LogPrint("Resume Time: ", TimeToString(pauseStartTime + currentPauseDuration * 60));
             LogPrint("+-----------------------------------------+");
@@ -2078,7 +2086,7 @@ void CheckEquityDrawdawn()
                 alertMsg += "**Min Allowed (" + DoubleToString(MinEquityPercent, 0) + "%):** $" + DoubleToString(minAllowedEquity, 2) + "\n";
                 alertMsg += "**Trading Paused:** " + IntegerToString(currentPauseDuration) + " minutes\n";
                 alertMsg += "**Resume Time:** " + TimeToString(pauseStartTime + currentPauseDuration * 60) + "\n";
-                alertMsg += "**Action:** Trading Paused & Closing unprofitable positions";
+                alertMsg += "**Action:** Trading Paused";
                 
                 SendDiscordAlert("⚠️ MINIMUM EQUITY PROTECTION TRIGGERED", alertMsg, 16705372); // Yellow color
             }
@@ -2160,7 +2168,7 @@ void CheckHighImpactNews()
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
             alertMsg += "**Trading Paused:** " + IntegerToString(currentPauseDuration) + " minutes\n";
             alertMsg += "**Resume Time:** " + TimeToString(pauseStartTime + currentPauseDuration * 60) + "\n";
-            alertMsg += "**Action:** Trading paused during news period & closing unprofitable positions";
+            alertMsg += "**Action:** Trading Paused";
             
             SendDiscordAlert("⚠️ HIGH-IMPACT NEWS DETECTED!", alertMsg, 16705372); // Yellow color
         }
@@ -2199,7 +2207,7 @@ void CheckTradingHours()
             alertMsg += "**Trading Period:** " + TradingStartTime + " - " + TradingEndTime + "\n";
             alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-            alertMsg += "**Status:** Now accepting new trading signals";
+            alertMsg += "**Action:** Trading Started";
             
             SendDiscordAlert("🟢 TRADING HOURS STARTED!", alertMsg, 5763719); // Green color
         }
@@ -2227,7 +2235,7 @@ void CheckTradingHours()
             alertMsg += "**Trading Period:** " + TradingStartTime + " - " + TradingEndTime + "\n";
             alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-            alertMsg += "⏸**Status:** No new positions until next trading session";
+            alertMsg += "**Action:** Trading Stopped";
             
             SendDiscordAlert("🔴 TRADING HOURS ENDED!", alertMsg, 15158332); // Red color
             
@@ -2237,10 +2245,12 @@ void CheckTradingHours()
     }
 }
 
-// Check is near market close time
-bool IsNearMarketClose()
+// +------------------------------------------------------------------+
+// | Check Market Close Time                                          |
+// +------------------------------------------------------------------+
+void CheckMarketClose()
 {
-    if(!EnableMarketCloseFilter || MinutesBeforeClose <= 0) return false;
+    if(!EnableMarketCloseFilter || MinutesBeforeClose <= 0) return;
     
     MqlDateTime dt;
     TimeCurrent(dt);
@@ -2268,24 +2278,27 @@ bool IsNearMarketClose()
                 alertMsg += "**Market Close Time:** " + TimeToString(to, TIME_DATE|TIME_MINUTES) + "\n";
                 alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
                 alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-                alertMsg += "**Status:** Stopped opening new positions";
+                alertMsg += "**Action:** Stopped Opening New Positions";
                 
                 SendDiscordAlert("⏰ MARKET CLOSING SOON", alertMsg, 16776960); // Yellow
                 marketCloseAlertSent = true;
             }
             
             LogPrint("Market closes in ", minutesUntilClose, " minutes. Not opening new positions.");
-            return true;
+            isNearMarketClose = true;
+            return; // Already in warning window, no need to check further
         }
         
-        // Reset alert flag when outside warning period
+        // Reset when outside warning period
         if(minutesUntilClose > MinutesBeforeClose)
         {
-            marketCloseAlertSent = false;
+            isNearMarketClose = false;
+            marketCloseAlertSent = false; // Also reset alert flag for next session
+            return;
         }
         
-        // Check second session if exists
-        if(currentTime > to)
+        // Current time is past session 0 close — check session 1
+        if(currentTime >= to)
         {
             datetime from2, to2;
             if(SymbolInfoSessionQuote(_Symbol, dayOfWeek, 1, from2, to2))
@@ -2296,13 +2309,21 @@ bool IsNearMarketClose()
                 if(minutesUntilClose > 0 && minutesUntilClose <= MinutesBeforeClose)
                 {
                     LogPrint("Market closes in ", minutesUntilClose, " minutes. Not opening new positions.");
-                    return true;
+                    isNearMarketClose = true;
+                    return;
+                }
+                
+                if(minutesUntilClose > MinutesBeforeClose)
+                {
+                    isNearMarketClose = false;
+                    return;
                 }
             }
         }
     }
     
-    return false;
+    // No valid session found or market is closed
+    isNearMarketClose = false;
 }
 // +------------------------------------------------------------------+
 
@@ -2341,7 +2362,7 @@ void CheckLeverageChange()
             alertMsg += "**Current Leverage:** 1:" + IntegerToString((int)currentLeverage) + "\n";
             alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-            alertMsg += "**Status:** Trading paused until leverage returns to initial value";
+            alertMsg += "**Action:** Trading Paused";
             
             SendDiscordAlert("⚠️ LEVERAGE CHANGE - TRADING PAUSED", alertMsg, 16705372); // Orange color
         }
@@ -2370,7 +2391,7 @@ void CheckLeverageChange()
             alertMsg += "**Leverage:** 1:" + IntegerToString((int)currentLeverage) + "\n";
             alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
             alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-            alertMsg += "**Status:** Trading resumed - monitoring for new signals";
+            alertMsg += "**Action:** Trading Resumed";
             
             SendDiscordAlert("▶️ LEVERAGE RESTORED - TRADING RESUMED", alertMsg, 3066993); // Blue color
         }
@@ -2511,12 +2532,21 @@ void SendTradeReport()
 
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double deposit = initialBalance;
     
     TradeStats dailyStats;
     TradeStats allTimeStats;
     GetTradeStats(dailyStats, allTimeStats);
     
-    // Calculate Percentages
+    // Session net profit
+    double sessionNetProfit = dailyStats.profit + dailyStats.loss; // loss is already negative
+    double sessionNetPercent = (balance > 0) ? (sessionNetProfit / balance) * 100.0 : 0.0;
+    
+    // All time net profit
+    double allTimeNetProfit = allTimeStats.profit + allTimeStats.loss;
+    double allTimeNetPercent = (deposit > 0) ? (allTimeNetProfit / deposit) * 100.0 : 0.0;
+    
+    // All time profit/loss percentages (kept for existing lines)
     double profitPercent = (balance > 0) ? (allTimeStats.profit / balance) * 100.0 : 0.0;
     double lossPercent = (balance > 0) ? (allTimeStats.loss / balance) * 100.0 : 0.0;
     
@@ -2544,34 +2574,34 @@ void SendTradeReport()
     alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
     alertMsg += "**Previous Report Equity:** $" + DoubleToString(lastReportEquity, 2) + "\n";
     alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-    alertMsg += "**Report Generated For:** " + reportDurationStr + "\n";
-    alertMsg += "**Run Duration:** " + durationStr + "\n\n";
+    alertMsg += "**Initial Balance:** $" + DoubleToString(deposit, 2) + "\n";
+    alertMsg += "**Current Balance:** $" + DoubleToString(balance, 2) + "\n\n";
     
-    alertMsg += "**TRADES (THIS SESSION)**\n";
     alertMsg += "**Trades:** " + IntegerToString(dailyStats.count) + "\n";
     alertMsg += "**Won:** " + IntegerToString(dailyStats.won) + "\n";
     alertMsg += "**Lost:** " + IntegerToString(dailyStats.lost) + "\n";
     alertMsg += "**Profit:** $" + DoubleToString(dailyStats.profit, 2) + "\n";
-    alertMsg += "**Loss:** $" + DoubleToString(dailyStats.loss, 2) + "\n\n";
+    alertMsg += "**Loss:** $" + DoubleToString(dailyStats.loss, 2) + "\n";
+    alertMsg += "**Net Profit:** $" + DoubleToString(sessionNetProfit, 2) + " (" + DoubleToString(sessionNetPercent, 2) + "%)\n\n";
     
-    alertMsg += "**ALL TIME TRADES**\n";
     alertMsg += "**All Time Trades:** " + IntegerToString(allTimeStats.count) + "\n";
     alertMsg += "**All Time Won:** " + IntegerToString(allTimeStats.won) + "\n";
     alertMsg += "**All Time Lost:** " + IntegerToString(allTimeStats.lost) + "\n";
     alertMsg += "**All Time Profit:** $" + DoubleToString(allTimeStats.profit, 2) + " (" + DoubleToString(profitPercent, 2) + "%)\n";
     alertMsg += "**All Time Loss:** $" + DoubleToString(allTimeStats.loss, 2) + " (" + DoubleToString(lossPercent, 2) + "%)\n";
+    alertMsg += "**All Time Net Profit:** $" + DoubleToString(allTimeNetProfit, 2) + " (" + DoubleToString(allTimeNetPercent, 2) + "%)\n\n";
     
     alertMsg += "**Average Profit:** $" + DoubleToString(allTimeStats.avgProfit, 2) + "\n";
     alertMsg += "**Largest Profit:** $" + DoubleToString(allTimeStats.maxProfit, 2) + "\n";
     alertMsg += "**Smallest Profit:** $" + DoubleToString(allTimeStats.minProfit, 2) + "\n";
-    
     alertMsg += "**Average Loss:** $" + DoubleToString(allTimeStats.avgLoss, 2) + "\n";
     alertMsg += "**Largest Loss:** $" + DoubleToString(allTimeStats.maxLoss, 2) + "\n";
     alertMsg += "**Smallest Loss:** $" + DoubleToString(allTimeStats.minLoss, 2) + "\n\n";
     
-    alertMsg += "**PAUSE STATISTICS**\n";
     alertMsg += "**Pauses Triggered:** " + IntegerToString(totalPauseCount) + "\n";
-    alertMsg += "**Total Paused Duration:** " + DoubleToString(totalPauseDurationMinutes, 0) + " minutes";
+    alertMsg += "**Total Paused Duration:** " + DoubleToString(totalPauseDurationMinutes, 0) + " minutes" + "\n";
+    alertMsg += "**Report Generated For:** " + reportDurationStr + "\n";
+    alertMsg += "**Run Duration:** " + durationStr + "\n";
     
     SendDiscordAlert("📊 TRADE REPORT", alertMsg, 16776960); // Yellow/Gold color
     
@@ -2581,8 +2611,60 @@ void SendTradeReport()
 // +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
-// | Toggle Disable Algo Trading MT5                                  |
+// | Algo Trading MT5                                                 |
 // +------------------------------------------------------------------+
+void CheckAlgoTradingStatus()
+{
+    bool currentStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
+   
+   // Detect status change
+   if(currentStatus != algoTradingStatus)
+   {
+      if(currentStatus)
+      {
+        LogPrint("Algo Trading has been ENABLED");
+
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+        string alertMsg = "**Instrument:** " + _Symbol + "\n";
+        alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+        alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+        alertMsg += "**Trading Hours:** " + (EnableTradingHours ? TradingStartTime + " - " + TradingEndTime + "\n" : "DISABLED\n");
+        alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+        alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+        alertMsg += "**Current Balance:** $" + DoubleToString(balance, 2) + "\n";
+        alertMsg += "**Initial Balance:** $" + DoubleToString(initialBalance, 2) + "\n";
+        alertMsg += "**Action:** Trading Started (Algo Trading Enabled)";
+        
+        SendDiscordAlert("🟢 AUTOMATED TRADING STARTED", alertMsg, 5763719); // Green color
+      }
+      else
+      {
+        LogPrint("Algo Trading has been DISABLED");
+
+        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+        double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+        string alertMsg = "**Instrument:** " + _Symbol + "\n";
+        alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+        alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+        alertMsg += "**Trading Hours:** " + (EnableTradingHours ? TradingStartTime + " - " + TradingEndTime + "\n" : "DISABLED\n");
+        alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
+        alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
+        alertMsg += "**Current Balance:** $" + DoubleToString(balance, 2) + "\n";
+        alertMsg += "**Initial Balance:** $" + DoubleToString(initialBalance, 2) + "\n";
+        alertMsg += "**Action:** Trading Stopped (Algo Trading Disabled)";
+        
+        SendDiscordAlert("🔴 AUTOMATED TRADING STOPPED", alertMsg, 15158332); // Green color
+      }
+      
+      // Update status
+      algoTradingStatus = currentStatus;
+   }
+}
+
+// Toggle  disable algo trading in MT5
 void DisableAlgoTrading()
 {
     bool Status = (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
@@ -2612,7 +2694,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v18.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v19.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -2659,19 +2741,7 @@ void CheckDiscordAlert()
         LogPrint("WARNING: Discord webhook URL format may be incorrect!");
     }
     else
-    {
-        // Get current equity
-        double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-
-        string alertMsg = "**Instrument:** " + _Symbol + "\n";
-        alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
-        alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
-        alertMsg += "**Trading Hours:** " + (EnableTradingHours ? TradingStartTime + " - " + TradingEndTime + "\n" : "DISABLED\n");
-        alertMsg += "**Current Equity:** $" + DoubleToString(currentEquity, 2) + "\n";
-        alertMsg += "**Peak Equity:** $" + DoubleToString(peakEquity, 2) + "\n";
-        alertMsg += "**News Filter:** " + (EnableNewsFilter ? "ENABLED" : "DISABLED") + "\n";
-        alertMsg += "**Status:** Trading started successfully";
-        
-        SendDiscordAlert("🟢 AUTOMATED TRADING STARTED", alertMsg, 5763719); // Green color
+    {   
+        CheckAlgoTradingStatus();
     }
 }
