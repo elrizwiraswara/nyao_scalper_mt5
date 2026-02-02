@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v19.0      |
+// |                                          Nyao Scalper v21.0      |
 // |             Candle Prediction with Smart Multi-Entry System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "19.0"
+#property version   "21.0"
 #property description "Auto Trading EA Robot with Smart Multi-Entry & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -27,7 +27,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v19.0"
+input group " Nyao Scalper v21.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -51,15 +51,15 @@ input group "🚀 Smart Multi-Entry Settings"
 input bool EnableMultiEntry = true;                       // Enable Multi-Entry on Strong Signals
 input int MaxMultiEntryPositions = 10;                    // Max Total Multi-Entry Positions per Direction
 input double MultiEntryMinDistance = 5.0;                 // Min Distance Between Entries (Points)
-input int MultiEntryMinStrength = 5;                      // Min Signal Strength to Allow Multi-Entry (1-5)
+input int MultiEntryMinStrength = 7;                      // Min Signal Strength to Allow Multi-Entry (0-10+)
 input double MultiEntryProfitThreshold = 1;               // Min Profit ($) of Winning Positions to Add
 input int MultiEntryCooldownSeconds = 1;                  // Cooldown Between Multi-Entries (Seconds)
 
 input group "🛡️ Position Loss Management"
 input bool EnableLossManagement = true;                   // Enable Independent Loss Management
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
-input int StrongInvalidationThreshold = 5;                // Strong Invalidation Score Threshold (Close Immediately)
-input int MediumInvalidationThreshold = 1;                // Medium Invalidation Score (Can Hold If Recoverable)
+input int StrongInvalidationThreshold = 10;               // Strong Invalidation Score Threshold (0-10+)
+input int MediumInvalidationThreshold = 3;                // Medium Invalidation Score (Can Hold If Recoverable)
 input double MaxRecoverableLoss = 15.0;                   // Max Loss ($) Considered Recoverable
 input bool CloseFromMostLosing = true;                    // Close from Most Losing Position First
 
@@ -237,7 +237,6 @@ int OnInit()
         return(INIT_PARAMETERS_INCORRECT);
     }
 
-    
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     lastPeakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -260,7 +259,7 @@ int OnInit()
     algoTradingStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
     LogPrint("+-----------------------------------------+");
-    LogPrint("Nyao Scalper v19.0 Initialized Successfully");
+    LogPrint("Nyao Scalper v21.0 Initialized Successfully");
     LogPrint("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -407,8 +406,7 @@ void CheckForTradingSignal()
     }
 }
 
-// Buy Signal - Candle Prediction for M1 Scalping
-// Triggers on each bullish candle (predicts continuation UP)
+// Buy Signal - Current TF candle
 bool BuySignal()
 {
    double close1 = iClose(_Symbol, _Period, 1);
@@ -426,9 +424,7 @@ bool BuySignal()
    return false;
 }
 
-
-// Sell Signal - Candle Prediction for M1 Scalping
-// Triggers on each bearish candle (predicts continuation DOWN)
+// Sell Signal - Current TF candle
 bool SellSignal()
 {
    double close1 = iClose(_Symbol, _Period, 1);
@@ -460,15 +456,33 @@ bool AllowNewSell(double price)
    return true;
 }
 
-// Candle utils - Used by invalidation checks
-double CandleBody(int i)
+// Helper: Get candle body
+double CandleBody(int index)
 {
-   return MathAbs(iClose(_Symbol,_Period, i) - iOpen(_Symbol, _Period, i));
+    return MathAbs(iClose(_Symbol, _Period, index) - iOpen(_Symbol, _Period, index));
 }
 
-double CandleRange(int i)
+// Helper: Get candle range
+double CandleRange(int index)
 {
-   return iHigh(_Symbol, _Period, i) - iLow(_Symbol, _Period, i);
+    return iHigh(_Symbol, _Period, index) - iLow(_Symbol, _Period, index);
+}
+
+// Function to get next higher timeframe
+ENUM_TIMEFRAMES GetHigherTimeframe()
+{
+   switch(_Period)
+   {
+      case PERIOD_M1:  return PERIOD_M5;
+      case PERIOD_M5:  return PERIOD_M15;
+      case PERIOD_M15: return PERIOD_M30;
+      case PERIOD_M30: return PERIOD_H1;
+      case PERIOD_H1:  return PERIOD_H4;
+      case PERIOD_H4:  return PERIOD_D1;
+      case PERIOD_D1:  return PERIOD_W1;
+      case PERIOD_W1:  return PERIOD_MN1;
+      default:         return PERIOD_M5;  // fallback
+   }
 }
 // +------------------------------------------------------------------+
 
@@ -499,7 +513,7 @@ void ManagePositions()
 }
 
 // +------------------------------------------------------------------+
-// | Signal Strength Analysis (1-5 Scale)                             |
+// | Signal Strength Analysis (1-10 Scale with Wick + HTF)            |
 // +------------------------------------------------------------------+
 SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
 {
@@ -510,20 +524,28 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     strength.totalScore = 0;
     strength.reasoning = "";
     
-    // Get candle data for analysis
+    // CURRENT TIMEFRAME DATA
     double close1 = iClose(_Symbol, _Period, 1);
     double open1 = iOpen(_Symbol, _Period, 1);
-    double close2 = iClose(_Symbol, _Period, 2);
-    double open2 = iOpen(_Symbol, _Period, 2);
-    double close3 = iClose(_Symbol, _Period, 3);
-    double open3 = iOpen(_Symbol, _Period, 3);
-    
     double high1 = iHigh(_Symbol, _Period, 1);
     double low1 = iLow(_Symbol, _Period, 1);
+    
+    double close2 = iClose(_Symbol, _Period, 2);
+    double open2 = iOpen(_Symbol, _Period, 2);
     double high2 = iHigh(_Symbol, _Period, 2);
     double low2 = iLow(_Symbol, _Period, 2);
     
+    double close3 = iClose(_Symbol, _Period, 3);
+    double open3 = iOpen(_Symbol, _Period, 3);
+    
     if(close1 == 0 || open1 == 0) return strength;
+    
+    // HIGHER TIMEFRAME DATA
+    ENUM_TIMEFRAMES htf = GetHigherTimeframe();
+    double close_htf = iClose(_Symbol, htf, 1);
+    double open_htf = iOpen(_Symbol, htf, 1);
+    double high_htf = iHigh(_Symbol, htf, 1);
+    double low_htf = iLow(_Symbol, htf, 1);
     
     // Candle direction checks
     bool isBullish1 = close1 > open1;
@@ -533,82 +555,221 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     bool isBearish2 = close2 < open2;
     bool isBearish3 = close3 < open3;
     
-    // Calculate body sizes for momentum
-    double body1 = CandleBody(1);
-    double body2 = CandleBody(2);
-    double range1 = CandleRange(1);
+    bool isBullish_htf = close_htf > open_htf;
+    bool isBearish_htf = close_htf < open_htf;
+    
+    // Calculate body sizes and wicks
+    double body1 = MathAbs(close1 - open1);
+    double body2 = MathAbs(close2 - open2);
+    double range1 = high1 - low1;
     double avgBody = (body1 + body2) / 2;
+    
+    // Wick calculations for current candle
+    double upperWick1 = high1 - MathMax(close1, open1);
+    double lowerWick1 = MathMin(close1, open1) - low1;
+    
+    // HTF wick calculations
+    double body_htf = MathAbs(close_htf - open_htf);
+    double upperWick_htf = high_htf - MathMax(close_htf, open_htf);
+    double lowerWick_htf = MathMin(close_htf, open_htf) - low_htf;
     
     if(orderType == ORDER_TYPE_BUY)
     {
-        // TREND SCORE (0-2): Check trend direction
+        // TREND SCORE (0-3)
         if(isBullish1)
         {
             strength.trendScore++;
-            strength.reasoning += "[Bullish Candle] ";
+            strength.reasoning += "[Bull Candle] ";
         }
+        
         if(isBullish1 && isBullish2)
         {
             strength.trendScore++;
-            strength.reasoning += "[Consecutive Bullish] ";
+            strength.reasoning += "[Consecutive Bull] ";
         }
         
-        // MOMENTUM SCORE (0-2): Check candle strength
+        if(isBullish1 && isBullish2 && isBullish3)
+        {
+            strength.trendScore++;
+            strength.reasoning += "[Triple Bull] ";
+        }
+        
+        // MOMENTUM SCORE (0-3)
+        // Strong body size
         if(body1 > avgBody * 1.2)
         {
             strength.momentumScore++;
             strength.reasoning += "[Strong Body] ";
         }
-        if(range1 > 0 && body1 / range1 > 0.6) // Body > 60% of range = strong
-        {
-            strength.momentumScore++;
-            strength.reasoning += "[High Body Ratio] ";
-        }
         
-        // CONFIRMATION SCORE (0-1): Higher low or break resistance
-        if(isBullish1 && low1 > low2)
-        {
-            strength.confirmationScore++;
-            strength.reasoning += "[Higher Low] ";
-        }
-    }
-    else // ORDER_TYPE_SELL
-    {
-        // TREND SCORE (0-2): Check trend direction
-        if(isBearish1)
-        {
-            strength.trendScore++;
-            strength.reasoning += "[Bearish Candle] ";
-        }
-        if(isBearish1 && isBearish2)
-        {
-            strength.trendScore++;
-            strength.reasoning += "[Consecutive Bearish] ";
-        }
-        
-        // MOMENTUM SCORE (0-2): Check candle strength
-        if(body1 > avgBody * 1.2)
-        {
-            strength.momentumScore++;
-            strength.reasoning += "[Strong Body] ";
-        }
+        // High body-to-range ratio (decisive candle)
         if(range1 > 0 && body1 / range1 > 0.6)
         {
             strength.momentumScore++;
             strength.reasoning += "[High Body Ratio] ";
         }
         
-        // CONFIRMATION SCORE (0-1): Lower high or break support
-        if(isBearish1 && high1 < high2)
+        // Very strong momentum
+        if(body1 > avgBody * 1.5)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[Very Strong] ";
+        }
+        
+        // CONFIRMATION SCORE (0-4)
+        // 1. WICK CONFIRMATION - Small upper wick (no rejection)
+        if(upperWick1 < body1 * 0.3)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[Clean Wick] ";
+        }
+        
+        // 2. WICK POSITION - Lower wick larger (buying pressure)
+        if(lowerWick1 > upperWick1)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[Buy Pressure] ";
+        }
+        
+        // 3. STRUCTURE - Higher low (uptrend structure)
+        if(low1 > low2)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[Higher Low] ";
+        }
+        
+        // 4. HIGHER TIMEFRAME ALIGNMENT
+        if(isBullish_htf)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[HTF Bull] ";
+            
+            // HTF also has good wick structure (bonus)
+            if(upperWick_htf < body_htf * 0.5 && lowerWick_htf > upperWick_htf)
+            {
+                strength.confirmationScore++;
+                strength.reasoning += "[HTF Clean] ";
+            }
+        }
+        
+        // PENALTY FOR WEAK SIGNALS
+        // Large upper wick = rejection (reduce score)
+        if(upperWick1 > body1 * 0.5)
+        {
+            strength.confirmationScore = MathMax(0, strength.confirmationScore - 2);
+            strength.reasoning += "[Upper Rejection!] ";
+        }
+        
+        // HTF bearish = counter-trend (reduce score)
+        if(isBearish_htf)
+        {
+            strength.trendScore = MathMax(0, strength.trendScore - 1);
+            strength.reasoning += "[HTF Conflict!] ";
+        }
+    }
+    else // ORDER_TYPE_SELL
+    {
+        // TREND SCORE (0-3)
+        {
+            strength.trendScore++;
+            strength.reasoning += "[Bear Candle] ";
+        }
+        
+        if(isBearish1 && isBearish2)
+        {
+            strength.trendScore++;
+            strength.reasoning += "[Consecutive Bear] ";
+        }
+        
+        if(isBearish1 && isBearish2 && isBearish3)
+        {
+            strength.trendScore++;
+            strength.reasoning += "[Triple Bear] ";
+        }
+        
+        // MOMENTUM SCORE (0-3)
+        // Strong body size
+        if(body1 > avgBody * 1.2)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[Strong Body] ";
+        }
+        
+        // High body-to-range ratio
+        if(range1 > 0 && body1 / range1 > 0.6)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[High Body Ratio] ";
+        }
+        
+        // Very strong momentum
+        if(body1 > avgBody * 1.5)
+        {
+            strength.momentumScore++;
+            strength.reasoning += "[Very Strong] ";
+        }
+        
+        // CONFIRMATION SCORE (0-4)
+        // 1. WICK CONFIRMATION - Small lower wick (no rejection)
+        if(lowerWick1 < body1 * 0.3)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[Clean Wick] ";
+        }
+        
+        // 2. WICK POSITION - Upper wick larger (selling pressure)
+        if(upperWick1 > lowerWick1)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[Sell Pressure] ";
+        }
+        
+        // 3. STRUCTURE - Lower high (downtrend structure)
+        if(high1 < high2)
         {
             strength.confirmationScore++;
             strength.reasoning += "[Lower High] ";
         }
+        
+        // 4. HIGHER TIMEFRAME ALIGNMENT
+        if(isBearish_htf)
+        {
+            strength.confirmationScore++;
+            strength.reasoning += "[HTF Bear] ";
+            
+            // HTF also has good wick structure (bonus)
+            if(lowerWick_htf < body_htf * 0.5 && upperWick_htf > lowerWick_htf)
+            {
+                strength.confirmationScore++;
+                strength.reasoning += "[HTF Clean] ";
+            }
+        }
+        
+        // PENALTY FOR WEAK SIGNALS
+        // Large lower wick = rejection (reduce score)
+        if(lowerWick1 > body1 * 0.5)
+        {
+            strength.confirmationScore = MathMax(0, strength.confirmationScore - 2);
+            strength.reasoning += "[Lower Rejection!] ";
+        }
+        
+        // HTF bullish = counter-trend (reduce score)
+        if(isBullish_htf)
+        {
+            strength.trendScore = MathMax(0, strength.trendScore - 1);
+            strength.reasoning += "[HTF Conflict!] ";
+        }
     }
     
-    // Calculate total (max 5)
+    // Calculate total score (max 10+)
     strength.totalScore = strength.trendScore + strength.momentumScore + strength.confirmationScore;
-    
+
+    // Signal Strength Scale (0-10+):
+    // 0-2   : Very Weak - Skip signal
+    // 3-4   : Weak - Small lot only
+    // 5-6   : Moderate - Normal lot
+    // 7-8   : Strong - Increased lot
+    // 9-10+ : Very Strong - Maximum lot
     return strength;
 }
 
@@ -756,7 +917,7 @@ void ManageMultiEntry()
 }
 
 // +------------------------------------------------------------------+
-// | Get Buy Direction Invalidation                                   |
+// | Get Buy Direction Invalidation (Current Candle + Price Action)   |
 // +------------------------------------------------------------------+
 InvalidationDetails GetBuyInvalidation()
 {
@@ -769,60 +930,154 @@ InvalidationDetails GetBuyInvalidation()
     details.reason = "";
     details.isRecoverable = true;
     
-    // Get candle data
+    // Current candle (real-time)
+    double close0 = iClose(_Symbol, _Period, 0);
+    double open0 = iOpen(_Symbol, _Period, 0);
+    double high0 = iHigh(_Symbol, _Period, 0);
+    double low0 = iLow(_Symbol, _Period, 0);
+    
+    // Previous candles
     double close1 = iClose(_Symbol, _Period, 1);
     double open1 = iOpen(_Symbol, _Period, 1);
+    double high1 = iHigh(_Symbol, _Period, 1);
+    double low1 = iLow(_Symbol, _Period, 1);
+    
     double close2 = iClose(_Symbol, _Period, 2);
     double open2 = iOpen(_Symbol, _Period, 2);
     double close3 = iClose(_Symbol, _Period, 3);
     double open3 = iOpen(_Symbol, _Period, 3);
     
-    if(close1 == 0 || open1 == 0) return details;
+    if(close0 == 0 || open0 == 0) return details;
     
+    // Current price
+    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    
+    // Candle direction checks
+    bool isBearish0 = close0 < open0;  // Current candle forming bearish
     bool isBearish1 = close1 < open1;
     bool isBearish2 = close2 < open2;
     bool isBearish3 = close3 < open3;
     
-    double body1 = CandleBody(1);
-    double body2 = CandleBody(2);
+    // Calculate bodies
+    double body0 = MathAbs(close0 - open0);
+    double body1 = MathAbs(close1 - open1);
+    double body2 = MathAbs(close2 - open2);
     double avgBody = (body1 + body2) / 2;
     
-    // Single bearish candle = 1 point
+    // CURRENT CANDLE CHECKS (Real-time)
+    // 1. Current candle is bearish and growing = 1 point
+    if(isBearish0 && body0 > 0)
+    {
+        details.totalScore += 1;
+        details.reason += "[Current Bearish] ";
+        
+        // Strong bearish current candle = +1 point
+        if(body0 > avgBody * 1.2)
+        {
+            details.totalScore += 1;
+            details.reason += "[Strong Current Bearish] ";
+        }
+    }
+    
+    // 2. Current candle has large upper wick (rejection) = 2 points
+    double upperWick0 = high0 - MathMax(close0, open0);
+    double lowerWick0 = MathMin(close0, open0) - low0;
+    
+    if(upperWick0 > body0 * 0.5)
+    {
+        details.priceAction = true;
+        details.totalScore += 2;
+        details.reason += "[Upper Wick Rejection] ";
+        
+        // Very large upper wick = unrecoverable
+        if(upperWick0 > body0 * 1.5)
+        {
+            details.isRecoverable = false;
+            details.totalScore += 1;
+            details.reason += "[Large Rejection] ";
+        }
+    }
+    
+    // 3. Current price moving down aggressively = 1 point
+    double priceChange = currentPrice - close1;
+    if(priceChange < 0 && MathAbs(priceChange) > avgBody * 0.5)
+    {
+        details.totalScore += 1;
+        details.reason += "[Price Dropping] ";
+    }
+    
+    // PREVIOUS CANDLES PATTERN
+    // 4. Previous candle was bearish = 1 point
     if(isBearish1)
     {
         details.totalScore += 1;
-        details.reason += "[Bearish Candle] ";
+        details.reason += "[Prev Bearish] ";
     }
     
-    // Consecutive bearish = additional 2 points
-    if(isBearish1 && isBearish2)
+    // 5. Previous candle had upper wick rejection = 1 point
+    double upperWick1 = high1 - MathMax(close1, open1);
+    double lowerWick1 = MathMin(close1, open1) - low1;
+    
+    if(upperWick1 > CandleBody(1) * 0.6 && upperWick1 > lowerWick1)
+    {
+        details.priceAction = true;
+        details.totalScore += 1;
+        details.reason += "[Prev Wick Rejection] ";
+    }
+    
+    // 6. Consecutive bearish candles = 2 points
+    if(isBearish0 && isBearish1)
     {
         details.trendReversal = true;
         details.totalScore += 2;
         details.reason += "[Consecutive Bearish] ";
     }
     
-    // 3 consecutive bearish = strong reversal
+    // 7. Three consecutive bearish = strong reversal (unrecoverable)
     if(isBearish1 && isBearish2 && isBearish3)
     {
-        details.totalScore += 1;
-        details.reason += "[Triple Bearish] ";
+        details.totalScore += 2;
+        details.reason += "[Triple Bearish Pattern] ";
         details.isRecoverable = false;
     }
     
-    // Strong bearish momentum = 1 point
+    // 8. Strong bearish momentum on previous candle = 1 point
     if(isBearish1 && body1 > avgBody * 1.5)
     {
         details.strongMomentum = true;
         details.totalScore += 1;
-        details.reason += "[Strong Bearish Momentum] ";
+        details.reason += "[Strong Momentum] ";
     }
     
+    // 9. Current candle low breaking previous low (lower lows) = 2 points
+    if(low0 < low1)
+    {
+        details.trendReversal = true;
+        details.totalScore += 2;
+        details.reason += "[Lower Low] ";
+    }
+    
+    // 10. Higher timeframe confirmation
+    ENUM_TIMEFRAMES htf = GetHigherTimeframe();
+    double close_htf = iClose(_Symbol, htf, 0);
+    double open_htf = iOpen(_Symbol, htf, 0);
+    
+    if(close_htf < open_htf)
+    {
+        details.totalScore += 1;
+        details.reason += "[HTF Bearish] ";
+    }
+    
+    // Score Breakdown (Max ~15+ points):
+    // 1-3  : Minor concern (recoverable)
+    // 4-6  : Moderate invalidation (watch closely)
+    // 7-10 : Strong invalidation (consider closing)
+    // 11+  : Critical invalidation (close immediately)
     return details;
 }
 
 // +------------------------------------------------------------------+
-// | Get Sell Direction Invalidation                                  |
+// | Get Sell Direction Invalidation (Current Candle + Price Action)  |
 // +------------------------------------------------------------------+
 InvalidationDetails GetSellInvalidation()
 {
@@ -835,55 +1090,149 @@ InvalidationDetails GetSellInvalidation()
     details.reason = "";
     details.isRecoverable = true;
     
-    // Get candle data
+    // Current candle (real-time)
+    double close0 = iClose(_Symbol, _Period, 0);
+    double open0 = iOpen(_Symbol, _Period, 0);
+    double high0 = iHigh(_Symbol, _Period, 0);
+    double low0 = iLow(_Symbol, _Period, 0);
+    
+    // Previous candles
     double close1 = iClose(_Symbol, _Period, 1);
     double open1 = iOpen(_Symbol, _Period, 1);
+    double high1 = iHigh(_Symbol, _Period, 1);
+    double low1 = iLow(_Symbol, _Period, 1);
+    
     double close2 = iClose(_Symbol, _Period, 2);
     double open2 = iOpen(_Symbol, _Period, 2);
     double close3 = iClose(_Symbol, _Period, 3);
     double open3 = iOpen(_Symbol, _Period, 3);
     
-    if(close1 == 0 || open1 == 0) return details;
+    if(close0 == 0 || open0 == 0) return details;
     
+    // Current price
+    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    
+    // Candle direction checks
+    bool isBullish0 = close0 > open0;  // Current candle forming bullish
     bool isBullish1 = close1 > open1;
     bool isBullish2 = close2 > open2;
     bool isBullish3 = close3 > open3;
     
-    double body1 = CandleBody(1);
-    double body2 = CandleBody(2);
+    // Calculate bodies
+    double body0 = MathAbs(close0 - open0);
+    double body1 = MathAbs(close1 - open1);
+    double body2 = MathAbs(close2 - open2);
     double avgBody = (body1 + body2) / 2;
     
-    // Single bullish candle = 1 point
+    // CURRENT CANDLE CHECKS (Real-time)
+    // 1. Current candle is bullish and growing = 1 point
+    if(isBullish0 && body0 > 0)
+    {
+        details.totalScore += 1;
+        details.reason += "[Current Bullish] ";
+        
+        // Strong bullish current candle = +1 point
+        if(body0 > avgBody * 1.2)
+        {
+            details.totalScore += 1;
+            details.reason += "[Strong Current Bullish] ";
+        }
+    }
+    
+    // 2. Current candle has large lower wick (rejection) = 2 points
+    double upperWick0 = high0 - MathMax(close0, open0);
+    double lowerWick0 = MathMin(close0, open0) - low0;
+    
+    if(lowerWick0 > body0 * 0.5)
+    {
+        details.priceAction = true;
+        details.totalScore += 2;
+        details.reason += "[Lower Wick Rejection] ";
+        
+        // Very large lower wick = unrecoverable
+        if(lowerWick0 > body0 * 1.5)
+        {
+            details.isRecoverable = false;
+            details.totalScore += 1;
+            details.reason += "[Large Rejection] ";
+        }
+    }
+    
+    // 3. Current price moving up aggressively = 1 point
+    double priceChange = currentPrice - close1;
+    if(priceChange > 0 && priceChange > avgBody * 0.5)
+    {
+        details.totalScore += 1;
+        details.reason += "[Price Rising] ";
+    }
+    
+    // PREVIOUS CANDLES PATTERN
+    // 4. Previous candle was bullish = 1 point
     if(isBullish1)
     {
         details.totalScore += 1;
-        details.reason += "[Bullish Candle] ";
+        details.reason += "[Prev Bullish] ";
     }
     
-    // Consecutive bullish = additional 2 points
-    if(isBullish1 && isBullish2)
+    // 5. Previous candle had lower wick rejection = 1 point
+    double upperWick1 = high1 - MathMax(close1, open1);
+    double lowerWick1 = MathMin(close1, open1) - low1;
+    
+    if(lowerWick1 > CandleBody(1) * 0.6 && lowerWick1 > upperWick1)
+    {
+        details.priceAction = true;
+        details.totalScore += 1;
+        details.reason += "[Prev Wick Rejection] ";
+    }
+    
+    // 6. Consecutive bullish candles = 2 points
+    if(isBullish0 && isBullish1)
     {
         details.trendReversal = true;
         details.totalScore += 2;
         details.reason += "[Consecutive Bullish] ";
     }
     
-    // 3 consecutive bullish = strong reversal
+    // 7. Three consecutive bullish = strong reversal (unrecoverable)
     if(isBullish1 && isBullish2 && isBullish3)
     {
-        details.totalScore += 1;
-        details.reason += "[Triple Bullish] ";
+        details.totalScore += 2;
+        details.reason += "[Triple Bullish Pattern] ";
         details.isRecoverable = false;
     }
     
-    // Strong bullish momentum = 1 point
+    // 8. Strong bullish momentum on previous candle = 1 point
     if(isBullish1 && body1 > avgBody * 1.5)
     {
         details.strongMomentum = true;
         details.totalScore += 1;
-        details.reason += "[Strong Bullish Momentum] ";
+        details.reason += "[Strong Momentum] ";
     }
     
+    // 9. Current candle high breaking previous high (higher highs) = 2 points
+    if(high0 > high1)
+    {
+        details.trendReversal = true;
+        details.totalScore += 2;
+        details.reason += "[Higher High] ";
+    }
+    
+    // 10. Higher timeframe confirmation
+    ENUM_TIMEFRAMES htf = GetHigherTimeframe();
+    double close_htf = iClose(_Symbol, htf, 0);
+    double open_htf = iOpen(_Symbol, htf, 0);
+    
+    if(close_htf > open_htf)
+    {
+        details.totalScore += 1;
+        details.reason += "[HTF Bullish] ";
+    }
+    
+    // Score Breakdown (Max ~15+ points):
+    // 1-3  : Minor concern (recoverable)
+    // 4-6  : Moderate invalidation (watch closely)
+    // 7-10 : Strong invalidation (consider closing)
+    // 11+  : Critical invalidation (close immediately)
     return details;
 }
 
@@ -2694,7 +3043,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v19.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v21.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
