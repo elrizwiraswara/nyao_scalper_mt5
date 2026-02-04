@@ -1,12 +1,12 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v23.0      |
-// |             Candle Prediction with Smart Multi-Entry System      |
+// |                                          Nyao Scalper v25.0      |
+// |              Indicator-Based Signal Strength Trading System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "23.0"
-#property description "Auto Trading EA Robot with Smart Multi-Entry & Position Management."
+#property version   "25.0"
+#property description "Auto Trading EA Robot with Indicator-Based Signal Strength & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
 
@@ -15,6 +15,12 @@
 #define WM_COMMAND 0x0111
 #define GA_ROOT    2
 #include <WinAPI\winapi.mqh>
+
+// Dialog Controls for Password Input
+#include <Controls\Dialog.mqh>
+#include <Controls\Edit.mqh>
+#include <Controls\Button.mqh>
+#include <Controls\Label.mqh>
 
 // Print wrapper with logging control
 #define LogPrint if(EnableLogging) Print
@@ -27,7 +33,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v23.0"
+input group " Nyao Scalper v25.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -35,63 +41,84 @@ input group "+-----------------------------------------+"
 // +------------------------------------------------------------------+
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
-input group "📝 Order Settings"
+input group "📊 Indicator Settings"
+input int RSI_Period = 5;                                 // RSI Period
+input int EMA_FastPeriod = 5;                             // EMA Fast Period
+input int EMA_SlowPeriod = 13;                            // EMA Slow Period
+input int Bollinger_Period = 14;                          // Bollinger Bands Period
+input double Bollinger_Deviation = 1.8;                   // Bollinger Bands Deviation
+input int Stoch_KPeriod = 5;                              // Stochastic %K Period
+input int Stoch_DPeriod = 3;                              // Stochastic %D Period
+input int Stoch_Slowing = 2;                              // Stochastic Slowing
+
+input group "⚖️ Score Weight Settings"
+input int WeightRSI = 3;                                  // RSI Weight (Score 0-3 × Weight)
+input int WeightEMA = 3;                                  // EMA Weight (Score 0-3 × Weight)
+input int WeightBollinger = 2;                            // Bollinger Bands Weight (Score 0-2 × Weight)
+input int WeightStochastic = 2;                           // Stochastic Weight (Score 0-2 × Weight)
+input int ScoreCandleWick = 2;                            // Candle Wick Rejection Score
+input int ScoreCandleMomentum = 2;                        // Candle Momentum Shift Score
+input int ScoreNearSR = 2;                                // Near Support/Resistance Score
+input int ScoreBreakoutSR = 3;                            // S/R Breakout Score
+
+input group "📝 Order & Position Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
-input int MaxOpenOrders = 15;                             // Maximum Consecutive Open Orders
-input double ZonePoints = 1000;                           // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
-input double BuyDuplicateMultiplier  = 1.0;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
-input double SellDuplicateMultiplier = 1.0;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
-input double MinBreakEvenProfit = 1.0;                    // Minimum Profit to Trigger Break-Even ($)
-input double ProfitThresholdMultiplier = 1.0;             // Threshold Multiplier for Min Break-Even Profit
-input double LossThresholdMultiplier = 1.0;               // Threshold Multiplier for Max Break-Even Loss
-input int MinBuySignalScore = 2;                          // Minimum Signal Strength Score to Buy
-input int MinSellSignalScore = 2;                         // Minimum Signal Strength Score to Sell
-input int MinPyramidingBuySignalScore = 8;                // Minimum Signal Strength Score to Pyramiding Buy
-input int MinPyramidingSellSignalScore = 8;               // Minimum Signal Strength Score to Pyramiding Sell
-
-input group "🛡️ Position Loss Management"
-input bool EnableLossManagement = true;                   // Enable Independent Loss Management
-input int MaxHoldingLossPositions = 4;                    // Max Losing Positions to Hold (0 = Close Immediately)
-input int StrongInvalidationThreshold = 10;               // Strong Invalidation Score Threshold (0-10+)
+input int MaxOpenOrders = 6;                              // Max Consecutive Open Orders
+input double ZonePoints = 500;                            // Zone Points to Avoid Duplicate Signals
+input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multiplier to Avoid Duplicate Buy Signals
+input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
+input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($)
+input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
+input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
+input int MinBuySignalScore = 3;                          // Min Signal Strength Score to Buy
+input int MinSellSignalScore = 3;                         // Min Signal Strength Score to Sell
+input bool EnablePyramiding = true;                       // Enable Pyramiding Positions
+input int MinPyramidingBuySignalScore = 6;                // Min Signal Strength Score to Pyramiding Buy
+input int MinPyramidingSellSignalScore = 6;               // Min Signal Strength Score to Pyramiding Sell
+input int MaxPositionsPerCandle = 4;                      // Max Positions Per Candle
+input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
+input int MinSignalStrengthToHold = 1;                    // Min Signal Score to Hold Losing Position
+input int MaxHoldingLossPositions = 6;                    // Max Losing Positions to Hold (0 = Close Immediately)
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
-input double EquityDropPercent = 5.0;                     // Equity Drop % per Lot Step
+input double EquityDropPercent = 0.0;                     // Equity Drop % per Lot Step
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
-input double MaxLotSize = 0.1;                            // Maximum Lot Size
-input int      ATRPeriod = 14;                            // ATR Period
-input double   ATRMultiplier = 2.0;                       // ATR Multiplier (stop loss distance)
-input double   RiskPercent = 1.0;                         // Risk per trade (%)
+input double MaxLotSize = 0.05;                           // Max Lot Size
+input int MinSignalStrengthForLot = 10;                   // Min Signal Score for Lot Increase
 
 input group "🏦 Equity Settings"
-input double MinEquityPercent = 50.0;                     // Min Equity % from Peak - Pause Trading when Reached
+input double MinEquityPercent = 70.0;                     // Min Equity % from Peak - Pause Trading when Reached
 input double MaxDrawdownFromPeak = 0;                     // Max Equity $ Drawdown - Pause Trading when Reached (0 = Disabled)
-input int PauseMinutes = 30;                              // Pause Duration when Reached (Minutes)
-input double PauseMinutesMultiplier = 1;                  // Multiply Pause Duration on Each Trigger
-input int MaxPauseMinutes = 0;                            // Max Pause Duration Minutes (0 = Maximum 24,855 days)
+input int PauseMinutes = 5;                               // Pause Duration when Reached (Minutes)
+input double PauseMinutesMultiplier = 1.5;                // Multiply Pause Duration on Each Trigger
+input int MaxPauseMinutes = 120;                          // Max Pause Duration Minutes (0 = Max 24,855 days)
 input int MaxMinEquityTriggers = 0;                       // Max Times Trigger - Stop Trading when Reached (0 = Unlimited)
 input bool ResetOnNewPeak = true;                         // Reset Min Equity Triggers on New Peak Equity
 input double TargetEquity = 0;                            // Target Equity - Stop Trading when Reached (0 = Disabled)
-input double MinimumEquity = 20;                          // Minimum Equity - Stop Trading when Reached (0 = Disabled)
+input double MinimumEquity = 20;                          // Min Equity - Stop Trading when Reached (0 = Disabled)
 
 input group "📈 Take Profit Settings"
 input bool EnableTakeProfit = false;                      // Enable Take Profit
 input ENUM_INPUT_TYPE TPInputType = INPUT_DOLLAR;         // TP Input Type
-input double TPValue = 5.0;                               // TP Value
-
-input group "💸 Trailing Stop Settings"
-input bool EnableTrailingStop = true;                     // Enable Trailing Stop
-input bool TSEnableBreakEvenLock = true;                  // Enable Break-Even Lock Point
-input bool TSOnProfitableOnly = true;                     // TS on Profitable Position Only
-input ENUM_INPUT_TYPE TSInputType = INPUT_DOLLAR;         // TS Input Type
-input double TSValue = 0.05;                              // TS Initial Value
+input double TPValue = 10.0;                              // TP Value
 
 input group "📉 Stop Loss Settings"
-input bool EnableStopLoss = true;                         // Enable Stop Loss
-input ENUM_INPUT_TYPE SLInputType = INPUT_PERCENT;        // SL Input Type
-input double SLValue = 20;                                // SL Value
+input bool EnableStopLoss = false;                        // Enable Stop Loss
+input ENUM_INPUT_TYPE SLInputType = INPUT_DOLLAR;         // SL Input Type
+input double SLValue = 10.0;                              // SL Value
+
+input group "💸 Trailing TP/SL Settings"
+input bool EnableTrailing = true;                         // Enable Trailing TP/SL
+input bool TrailingEnableBreakEvenLock = true;            // Enable Trailing Break-Even Lock
+input bool TrailingSLOnProfitableOnly = true;             // Trailing SL on Profitable Position Only
+input bool EnableAdaptiveTP = true;                       // Enable Adaptive TP
+input bool EnableAdaptiveSL = true;                       // Enable Adaptive SL
+input ENUM_INPUT_TYPE TSInputType = INPUT_DOLLAR;         // Trailing Distance Input Type
+input double TrailingDistanceValue = 0.2;                 // Trailing Distance Value
+input double TrailingValueMultiplier = 0.2;               // Trailing Value Multiplier
 
 input group "🤖 Robot Settings"
 input int MagicNumber = 6926268;                          // Magic Number
@@ -101,9 +128,9 @@ input bool EnableTradingHours = false;                    // Enable Trading Hour
 input string TradingStartTime = "00:00";                  // Trading Start Time (HH:MM)
 input string TradingEndTime = "23:59";                    // Trading End Time (HH:MM)
 input bool EnableReports = true;                          // Enable Trading Reports
-input int SendReportEveryHour = 1;                        // Send Report Every n Hours 
+input int SendReportEveryHour = 1;                        // Send Report Every (n) Hours 
 input bool EnableMarketCloseFilter = true;                // Stop Opening New Positions Near Market Close Hour
-input int MinutesBeforeClose = 60;                        // Stop Opening Minutes Before Market Close
+input int MinutesBeforeClose = 30;                        // Stop Opening Minutes Before Market Close
 input bool EnableNewsFilter = true;                       // Enable News Filter (Pause Trading During News)
 input int NewsMinutesBefore = 30;                         // Minutes Before News Event
 input int NewsMinutesAfter = 30;                          // Minutes After News Event
@@ -113,6 +140,17 @@ input bool EnableLogging = false;                         // Enable EA Logging (
 // +------------------------------------------------------------------+
 // | Global Variables                                                 |
 // +------------------------------------------------------------------+
+// EMBEDDED PASSWORD - Change this to your desired password (leave empty to disable)
+const string EA_PASSWORD = "";
+
+// Password Dialog Controls
+CDialog g_PasswordDialog;
+CEdit g_PasswordEdit;
+CButton g_PasswordSubmitBtn;
+CLabel g_PasswordLabel;
+bool g_PasswordVerified = false;
+bool g_PasswordDialogActive = false;
+
 double initialBalance = 0;                                // Initial Account Balance     
 double peakEquity = 0;                                    // Peak Equity Recorded
 double lastPeakEquity = 0;                                // Last recorded peak equity for drawdown calculations
@@ -147,31 +185,75 @@ double totalPauseDurationMinutes = 0;                     // Total duration of p
 // Multi-Entry tracking
 datetime lastMultiEntryTime = 0;
 
-// Signal Strength structure (1-5 scale)
+// Indicator handles (initialized in OnInit)
+int g_RSI_Handle = INVALID_HANDLE;
+int g_EMA_Fast_Handle = INVALID_HANDLE;
+int g_EMA_Slow_Handle = INVALID_HANDLE;
+int g_Bollinger_Handle = INVALID_HANDLE;
+int g_Stochastic_Handle = INVALID_HANDLE;
+
+// +------------------------------------------------------------------+
+// | Signal Strength Structure - Indicator-Based Scoring System       |
+// | Weights are adjustable via Score Weight Settings inputs          |
+// +------------------------------------------------------------------+
 struct SignalStrength
 {
-    int trendScore;              // Trend direction confirmation (0-2)
-    int momentumScore;           // Momentum/candle body strength (0-2)
-    int confirmationScore;       // Additional confirmations (0-1)
-    int totalScore;              // Total strength (0-5)
-    string reasoning;            // Explanation of score
+    // Individual indicator scores (raw, before weight multiplier)
+    int rsiScore;              // RSI score (0-3)
+    int emaScore;              // EMA crossover score (0-3)
+    int bollingerScore;        // Bollinger Bands score (0-2)
+    int stochasticScore;       // Stochastic score (0-2)
+    int candleScore;           // Candle pattern score (aggregate)
+    
+    // Direct scores (no weight multiplier)
+    int wickScore;             // Candle Wick Rejection Score
+    int momentumScore;         // Candle Momentum Shift Score
+    int supportResistanceScore;// Support/Resistance Proximity Score
+    int breakoutScore;         // Key Level Breakout Score
+    
+    // Final weighted scores (mutually exclusive)
+    int buyScore;              // Total weighted buy score
+    int sellScore;             // Total weighted sell score
+    int totalScore;            // The winning score (higher of buy/sell)
+    
+    string reasoning;          // Detailed explanation of score calculation
 };
 
-// Position Invalidation structure
-struct InvalidationDetails
+// +------------------------------------------------------------------+
+// | Managed Position Structure - For Position Tracking               |
+// | Stores position info to avoid repeated MQL function calls        |
+// +------------------------------------------------------------------+
+struct ManagedPosition
 {
-    int totalScore;              // Total invalidation score (0-5)
-    string reason;               // Explanation
+    ulong ticket;                    // Position ticket ID
+    ENUM_POSITION_TYPE type;         // Buy or Sell
+    int signalScore;          // Signal strength at entry
 };
 
-// Losing Position Info structure for sorting
-struct LosingPositionInfo
-{
-    ulong ticket;
-    double profit;
-    int invalidationScore;
-    bool isRecoverable;
-};
+// Managed positions array
+ManagedPosition g_ManagedPositions[];
+int g_ManagedPositionCount = 0;
+
+// Internal Position Counters (for O(1) checks)
+int g_BuyPositionCount = 0;
+int g_SellPositionCount = 0;
+
+// Candle-based Pyramiding Counters
+datetime g_CurrentBarTime = 0;
+int g_BuysOnCurrentBar = 0;
+int g_SellsOnCurrentBar = 0;
+
+// Last Position Tracking (for O(1) duplicate checks)
+datetime g_LastBuyTime = 0;
+double g_LastBuyPrice = 0;
+datetime g_LastSellTime = 0;
+double g_LastSellPrice = 0;
+
+// Last signal tracking per candle (for multi-signal logic)
+datetime g_LastBuySignalBarTime = 0;
+int g_LastBuySignalScore = 0;
+datetime g_LastSellSignalBarTime = 0;
+int g_LastSellSignalScore = 0;
 
 // Trade Statistics Structure
 struct TradeStats
@@ -190,10 +272,68 @@ struct TradeStats
 };
 
 // +------------------------------------------------------------------+
+// | Create Password Dialog                                            |
+// +------------------------------------------------------------------+
+bool CreatePasswordDialog()
+{
+    // Dialog with enough height for input + button
+    if(!g_PasswordDialog.Create(0, "PasswordDialog", 0, 10, 10, 324, 120))
+        return false;
+    
+    g_PasswordDialog.Caption("Enter Password to Use Nyao Scalper EA");
+    
+    // Password input - left aligned, full width
+    if(!g_PasswordEdit.Create(0, "PasswordEdit", 0, 5, 10, 300, 35))
+        return false;
+    g_PasswordEdit.Text("");
+    if(!g_PasswordDialog.Add(g_PasswordEdit))
+        return false;
+    
+    // Submit button - left aligned
+    if(!g_PasswordSubmitBtn.Create(0, "PasswordSubmit", 0, 5, 45, 100, 75))
+        return false;
+    g_PasswordSubmitBtn.Text("Submit");
+    if(!g_PasswordDialog.Add(g_PasswordSubmitBtn))
+        return false;
+    
+    return true;
+}
+
+// +------------------------------------------------------------------+
 // | Expert Initialization Function                                   |
 // +------------------------------------------------------------------+
 int OnInit()
 {   
+    // Password protection - show dialog if password is set
+    if(EA_PASSWORD != "")
+    {
+        g_PasswordVerified = false;
+        g_PasswordDialogActive = true;
+        
+        if(!CreatePasswordDialog())
+        {
+            Alert("ERROR: Failed to create password dialog!");
+            return(INIT_FAILED);
+        }
+        
+        Print("🔐 Password required. Please enter password in the dialog on chart.");
+        return(INIT_SUCCEEDED);
+    }
+    else
+    {
+        g_PasswordVerified = true;
+        g_PasswordDialogActive = false;
+    }
+    
+    // Continue with normal initialization
+    return(InitializeEA());
+}
+
+// +------------------------------------------------------------------+
+// | Full EA Initialization                                            |
+// +------------------------------------------------------------------+
+int InitializeEA()
+{
     if(BaseLotSize <= 0)
     {
         Alert("ERROR: BaseLotSize must be greater than 0");
@@ -247,9 +387,97 @@ int OnInit()
     isOrderSendLocked = false;
     algoTradingStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
-    LogPrint("+-----------------------------------------+");
-    LogPrint("Nyao Scalper v23.0 Initialized Successfully");
-    LogPrint("+-----------------------------------------+");
+    // Initialize indicator handles
+    g_RSI_Handle = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE);
+    g_EMA_Fast_Handle = iMA(_Symbol, _Period, EMA_FastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    g_EMA_Slow_Handle = iMA(_Symbol, _Period, EMA_SlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    g_Bollinger_Handle = iBands(_Symbol, _Period, Bollinger_Period, 0, Bollinger_Deviation, PRICE_CLOSE);
+    g_Stochastic_Handle = iStochastic(_Symbol, _Period, Stoch_KPeriod, Stoch_DPeriod, Stoch_Slowing, MODE_SMA, STO_LOWHIGH);
+    
+    // Validate all indicator handles
+    if(g_RSI_Handle == INVALID_HANDLE || 
+       g_EMA_Fast_Handle == INVALID_HANDLE || 
+       g_EMA_Slow_Handle == INVALID_HANDLE ||
+       g_Bollinger_Handle == INVALID_HANDLE || 
+       g_Stochastic_Handle == INVALID_HANDLE)
+    {
+        Alert("ERROR: Failed to create indicator handles. Check indicator parameters.");
+        return(INIT_FAILED);
+    }
+    
+    // Initialize managed positions array
+    ArrayResize(g_ManagedPositions, 0);
+    g_ManagedPositionCount = 0;
+    
+    // Scan and register existing positions
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+        if(!PositionSelectByTicket(ticket)) continue;
+        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+        
+        ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        
+        // For existing positions, try to calculate current signal strength as baseline
+        // If calculation fails or returns 0, use a default safe value (MinBuySignalScore)
+        int initialScore = 0;
+        
+        // We can't easily get the signal at open time, so we use current as baseline
+        // This effectively "resets" the signal tracking for this position
+        SignalStrength strength;
+        if(type == POSITION_TYPE_BUY) strength = GetSignalStrength(ORDER_TYPE_BUY);
+        else strength = GetSignalStrength(ORDER_TYPE_SELL);
+        
+        initialScore = strength.totalScore;
+        if(initialScore <= 0) initialScore = (type == POSITION_TYPE_BUY) ? MinBuySignalScore : MinSellSignalScore;
+        
+        initialScore = strength.totalScore;
+        if(initialScore <= 0) initialScore = (type == POSITION_TYPE_BUY) ? MinBuySignalScore : MinSellSignalScore;
+        
+        RegisterManagedPosition(ticket, type, initialScore);
+
+        // Update global last position tracking
+        datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+        double posPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        
+        // Reconstruct Candle Counters for existing positions
+        datetime posBarTime = (posTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+        datetime currentBarTime = iTime(_Symbol, _Period, 0);
+        
+        // Initialize current bar time if needed
+        if(g_CurrentBarTime == 0) g_CurrentBarTime = currentBarTime;
+        
+        if(posBarTime == currentBarTime)
+        {
+            if(type == POSITION_TYPE_BUY) g_BuysOnCurrentBar++;
+            else g_SellsOnCurrentBar++;
+        }
+        
+        if(type == POSITION_TYPE_BUY)
+        {
+            if(posTime > g_LastBuyTime)
+            {
+                g_LastBuyTime = posTime;
+                g_LastBuyPrice = posPrice;
+            }
+        }
+        else if(type == POSITION_TYPE_SELL)
+        {
+            if(posTime > g_LastSellTime)
+            {
+                g_LastSellTime = posTime;
+                g_LastSellPrice = posPrice;
+            }
+        }
+    }
+    
+    Print("+-----------------------------------------+");
+    Print("Nyao Scalper v25.0 Initialized Successfully");
+    Print("Indicators initialized: RSI(", RSI_Period, "), EMA(", EMA_FastPeriod, "/", EMA_SlowPeriod, 
+             "), BB(", Bollinger_Period, "), Stoch(", Stoch_KPeriod, ",", Stoch_DPeriod, ",", Stoch_Slowing, ")");
+    Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
     
@@ -261,13 +489,33 @@ int OnInit()
 // +------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {   
-    LogPrint("Nyao Scalper EA Deinitialized");
+    // Cleanup password dialog if active
+    if(g_PasswordDialogActive)
+    {
+        g_PasswordDialog.Destroy();
+        g_PasswordDialogActive = false;
+    }
+    
+    // Release indicator handles
+    if(g_RSI_Handle != INVALID_HANDLE) IndicatorRelease(g_RSI_Handle);
+    if(g_EMA_Fast_Handle != INVALID_HANDLE) IndicatorRelease(g_EMA_Fast_Handle);
+    if(g_EMA_Slow_Handle != INVALID_HANDLE) IndicatorRelease(g_EMA_Slow_Handle);
+    if(g_Bollinger_Handle != INVALID_HANDLE) IndicatorRelease(g_Bollinger_Handle);
+    if(g_Stochastic_Handle != INVALID_HANDLE) IndicatorRelease(g_Stochastic_Handle);
+    
+    Print("Nyao Scalper v25.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
 // | Expert Tick Function                                             |
 void OnTick()
 {   
+    // Block trading until password is verified
+    if(!g_PasswordVerified)
+    {
+        return;
+    }
+    
     // Check Algo Trading status
     CheckAlgoTradingStatus();
 
@@ -366,6 +614,47 @@ void OnTick()
 }
 
 // +------------------------------------------------------------------+
+// | Chart Event Handler - Password Dialog                             |
+// +------------------------------------------------------------------+
+void OnChartEvent(const int id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam)
+{
+    if(g_PasswordDialogActive)
+    {
+        g_PasswordDialog.OnEvent(id, lparam, dparam, sparam);
+        
+        // Check for submit button click
+        if(id == CHARTEVENT_OBJECT_CLICK && sparam == "PasswordSubmit")
+        {
+            string enteredPassword = g_PasswordEdit.Text();
+            
+            if(enteredPassword == EA_PASSWORD)
+            {
+                // Password correct - close dialog and initialize EA
+                g_PasswordDialog.Destroy();
+                g_PasswordDialogActive = false;
+                g_PasswordVerified = true;
+                
+                Print("Password verified! EA is now active.");
+                
+                // Complete initialization
+                if(InitializeEA() != INIT_SUCCEEDED)
+                {
+                    Alert("EA initialization failed!");
+                }
+            }
+            else
+            {
+                Alert("Invalid password! Please try again.");
+                g_PasswordEdit.Text("");
+            }
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
 // | Check For Trading Signals                                        |
 // +------------------------------------------------------------------+
 void CheckForTradingSignal()
@@ -378,37 +667,44 @@ void CheckForTradingSignal()
     if (buySignal > sellSignal)
     {
         if (!EnableBuyOrders) return;
-        OpenPosition(ORDER_TYPE_BUY);
+        OpenPosition(ORDER_TYPE_BUY, buySignal);
     }
     else if (buySignal < sellSignal)
     {
         if (!EnableSellOrders) return;
-        OpenPosition(ORDER_TYPE_SELL);
+        OpenPosition(ORDER_TYPE_SELL, sellSignal);
     }
 }
 
-// Buy Signal - ALIGNED with invalidation logic
+// Buy Signal
 int BuySignal()
 {   
     double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    if(!AllowNewBuy(currentPrice)) return 0;
+    bool isPyramiding = false;
+    
+    // Check strict conditions (limits & distance) first - O(1)
+    if(!CheckBuyConditions(currentPrice, isPyramiding)) return 0;
 
+    // Only calculate heavyweight indicators if conditions allow
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY);
 
-    LogPrint("BUY SIGNAL STRENGTH: ", strength.totalScore);
+    // Dynamic threshold based on context
+    int requiredScore = isPyramiding ? MinPyramidingBuySignalScore : MinBuySignalScore;
 
-    if (strength.totalScore >= MinBuySignalScore) 
+    if (strength.totalScore >= requiredScore) 
     {   
-        LogPrint("+-----------------------------------------+");
-        LogPrint("BUY SIGNAL RECEIVED");
-        LogPrint("+-----------------------------------------+");
-        LogPrint("Trend Score: ", strength.trendScore);
-        LogPrint("Momentum Score: ", strength.momentumScore);
-        LogPrint("Confirmation Score: ", strength.confirmationScore);
-        LogPrint("Total Score: ", strength.totalScore);
+        LogPrint("BUY SIGNAL RECEIVED (Score: ", strength.totalScore, "/", requiredScore, ")");
+        LogPrint("Details: RSI=", strength.rsiScore, 
+                 ", EMA=", strength.emaScore, 
+                 ", BB=", strength.bollingerScore, 
+                 ", Stoch=", strength.stochasticScore, 
+                 ", Wick=", strength.wickScore,
+                 ", Mom=", strength.momentumScore,
+                 ", SR=", strength.supportResistanceScore,
+                 ", Break=", strength.breakoutScore);
         LogPrint("Reasoning: ", strength.reasoning);
+        LogPrint("Context: ", isPyramiding ? "Pyramiding" : "Standard");
         LogPrint("Price: ", currentPrice);
-        LogPrint("+-----------------------------------------+");
 
         return strength.totalScore;
     }
@@ -416,28 +712,36 @@ int BuySignal()
     return 0;
 }
 
-// Sell Signal - ALIGNED with invalidation logic
+// Sell Signal
 int SellSignal()
 {
     double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    if(!AllowNewSell(currentPrice)) return 0;
+    bool isPyramiding = false;
+    
+    // Check strict conditions (limits & distance) first - O(1)
+    // NOTE: CheckSellConditions returns true if valid
+    if(!CheckSellConditions(currentPrice, isPyramiding)) return 0;
 
+    // Only calculate heavyweight indicators if conditions allow
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL);
 
-    LogPrint("SELL SIGNAL STRENGTH: ", strength.totalScore);
+    // Dynamic threshold based on context
+    int requiredScore = isPyramiding ? MinPyramidingSellSignalScore : MinSellSignalScore;
 
-    if (strength.totalScore >= MinSellSignalScore)
+    if (strength.totalScore >= requiredScore)
     {
-        LogPrint("+-----------------------------------------+");
-        LogPrint("SELL SIGNAL RECEIVED");
-        LogPrint("+-----------------------------------------+");
-        LogPrint("Trend Score: ", strength.trendScore);
-        LogPrint("Momentum Score: ", strength.momentumScore);
-        LogPrint("Confirmation Score: ", strength.confirmationScore);
-        LogPrint("Total Score: ", strength.totalScore);
+        LogPrint("SELL SIGNAL RECEIVED (Score: ", strength.totalScore, "/", requiredScore, ")");
+        LogPrint("Details: RSI=", strength.rsiScore, 
+                 ", EMA=", strength.emaScore, 
+                 ", BB=", strength.bollingerScore, 
+                 ", Stoch=", strength.stochasticScore, 
+                 ", Wick=", strength.wickScore,
+                 ", Mom=", strength.momentumScore,
+                 ", SR=", strength.supportResistanceScore,
+                 ", Break=", strength.breakoutScore);
         LogPrint("Reasoning: ", strength.reasoning);
+        LogPrint("Context: ", isPyramiding ? "Pyramiding" : "Standard");
         LogPrint("Price: ", currentPrice);
-        LogPrint("+-----------------------------------------+");
 
         return strength.totalScore;
     }
@@ -445,46 +749,42 @@ int SellSignal()
     return 0;
 }
 
-// FAST duplicate buy filter - O(n) single pass
-bool AllowNewBuy(double price)
+// FAST duplicate buy filter - O(1) using globals
+// Returns true if conditions allow a trade.
+// Sets isPyramiding=true if we are adding to a position on the same candle.
+bool CheckBuyConditions(double price, bool &isPyramiding)
 {
+    isPyramiding = false;
     datetime currentBarTime = iTime(_Symbol, _Period, 0);
-    double minDistance = ZonePoints * _Point * BuyDuplicateMultiplier;
+
+    // Determine effective count
+    int buysOnCandle = (g_CurrentBarTime == currentBarTime) ? g_BuysOnCurrentBar : 0;
     
-    // Check all existing BUY positions in ONE loop
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    // Check Pyramiding Limits per Candle
+    int limit = EnablePyramiding ? MaxPositionsPerCandle : 1;
+    
+    if(buysOnCandle >= limit)
     {
-        ulong ticket = PositionGetTicket(i);
-        if(ticket <= 0) continue;
+        return false;
+    }
+
+    // Check if we have a previous buy position
+    if(g_LastBuyTime > 0)
+    {
+        // Fast bar time calculation
+        datetime lastPosBarTime = (g_LastBuyTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
         
-        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        
-        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-        
-        if(posType == POSITION_TYPE_BUY)
+        // Only check distance if opened on SAME bar
+        if(lastPosBarTime == currentBarTime)
         {
-            datetime posOpenTime = (datetime)PositionGetInteger(POSITION_TIME);
-            double posOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+            isPyramiding = true; // Adding within the same bar
             
-            // Fast bar time calculation using period seconds
-            datetime posBarTime = (posOpenTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+            double minDistance = ZonePoints * _Point * BuyDuplicateMultiplier;
+            double distance = MathAbs(price - g_LastBuyPrice);
             
-            // Only check distance if opened on SAME bar
-            if(posBarTime == currentBarTime)
+            if(distance < minDistance)
             {
-                double distance = MathAbs(price - posOpenPrice);
-                
-                if(distance < minDistance)
-                {
-                    return false;
-                }
-
-                SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY);
-
-                if (strength.totalScore < MinPyramidingBuySignalScore)
-                {
-                    return false;
-                }
+                return false;
             }
         }
     }
@@ -492,80 +792,47 @@ bool AllowNewBuy(double price)
     return true;
 }
 
-// FAST duplicate sell filter - O(n) single pass
-bool AllowNewSell(double price)
+// FAST duplicate sell filter - O(1) using globals
+// Returns true if conditions allow a trade.
+// Sets isPyramiding=true if we are adding to a position on the same candle.
+bool CheckSellConditions(double price, bool &isPyramiding)
 {
+    isPyramiding = false;
     datetime currentBarTime = iTime(_Symbol, _Period, 0);
-    double minDistance = ZonePoints * _Point * SellDuplicateMultiplier;
     
-    // Check all existing SELL positions in ONE loop
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    // Determine effective count
+    int sellsOnCandle = (g_CurrentBarTime == currentBarTime) ? g_SellsOnCurrentBar : 0;
+    
+    // Check Pyramiding Limits per Candle
+    int limit = EnablePyramiding ? MaxPositionsPerCandle : 1;
+    
+    if(sellsOnCandle >= limit)
     {
-        ulong ticket = PositionGetTicket(i);
-        if(ticket <= 0) continue;
+        return false;
+    }
+
+    // Check if we have a previous sell position
+    if(g_LastSellTime > 0)
+    {
+        // Fast bar time calculation
+        datetime lastPosBarTime = (g_LastSellTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
         
-        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        
-        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-        
-        if(posType == POSITION_TYPE_SELL)
+        // Only check distance if opened on SAME bar
+        if(lastPosBarTime == currentBarTime)
         {
-            datetime posOpenTime = (datetime)PositionGetInteger(POSITION_TIME);
-            double posOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+            isPyramiding = true; // Adding within the same bar
             
-            // Fast bar time calculation using period seconds
-            datetime posBarTime = (posOpenTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+            double minDistance = ZonePoints * _Point * SellDuplicateMultiplier;
+            double distance = MathAbs(price - g_LastSellPrice);
             
-            // Only check distance if opened on SAME bar
-            if(posBarTime == currentBarTime)
+            if(distance < minDistance)
             {
-                double distance = MathAbs(price - posOpenPrice);
-                
-                if(distance < minDistance)
-                {
-                    return false;
-                }
-
-                SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL);
-
-                if (strength.totalScore < MinPyramidingSellSignalScore)
-                {
-                    return false;
-                }
+                return false;
             }
         }
     }
     
     return true;
-}
-
-// Helper: Get candle body
-double CandleBody(int index)
-{
-    return MathAbs(iClose(_Symbol, _Period, index) - iOpen(_Symbol, _Period, index));
-}
-
-// Helper: Get candle range
-double CandleRange(int index)
-{
-    return iHigh(_Symbol, _Period, index) - iLow(_Symbol, _Period, index);
-}
-
-// Function to get next higher timeframe
-ENUM_TIMEFRAMES GetHigherTimeframe()
-{
-   switch(_Period)
-   {
-      case PERIOD_M1:  return PERIOD_M5;
-      case PERIOD_M5:  return PERIOD_M15;
-      case PERIOD_M15: return PERIOD_M30;
-      case PERIOD_M30: return PERIOD_H1;
-      case PERIOD_H1:  return PERIOD_H4;
-      case PERIOD_H4:  return PERIOD_D1;
-      case PERIOD_D1:  return PERIOD_W1;
-      case PERIOD_W1:  return PERIOD_MN1;
-      default:         return PERIOD_M5;  // fallback
-   }
 }
 // +------------------------------------------------------------------+
 
@@ -574,6 +841,9 @@ ENUM_TIMEFRAMES GetHigherTimeframe()
 // +------------------------------------------------------------------+
 void ManagePositions()
 {   
+    // Sync managed positions with broker (remove closed ones)
+    SyncManagedPositions();
+
     // Manage trailing stops for all positions
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
@@ -585,7 +855,8 @@ void ManagePositions()
         if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
 
-        if(EnableTrailingStop) ManageTrailingStop(ticket);
+        // Manage Trailing TP & SL for all positions
+        ManageTrailingTPSL(ticket);
     }
 
     // Manage losing positions
@@ -593,566 +864,345 @@ void ManagePositions()
 }
 
 // +------------------------------------------------------------------+
-// | Signal Strength Analysis (1-10 Scale with Wick + HTF)            |
+// | Signal Strength Analysis - Indicator-Based Scoring System        |
+// | Uses RSI, EMA, Bollinger Bands, Stochastic + Candle Analysis     |
+// | Weights are adjustable via input variables:                      |
+// |   WeightRSI, WeightEMA, WeightBollinger, WeightStochastic        |
+// |   ScoreCandleWick, ScoreCandleMomentum, ScoreNearSR, ScoreBreakSR|
 // +------------------------------------------------------------------+
 SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
 {
     SignalStrength strength;
-    strength.trendScore = 0;
+    
+    // Initialize all scores to 0
+    strength.rsiScore = 0;
+    strength.emaScore = 0;
+    strength.bollingerScore = 0;
+    strength.stochasticScore = 0;
+    strength.candleScore = 0;
+    strength.wickScore = 0;
     strength.momentumScore = 0;
-    strength.confirmationScore = 0;
+    strength.supportResistanceScore = 0;
+    strength.breakoutScore = 0;
+    strength.buyScore = 0;
+    strength.sellScore = 0;
     strength.totalScore = 0;
     strength.reasoning = "";
     
-    // CURRENT TIMEFRAME DATA
-    double close1 = iClose(_Symbol, _Period, 1);
+    // ================================================================
+    // 1. EMA SCORE (Weight: 3x)
+    // ================================================================
+    double emaFastBuffer[], emaSlowBuffer[];
+    ArraySetAsSeries(emaFastBuffer, true);
+    ArraySetAsSeries(emaSlowBuffer, true);
+    
+    bool isUptrend = false;
+    bool isDowntrend = false;
+    
+    if(CopyBuffer(g_EMA_Fast_Handle, 0, 0, 3, emaFastBuffer) >= 3 &&
+       CopyBuffer(g_EMA_Slow_Handle, 0, 0, 3, emaSlowBuffer) >= 3)
+    {
+        double emaFast = emaFastBuffer[0];
+        double emaSlow = emaSlowBuffer[0];
+        double emaFastPrev = emaFastBuffer[1];
+        double emaSlowPrev = emaSlowBuffer[1];
+        double currentPrice = (orderType == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+        
+        int emaBuyScore = 0;
+        int emaSellScore = 0;
+        
+        if(emaFast > emaSlow) isUptrend = true;
+        if(emaFast < emaSlow) isDowntrend = true;
+        
+        if(isUptrend)
+        {
+            if(emaFastPrev <= emaSlowPrev) { emaBuyScore = 3; strength.reasoning += "[EMA Cross] "; }
+            else if(currentPrice > emaFast) { emaBuyScore = 2; }
+            else { emaBuyScore = 1; }
+        }
+        
+        if(isDowntrend)
+        {
+            if(emaFastPrev >= emaSlowPrev) { emaSellScore = 3; strength.reasoning += "[EMA Cross] "; }
+            else if(currentPrice < emaFast) { emaSellScore = 2; }
+            else { emaSellScore = 1; }
+        }
+        
+        strength.buyScore += emaBuyScore * WeightEMA;
+        strength.sellScore += emaSellScore * WeightEMA;
+        strength.emaScore = (orderType == ORDER_TYPE_BUY) ? emaBuyScore : emaSellScore;
+    }
+
+    // ================================================================
+    // 2. RSI SCORE (Weight: 3x)
+    // ================================================================
+    double rsiBuffer[];
+    ArraySetAsSeries(rsiBuffer, true);
+    
+    if(CopyBuffer(g_RSI_Handle, 0, 0, 3, rsiBuffer) >= 3)
+    {
+        double rsi = rsiBuffer[0];
+        double rsiPrev = rsiBuffer[1];
+        int rsiBuyScore = 0;
+        int rsiSellScore = 0;
+        
+        if(rsi < 30)
+        {
+             if(rsi > rsiPrev) { rsiBuyScore = 3; strength.reasoning += "[RSI Hook Up] "; }
+             else { rsiBuyScore = 1; }
+        }
+        else if(rsi < 40 && rsi > rsiPrev && isUptrend)
+        {
+             rsiBuyScore = 2;
+             strength.reasoning += "[RSI Dip] ";
+        }
+        
+        if(rsi > 70)
+        {
+            if(rsi < rsiPrev) { rsiSellScore = 3; strength.reasoning += "[RSI Hook Down] "; }
+            else { rsiSellScore = 1; }
+        }
+        else if(rsi > 60 && rsi < rsiPrev && isDowntrend)
+        {
+             rsiSellScore = 2;
+             strength.reasoning += "[RSI Rally] ";
+        }
+        
+        strength.buyScore += rsiBuyScore * WeightRSI;
+        strength.sellScore += rsiSellScore * WeightRSI;
+        strength.rsiScore = (orderType == ORDER_TYPE_BUY) ? rsiBuyScore : rsiSellScore;
+    }
+    
+    // ================================================================
+    // 3. BOLLINGER BANDS SCORE (Weight: 2x)
+    // ================================================================
+    double bbMiddle[], bbUpper[], bbLower[];
+    ArraySetAsSeries(bbMiddle, true);
+    ArraySetAsSeries(bbUpper, true);
+    ArraySetAsSeries(bbLower, true);
+    
+    if(CopyBuffer(g_Bollinger_Handle, 0, 0, 2, bbMiddle) >= 2 &&
+       CopyBuffer(g_Bollinger_Handle, 1, 0, 2, bbUpper) >= 2 &&
+       CopyBuffer(g_Bollinger_Handle, 2, 0, 2, bbLower) >= 2)
+    {
+        double close0 = iClose(_Symbol, _Period, 0);
+        double close1 = iClose(_Symbol, _Period, 1);
+        int bbBuyScore = 0;
+        int bbSellScore = 0;
+        
+        // Lower Band Rejection
+        if(close1 < bbLower[1] && close0 > bbLower[0]) 
+        {
+            bbBuyScore = 2;
+            strength.reasoning += "[BB Low Rej] ";
+        }
+        else if(close0 < bbLower[0]) bbBuyScore = 1; 
+
+        // Upper Band Rejection
+        if(close1 > bbUpper[1] && close0 < bbUpper[0])
+        {
+            bbSellScore = 2;
+            strength.reasoning += "[BB High Rej] ";
+        }
+        else if(close0 > bbUpper[0]) bbSellScore = 1;
+        
+        strength.buyScore += bbBuyScore * WeightBollinger;
+        strength.sellScore += bbSellScore * WeightBollinger;
+        strength.bollingerScore = (orderType == ORDER_TYPE_BUY) ? bbBuyScore : bbSellScore;
+    }
+    
+    // ================================================================
+    // 4. STOCHASTIC SCORE (Weight: 2x)
+    // ================================================================
+    double stochK[], stochD[];
+    ArraySetAsSeries(stochK, true);
+    ArraySetAsSeries(stochD, true);
+    
+    if(CopyBuffer(g_Stochastic_Handle, 0, 0, 3, stochK) >= 3 &&
+       CopyBuffer(g_Stochastic_Handle, 1, 0, 3, stochD) >= 3)
+    {
+        double k = stochK[0];
+        double d = stochD[0];
+        double kPrev = stochK[1];
+        double dPrev = stochD[1];
+        int stochBuyScore = 0;
+        int stochSellScore = 0;
+        
+        if(k < 20)
+        {
+            if(k > d && kPrev <= dPrev) { stochBuyScore = 2; strength.reasoning += "[Stoch Cross] "; }
+            else if(k > kPrev) { stochBuyScore = 1; }
+        }
+        
+        if(k > 80)
+        {
+            if(k < d && kPrev >= dPrev) { stochSellScore = 2; strength.reasoning += "[Stoch Cross] "; }
+            else if(k < kPrev) { stochSellScore = 1; }
+        }
+        
+        strength.buyScore += stochBuyScore * WeightStochastic;
+        strength.sellScore += stochSellScore * WeightStochastic;
+        strength.stochasticScore = (orderType == ORDER_TYPE_BUY) ? stochBuyScore : stochSellScore;
+    }
+    
+    // ================================================================
+    // 5. CANDLE ANALYSIS (Separated Wick & Momentum)
+    // ================================================================
+    double open0 = iOpen(_Symbol, _Period, 0);
+    double close0 = iClose(_Symbol, _Period, 0); // Active candle
+    double high0 = iHigh(_Symbol, _Period, 0);
+    double low0 = iLow(_Symbol, _Period, 0);
+    
     double open1 = iOpen(_Symbol, _Period, 1);
+    double close1 = iClose(_Symbol, _Period, 1); // Last completed
     double high1 = iHigh(_Symbol, _Period, 1);
     double low1 = iLow(_Symbol, _Period, 1);
     
-    double close2 = iClose(_Symbol, _Period, 2);
-    double open2 = iOpen(_Symbol, _Period, 2);
-    double high2 = iHigh(_Symbol, _Period, 2);
-    double low2 = iLow(_Symbol, _Period, 2);
+    int wickBuyScore = 0;
+    int wickSellScore = 0;
+    int momentumBuyScore = 0;
+    int momentumSellScore = 0;
     
-    double close3 = iClose(_Symbol, _Period, 3);
-    double open3 = iOpen(_Symbol, _Period, 3);
+    // -- Wick Analysis (Rejection) --
+    double bodySize1 = MathAbs(close1 - open1);
+    double upperWick1 = high1 - MathMax(open1, close1);
+    double lowerWick1 = MathMin(open1, close1) - low1;
+    double totalSize1 = high1 - low1;
     
-    if(close1 == 0 || open1 == 0) return strength;
-    
-    // HIGHER TIMEFRAME DATA
-    ENUM_TIMEFRAMES htf = GetHigherTimeframe();
-    double close_htf = iClose(_Symbol, htf, 1);
-    double open_htf = iOpen(_Symbol, htf, 1);
-    double high_htf = iHigh(_Symbol, htf, 1);
-    double low_htf = iLow(_Symbol, htf, 1);
-    
-    // Candle direction checks
-    bool isBullish1 = close1 > open1;
-    bool isBullish2 = close2 > open2;
-    bool isBullish3 = close3 > open3;
-    bool isBearish1 = close1 < open1;
-    bool isBearish2 = close2 < open2;
-    bool isBearish3 = close3 < open3;
-    
-    bool isBullish_htf = close_htf > open_htf;
-    bool isBearish_htf = close_htf < open_htf;
-    
-    // Calculate body sizes and wicks
-    double body1 = MathAbs(close1 - open1);
-    double body2 = MathAbs(close2 - open2);
-    double body3 = MathAbs(close3 - open3);
-    double range1 = high1 - low1;
-    
-    // FIX: Calculate average excluding current candle
-    double avgBody = (body2 + body3) / 2;
-    
-    // Wick calculations for current candle
-    double upperWick1 = high1 - MathMax(close1, open1);
-    double lowerWick1 = MathMin(close1, open1) - low1;
-    
-    // HTF wick calculations
-    double body_htf = MathAbs(close_htf - open_htf);
-    double upperWick_htf = high_htf - MathMax(close_htf, open_htf);
-    double lowerWick_htf = MathMin(close_htf, open_htf) - low_htf;
-    
-    if(orderType == ORDER_TYPE_BUY)
+    if(totalSize1 > 0)
     {
-        // TREND SCORE (0-3) - FIX: Use mutually exclusive conditions
-        if(isBullish1 && isBullish2 && isBullish3)
+        // Hammer / Pinbar at Low
+        if(lowerWick1 > bodySize1 * 2 && upperWick1 < bodySize1)
         {
-            strength.trendScore = 3;
-            strength.reasoning += "[Triple Bull] ";
+            wickBuyScore = ScoreCandleWick;
+            strength.reasoning += "[Hammer] ";
         }
-        else if(isBullish1 && isBullish2)
+        // Shooting Star / Pinbar at High
+        if(upperWick1 > bodySize1 * 2 && lowerWick1 < bodySize1)
         {
-            strength.trendScore = 2;
-            strength.reasoning += "[Consecutive Bull] ";
+            wickSellScore = ScoreCandleWick;
+            strength.reasoning += "[Shooter] ";
         }
-        else if(isBullish1)
-        {
-            strength.trendScore = 1;
-            strength.reasoning += "[Bull Candle] ";
-        }
-        
-        // MOMENTUM SCORE (0-3) - FIX: Use proper thresholds
-        if(avgBody > 0)  // Prevent division by zero
-        {
-            double bodyRatio = body1 / avgBody;
-            
-            if(bodyRatio > 1.5)
-            {
-                strength.momentumScore = 3;
-                strength.reasoning += "[Very Strong] ";
-            }
-            else if(bodyRatio > 1.2)
-            {
-                strength.momentumScore = 2;
-                strength.reasoning += "[Strong Body] ";
-            }
-            else if(bodyRatio > 1.0)
-            {
-                strength.momentumScore = 1;
-                strength.reasoning += "[Above Avg] ";
-            }
-        }
-        
-        // Add body-to-range check (independent)
-        if(range1 > 0 && body1 / range1 > 0.6)
-        {
-            strength.momentumScore = MathMin(3, strength.momentumScore + 1);
-            strength.reasoning += "[High Body Ratio] ";
-        }
-        
-        // CONFIRMATION SCORE (0-4)
-        int confirmScore = 0;
-        
-        // 1. WICK CONFIRMATION - Small upper wick (no rejection)
-        if(body1 > 0 && upperWick1 < body1 * 0.3)
-        {
-            confirmScore++;
-            strength.reasoning += "[Clean Wick] ";
-        }
-        
-        // 2. WICK POSITION - Lower wick larger (buying pressure)
-        if(lowerWick1 > upperWick1)
-        {
-            confirmScore++;
-            strength.reasoning += "[Buy Pressure] ";
-        }
-        
-        // 3. STRUCTURE - Higher low (uptrend structure)
-        if(low1 > low2)
-        {
-            confirmScore++;
-            strength.reasoning += "[Higher Low] ";
-        }
-        
-        // 4. HIGHER TIMEFRAME ALIGNMENT
-        if(isBullish_htf)
-        {
-            confirmScore++;
-            strength.reasoning += "[HTF Bull] ";
-        }
-        
-        // PENALTY FOR WEAK SIGNALS
-        // Large upper wick = rejection (reduce score)
-        if(body1 > 0 && upperWick1 > body1 * 0.5)
-        {
-            confirmScore = MathMax(0, confirmScore - 2);
-            strength.reasoning += "[Upper Rejection!] ";
-        }
-        
-        // HTF bearish = counter-trend (reduce score)
-        if(isBearish_htf)
-        {
-            strength.trendScore = MathMax(0, strength.trendScore - 1);
-            strength.reasoning += "[HTF Conflict!] ";
-        }
-        
-        strength.confirmationScore = MathMin(4, confirmScore);  // Cap at 4
-    }
-    else // ORDER_TYPE_SELL
-    {
-        // TREND SCORE (0-3) - FIX: Use mutually exclusive conditions
-        if(isBearish1 && isBearish2 && isBearish3)
-        {
-            strength.trendScore = 3;
-            strength.reasoning += "[Triple Bear] ";
-        }
-        else if(isBearish1 && isBearish2)
-        {
-            strength.trendScore = 2;
-            strength.reasoning += "[Consecutive Bear] ";
-        }
-        else if(isBearish1)
-        {
-            strength.trendScore = 1;
-            strength.reasoning += "[Bear Candle] ";
-        }
-        
-        // MOMENTUM SCORE (0-3) - FIX: Use proper thresholds
-        if(avgBody > 0)
-        {
-            double bodyRatio = body1 / avgBody;
-            
-            if(bodyRatio > 1.5)
-            {
-                strength.momentumScore = 3;
-                strength.reasoning += "[Very Strong] ";
-            }
-            else if(bodyRatio > 1.2)
-            {
-                strength.momentumScore = 2;
-                strength.reasoning += "[Strong Body] ";
-            }
-            else if(bodyRatio > 1.0)
-            {
-                strength.momentumScore = 1;
-                strength.reasoning += "[Above Avg] ";
-            }
-        }
-        
-        // Add body-to-range check (independent)
-        if(range1 > 0 && body1 / range1 > 0.6)
-        {
-            strength.momentumScore = MathMin(3, strength.momentumScore + 1);
-            strength.reasoning += "[High Body Ratio] ";
-        }
-        
-        // CONFIRMATION SCORE (0-4)
-        int confirmScore = 0;
-        
-        // 1. WICK CONFIRMATION - Small lower wick (no rejection)
-        if(body1 > 0 && lowerWick1 < body1 * 0.3)
-        {
-            confirmScore++;
-            strength.reasoning += "[Clean Wick] ";
-        }
-        
-        // 2. WICK POSITION - Upper wick larger (selling pressure)
-        if(upperWick1 > lowerWick1)
-        {
-            confirmScore++;
-            strength.reasoning += "[Sell Pressure] ";
-        }
-        
-        // 3. STRUCTURE - Lower high (downtrend structure)
-        if(high1 < high2)
-        {
-            confirmScore++;
-            strength.reasoning += "[Lower High] ";
-        }
-        
-        // 4. HIGHER TIMEFRAME ALIGNMENT
-        if(isBearish_htf)
-        {
-            confirmScore++;
-            strength.reasoning += "[HTF Bear] ";
-        }
-        
-        // PENALTY FOR WEAK SIGNALS
-        // Large lower wick = rejection (reduce score)
-        if(body1 > 0 && lowerWick1 > body1 * 0.5)
-        {
-            confirmScore = MathMax(0, confirmScore - 2);
-            strength.reasoning += "[Lower Rejection!] ";
-        }
-        
-        // HTF bullish = counter-trend (reduce score)
-        if(isBullish_htf)
-        {
-            strength.trendScore = MathMax(0, strength.trendScore - 1);
-            strength.reasoning += "[HTF Conflict!] ";
-        }
-        
-        strength.confirmationScore = MathMin(4, confirmScore);  // Cap at 4
     }
     
-    // Calculate total score (max 10)
-    strength.totalScore = strength.trendScore + strength.momentumScore + strength.confirmationScore;
+    // -- Momentum Shift --
+    double bodySize0 = MathAbs(close0 - open0);
+    
+    if(bodySize0 > bodySize1 * 1.5) // Active candle is significantly larger
+    {
+        if(close0 > open0) // Bullish Momentum
+        {
+            momentumBuyScore = ScoreCandleMomentum;
+            strength.reasoning += "[Mom. Shift] ";
+        }
+        if(close0 < open0) // Bearish Momentum
+        {
+            momentumSellScore = ScoreCandleMomentum;
+            strength.reasoning += "[Mom. Shift] ";
+        }
+    }
+    
+    strength.wickScore = (orderType == ORDER_TYPE_BUY) ? wickBuyScore : wickSellScore;
+    strength.momentumScore = (orderType == ORDER_TYPE_BUY) ? momentumBuyScore : momentumSellScore;
+    
+    strength.buyScore += wickBuyScore + momentumBuyScore;
+    strength.sellScore += wickSellScore + momentumSellScore;
+    strength.candleScore = strength.wickScore + strength.momentumScore; 
 
+    // ================================================================
+    // 6. SUPPORT AND RESISTANCE & 7. BREAKOUT (Detailed)
+    // ================================================================
+    
+    int srBuyScore = 0;
+    int srSellScore = 0;
+    int breakoutBuyScore = 0;
+    int breakoutSellScore = 0;
+
+
+    int lookback = 50;
+    int highestIndex = iHighest(_Symbol, _Period, MODE_HIGH, lookback, 1);
+    int lowestIndex = iLowest(_Symbol, _Period, MODE_LOW, lookback, 1);
+    
+    if(highestIndex != -1 && lowestIndex != -1)
+    {
+        double resistancePrice = iHigh(_Symbol, _Period, highestIndex);
+        double supportPrice = iLow(_Symbol, _Period, lowestIndex);
+        double currentPrice = (close0); 
+        
+        double range = resistancePrice - supportPrice;
+        double threshold = range * 0.1; // 10% tolerance
+        
+        // Near Support (Buy Potential)
+        if(MathAbs(currentPrice - supportPrice) < threshold)
+        {
+            srBuyScore = ScoreNearSR;
+            strength.reasoning += "[Near Supp] ";
+        }
+        
+        // Near Resistance (Sell Potential)
+        if(MathAbs(currentPrice - resistancePrice) < threshold)
+        {
+            srSellScore = ScoreNearSR;
+            strength.reasoning += "[Near Res] ";
+        }
+        
+        // Breakout Support (Sell Loophole)
+        if(close0 < supportPrice)
+        {
+            breakoutSellScore = ScoreBreakoutSR;
+            strength.reasoning += "[Supp Broken] ";
+        }
+        
+        // Breakout Resistance (Buy Loophole)
+        if(close0 > resistancePrice)
+        {
+            breakoutBuyScore = ScoreBreakoutSR;
+            strength.reasoning += "[Res Broken] ";
+        }
+    }
+    
+    strength.supportResistanceScore = (orderType == ORDER_TYPE_BUY) ? srBuyScore : srSellScore;
+    strength.breakoutScore = (orderType == ORDER_TYPE_BUY) ? breakoutBuyScore : breakoutSellScore;
+    
+    strength.buyScore += srBuyScore + breakoutBuyScore;
+    strength.sellScore += srSellScore + breakoutSellScore;
+
+    // ================================================================
+    // FINAL SCORE & TREND FILTER
+    // ================================================================
+    if(isUptrend && strength.sellScore > 0)
+    {
+        strength.sellScore = (int)(strength.sellScore * 0.5); 
+        strength.reasoning += "[Trend Filter] ";
+    }
+    
+    if(isDowntrend && strength.buyScore > 0)
+    {
+        strength.buyScore = (int)(strength.buyScore * 0.5); 
+        strength.reasoning += "[Trend Filter] ";
+    }
+
+    if(strength.buyScore > strength.sellScore)
+    {
+        strength.totalScore = strength.buyScore;
+        if(orderType == ORDER_TYPE_SELL) strength.totalScore = 0;
+    }
+    else if(strength.sellScore > strength.buyScore)
+    {
+        strength.totalScore = strength.sellScore;
+        if(orderType == ORDER_TYPE_BUY) strength.totalScore = 0;
+    }
+    else
+    {
+        strength.totalScore = 0;
+    }
+    
     return strength;
 }
 
 // +------------------------------------------------------------------+
-// | Get Buy Direction Invalidation (Current Candle + Price Action)   |
-// +------------------------------------------------------------------+
-InvalidationDetails GetBuyInvalidation()
-{
-    InvalidationDetails details;
-    details.totalScore = 0;
-    details.reason = "";
-    
-    // Current candle (real-time)
-    double close0 = iClose(_Symbol, _Period, 0);
-    double open0 = iOpen(_Symbol, _Period, 0);
-    double high0 = iHigh(_Symbol, _Period, 0);
-    double low0 = iLow(_Symbol, _Period, 0);
-    
-    // Previous candles
-    double close1 = iClose(_Symbol, _Period, 1);
-    double open1 = iOpen(_Symbol, _Period, 1);
-    double high1 = iHigh(_Symbol, _Period, 1);
-    double low1 = iLow(_Symbol, _Period, 1);
-    
-    double close2 = iClose(_Symbol, _Period, 2);
-    double open2 = iOpen(_Symbol, _Period, 2);
-    double close3 = iClose(_Symbol, _Period, 3);
-    double open3 = iOpen(_Symbol, _Period, 3);
-    
-    if(close0 == 0 || open0 == 0) return details;
-    
-    // Current price
-    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    
-    // Candle direction checks
-    bool isBearish0 = close0 < open0;  // Current candle forming bearish
-    bool isBearish1 = close1 < open1;
-    bool isBearish2 = close2 < open2;
-    bool isBearish3 = close3 < open3;
-    
-    // Calculate bodies
-    double body0 = MathAbs(close0 - open0);
-    double body1 = MathAbs(close1 - open1);
-    double body2 = MathAbs(close2 - open2);
-    double avgBody = (body1 + body2) / 2;
-    
-    // CURRENT CANDLE CHECKS (Real-time)
-    // 1. Current candle is bearish and growing = 1 point
-    if(isBearish0 && body0 > 0)
-    {
-        details.totalScore += 1;
-        details.reason += "[Current Bearish] ";
-        
-        // Strong bearish current candle = +1 point
-        if(body0 > avgBody * 1.2)
-        {
-            details.totalScore += 1;
-            details.reason += "[Strong Current Bearish] ";
-        }
-    }
-    
-    // 2. Current candle has large upper wick (rejection) = 2 points
-    double upperWick0 = high0 - MathMax(close0, open0);
-    double lowerWick0 = MathMin(close0, open0) - low0;
-    
-    if(upperWick0 > body0 * 0.5)
-    {
-        details.totalScore += 2;
-        details.reason += "[Upper Wick Rejection] ";
-        
-        // Very large upper wick = unrecoverable
-        if(upperWick0 > body0 * 1.5)
-        {
-            details.totalScore += 1;
-            details.reason += "[Large Rejection] ";
-        }
-    }
-    
-    // 3. Current price moving down aggressively = 1 point
-    double priceChange = currentPrice - close1;
-    if(priceChange < 0 && MathAbs(priceChange) > avgBody * 0.5)
-    {
-        details.totalScore += 1;
-        details.reason += "[Price Dropping] ";
-    }
-    
-    // PREVIOUS CANDLES PATTERN
-    // 4. Previous candle was bearish = 1 point
-    if(isBearish1)
-    {
-        details.totalScore += 1;
-        details.reason += "[Prev Bearish] ";
-    }
-    
-    // 5. Previous candle had upper wick rejection = 1 point
-    double upperWick1 = high1 - MathMax(close1, open1);
-    double lowerWick1 = MathMin(close1, open1) - low1;
-    
-    if(upperWick1 > CandleBody(1) * 0.6 && upperWick1 > lowerWick1)
-    {
-        details.totalScore += 1;
-        details.reason += "[Prev Wick Rejection] ";
-    }
-    
-    // 6. Consecutive bearish candles = 2 points
-    if(isBearish0 && isBearish1)
-    {
-        details.totalScore += 2;
-        details.reason += "[Consecutive Bearish] ";
-    }
-    
-    // 7. Three consecutive bearish = strong reversal (unrecoverable)
-    if(isBearish1 && isBearish2 && isBearish3)
-    {
-        details.totalScore += 2;
-        details.reason += "[Triple Bearish Pattern] ";
-    }
-    
-    // 8. Strong bearish momentum on previous candle = 1 point
-    if(isBearish1 && body1 > avgBody * 1.5)
-    {
-        details.totalScore += 1;
-        details.reason += "[Strong Momentum] ";
-    }
-    
-    // 9. Current candle low breaking previous low (lower lows) = 2 points
-    if(low0 < low1)
-    {
-        details.totalScore += 2;
-        details.reason += "[Lower Low] ";
-    }
-    
-    // 10. Higher timeframe confirmation
-    ENUM_TIMEFRAMES htf = GetHigherTimeframe();
-    double close_htf = iClose(_Symbol, htf, 0);
-    double open_htf = iOpen(_Symbol, htf, 0);
-    
-    if(close_htf < open_htf)
-    {
-        details.totalScore += 1;
-        details.reason += "[HTF Bearish] ";
-    }
-    
-    // Score Breakdown (Max ~15+ points):
-    // 1-3  : Minor concern (recoverable)
-    // 4-6  : Moderate invalidation (watch closely)
-    // 7-10 : Strong invalidation (consider closing)
-    // 11+  : Critical invalidation (close immediately)
-    return details;
-}
-
-// +------------------------------------------------------------------+
-// | Get Sell Direction Invalidation (Current Candle + Price Action)  |
-// +------------------------------------------------------------------+
-InvalidationDetails GetSellInvalidation()
-{
-    InvalidationDetails details;
-    details.totalScore = 0;
-    details.reason = "";
-    
-    // Current candle (real-time)
-    double close0 = iClose(_Symbol, _Period, 0);
-    double open0 = iOpen(_Symbol, _Period, 0);
-    double high0 = iHigh(_Symbol, _Period, 0);
-    double low0 = iLow(_Symbol, _Period, 0);
-    
-    // Previous candles
-    double close1 = iClose(_Symbol, _Period, 1);
-    double open1 = iOpen(_Symbol, _Period, 1);
-    double high1 = iHigh(_Symbol, _Period, 1);
-    double low1 = iLow(_Symbol, _Period, 1);
-    
-    double close2 = iClose(_Symbol, _Period, 2);
-    double open2 = iOpen(_Symbol, _Period, 2);
-    double close3 = iClose(_Symbol, _Period, 3);
-    double open3 = iOpen(_Symbol, _Period, 3);
-    
-    if(close0 == 0 || open0 == 0) return details;
-    
-    // Current price
-    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    
-    // Candle direction checks
-    bool isBullish0 = close0 > open0;  // Current candle forming bullish
-    bool isBullish1 = close1 > open1;
-    bool isBullish2 = close2 > open2;
-    bool isBullish3 = close3 > open3;
-    
-    // Calculate bodies
-    double body0 = MathAbs(close0 - open0);
-    double body1 = MathAbs(close1 - open1);
-    double body2 = MathAbs(close2 - open2);
-    double avgBody = (body1 + body2) / 2;
-    
-    // CURRENT CANDLE CHECKS (Real-time)
-    // 1. Current candle is bullish and growing = 1 point
-    if(isBullish0 && body0 > 0)
-    {
-        details.totalScore += 1;
-        details.reason += "[Current Bullish] ";
-        
-        // Strong bullish current candle = +1 point
-        if(body0 > avgBody * 1.2)
-        {
-            details.totalScore += 1;
-            details.reason += "[Strong Current Bullish] ";
-        }
-    }
-    
-    // 2. Current candle has large lower wick (rejection) = 2 points
-    double upperWick0 = high0 - MathMax(close0, open0);
-    double lowerWick0 = MathMin(close0, open0) - low0;
-    
-    if(lowerWick0 > body0 * 0.5)
-    {
-        details.totalScore += 2;
-        details.reason += "[Lower Wick Rejection] ";
-        
-        // Very large lower wick = unrecoverable
-        if(lowerWick0 > body0 * 1.5)
-        {
-            details.totalScore += 1;
-            details.reason += "[Large Rejection] ";
-        }
-    }
-    
-    // 3. Current price moving up aggressively = 1 point
-    double priceChange = currentPrice - close1;
-    if(priceChange > 0 && priceChange > avgBody * 0.5)
-    {
-        details.totalScore += 1;
-        details.reason += "[Price Rising] ";
-    }
-    
-    // PREVIOUS CANDLES PATTERN
-    // 4. Previous candle was bullish = 1 point
-    if(isBullish1)
-    {
-        details.totalScore += 1;
-        details.reason += "[Prev Bullish] ";
-    }
-    
-    // 5. Previous candle had lower wick rejection = 1 point
-    double upperWick1 = high1 - MathMax(close1, open1);
-    double lowerWick1 = MathMin(close1, open1) - low1;
-    
-    if(lowerWick1 > CandleBody(1) * 0.6 && lowerWick1 > upperWick1)
-    {
-        details.totalScore += 1;
-        details.reason += "[Prev Wick Rejection] ";
-    }
-    
-    // 6. Consecutive bullish candles = 2 points
-    if(isBullish0 && isBullish1)
-    {
-        details.totalScore += 2;
-        details.reason += "[Consecutive Bullish] ";
-    }
-    
-    // 7. Three consecutive bullish = strong reversal (unrecoverable)
-    if(isBullish1 && isBullish2 && isBullish3)
-    {
-        details.totalScore += 2;
-        details.reason += "[Triple Bullish Pattern] ";
-    }
-    
-    // 8. Strong bullish momentum on previous candle = 1 point
-    if(isBullish1 && body1 > avgBody * 1.5)
-    {
-        details.totalScore += 1;
-        details.reason += "[Strong Momentum] ";
-    }
-    
-    // 9. Current candle high breaking previous high (higher highs) = 2 points
-    if(high0 > high1)
-    {
-        details.totalScore += 2;
-        details.reason += "[Higher High] ";
-    }
-    
-    // 10. Higher timeframe confirmation
-    ENUM_TIMEFRAMES htf = GetHigherTimeframe();
-    double close_htf = iClose(_Symbol, htf, 0);
-    double open_htf = iOpen(_Symbol, htf, 0);
-    
-    if(close_htf > open_htf)
-    {
-        details.totalScore += 1;
-        details.reason += "[HTF Bullish] ";
-    }
-    
-    // Score Breakdown (Max ~15+ points):
-    // 1-3  : Minor concern (recoverable)
-    // 4-6  : Moderate invalidation (watch closely)
-    // 7-10 : Strong invalidation (consider closing)
-    // 11+  : Critical invalidation (close immediately)
-    return details;
-}
-
-// +------------------------------------------------------------------+
-// | Manage Losing Positions                                          |
+// | Manage Losing Positions - Signal Strength Based                  |
+// | Uses current signal strength vs initial to manage positions      |
 // +------------------------------------------------------------------+
 void ManageLosingPositions()
 {
@@ -1177,40 +1227,51 @@ void ManageLosingPositions()
         {
             ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
             
-            // Get invalidation for this position's direction
-            InvalidationDetails details;
-            if(posType == POSITION_TYPE_BUY)
+            // Get current signal strength for this position's direction
+            SignalStrength currentStrength;
+            ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+            currentStrength = GetSignalStrength(orderType);
+            
+            int currentScore = currentStrength.totalScore;
+            
+            // Get initial signal score from managed positions array
+            int initialScore = 0;
+            for(int j = 0; j < g_ManagedPositionCount; j++)
             {
-                details = GetBuyInvalidation();
-            }
-            else
-            {
-                details = GetSellInvalidation();
+                if(g_ManagedPositions[j].ticket == ticket)
+                {
+                    initialScore = g_ManagedPositions[j].signalScore;
+                    break;
+                }
             }
             
-            int score = details.totalScore;
+            // Calculate signal strength change
+            // Positive = signal strengthened, Negative = signal weakened
+            int signalChange = currentScore - initialScore;
             
             LogPrint("+-----------------------------------------+");
-            LogPrint("LOSING POSITION ANALYSIS");
+            LogPrint("LOSING POSITION ANALYSIS (Signal-Based)");
             LogPrint("Ticket: ", ticket, " | Type: ", EnumToString(posType));
             LogPrint("Profit: $", profit);
-            LogPrint("Invalidation Score: ", score, "/", StrongInvalidationThreshold);
-            LogPrint("Reason: ", details.reason);
+            LogPrint("Initial Signal Score: ", initialScore, " | Current: ", currentScore);
+            LogPrint("Signal Change: ", signalChange, " (positive = stronger)");
+            LogPrint("Reasoning: ", currentStrength.reasoning);
             LogPrint("+-----------------------------------------+");
             
-            // Decision logic:
-            // 1. Strong invalidation (>= threshold) = Close immediately
-            // 2. Over max hold count = Close
-            // 3. Otherwise = Hold
+            // Decision logic based on signal strength:
+            // 1. Signal still strong (currentScore >= initial or above threshold) = HOLD
+            // 2. Signal weakened significantly (dropped by half or below threshold) = CLOSE
+            // 3. Over max hold count = Close the weakest
             
             bool shouldClose = false;
             string closeReason = "";
             
-            // Check 1: Strong invalidation
-            if(score >= StrongInvalidationThreshold)
+            // Check 1: Signal weakened significantly
+            // If current score is below minimum threshold
+            if(currentScore < MinSignalStrengthToHold && currentScore < initialScore)
             {
                 shouldClose = true;
-                closeReason = "Strong Invalidation (Score: " + IntegerToString(score) + ")";
+                closeReason = "Signal Below Threshold (" + IntegerToString(currentScore) + " < " + IntegerToString(MinSignalStrengthToHold) + ")";
             }
             // Check 2: Over max hold count
             else if(holdCount >= MaxHoldingLossPositions)
@@ -1232,7 +1293,7 @@ void ManageLosingPositions()
             else
             {
                 holdCount++;
-                LogPrint("HOLDING position ", ticket, " (Score: ", score, ", Hold: ", holdCount, "/", MaxHoldingLossPositions, ")");
+                LogPrint("HOLDING position ", ticket, " - Signal still strong (Score: ", currentScore, ", Hold: ", holdCount, "/", MaxHoldingLossPositions, ")");
             }
         }
     }
@@ -1265,120 +1326,316 @@ int CountLosingPositions()
 // +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
-// | Manage Trailing Stop                                             |
+// | Manage Trailing TP & SL                                          |
+// | Adjusts TP/SL based on signal strength and trails price          |
 // +------------------------------------------------------------------+
-void ManageTrailingStop(ulong ticket)
+void ManageTrailingTPSL(ulong ticket)
 {
     if(!PositionSelectByTicket(ticket)) return;
-
-    double profit = PositionGetDouble(POSITION_PROFIT);
-
-    if(TSOnProfitableOnly && profit < (MinBreakEvenProfit * ProfitThresholdMultiplier)) return;
     
-    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+    // Get Position Details
     ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-    double volume = PositionGetDouble(POSITION_VOLUME);
-    double currentTP = PositionGetDouble(POSITION_TP);
     double currentSL = PositionGetDouble(POSITION_SL);
+    double currentTP = PositionGetDouble(POSITION_TP);
+    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+    double currentPrice = (posType == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double profit = PositionGetDouble(POSITION_PROFIT);
+    double volume = PositionGetDouble(POSITION_VOLUME);
     
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    // Get Signal Strength
+    ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+    SignalStrength currentStrength = GetSignalStrength(orderType);
+    int currentScore = currentStrength.totalScore;
     
-    double currentPrice = (posType == POSITION_TYPE_BUY) ? bid : ask;
-    
-    double trailingDistancePoints = ConvertToPoints(TSInputType, TSValue, volume);
-    double trailingDistancePrice  = trailingDistancePoints * _Point;
-    
-    long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-    long freezeLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-    
-    double minStopDistance = stopLevel * _Point;
-    double minFreezeDistance = freezeLevel * _Point;
-    double minDistance = MathMax(minStopDistance, minFreezeDistance);
-    
-    double breakEvenPrice = CalculateBreakEvenPrice(ticket, posType, entryPrice, volume);
-    
-    double newSL = 0;
-
-    // Buy position trailing logic
-    if(posType == POSITION_TYPE_BUY)
+    int initialScore = 0;
+    int posIndex = GetManagedPositionIndex(ticket);
+    if(posIndex != -1)
     {
-        double profitPoints = (currentPrice - entryPrice) / _Point;
-        if(profitPoints < trailingDistancePoints) return;
+        initialScore = g_ManagedPositions[posIndex].signalScore;
+    }
+    
+    // ================================================================
+    // ADAPTIVE LOGIC (Delta Based)
+    // ================================================================
+    double tpAdjustment = 0;
+    double slAdjustment = 0;
+    string adaptiveReason = "Normal";
 
-        newSL = currentPrice - trailingDistancePrice;
-        double maxAllowedSL = bid - minDistance;
+    // Calculate score delta (Current - Initial)
+    // Positive delta = Signal Strengthened
+    // Negative delta = Signal Weakened
+    int scoreDelta = currentScore - initialScore;
+    
+    if(initialScore > 0)
+    {
+        if(EnableAdaptiveTP) 
+        {
+             tpAdjustment = scoreDelta * TrailingValueMultiplier;
+        }
         
-        if(newSL > maxAllowedSL)
+        if(EnableAdaptiveSL) 
         {
-            newSL = maxAllowedSL;
+             slAdjustment = scoreDelta * TrailingValueMultiplier;
         }
-
-        // Break-even lock logic (still using SL)
-        if(TSEnableBreakEvenLock && newSL < breakEvenPrice)
+        
+        if(MathAbs(scoreDelta) > 0)
         {
-            newSL = breakEvenPrice;
+            adaptiveReason = "Adaptive (Delta: " + IntegerToString(scoreDelta) + ")";
         }
-
-        if(currentSL != 0 && newSL <= currentSL) return;
-        if(newSL >= bid) return;
     }
-    // Sell position trailing logic
-    else
+    
+    // ================================================================
+    // TAKE PROFIT MANAGEMENT (Adaptive)
+    // ================================================================
+    double newTP = currentTP;
+    
+    if(EnableTakeProfit)
     {
-        double profitPoints = (entryPrice - currentPrice) / _Point;
-        if(profitPoints < trailingDistancePoints) return;
+        double effectiveTP = TPValue + tpAdjustment;
+        
+        // Ensure effective TP doesn't go negative or too small
+        if(effectiveTP < (TrailingValueMultiplier * 0.1)) effectiveTP = TrailingValueMultiplier * 0.1;
 
-        newSL = currentPrice + trailingDistancePrice;
-        double minAllowedSL = ask + minDistance;
-
-        if(newSL < minAllowedSL)
+        double tpPoints = ConvertToPoints(TPInputType, effectiveTP, volume);
+        double targetTP = 0;
+        
+        if(posType == POSITION_TYPE_BUY) targetTP = NormalizeDouble(entryPrice + tpPoints * _Point, _Digits);
+        else targetTP = NormalizeDouble(entryPrice - tpPoints * _Point, _Digits);
+        
+        // Only modify if significant difference (> 1 point)
+        if(MathAbs(targetTP - currentTP) > _Point)
         {
-            newSL = minAllowedSL;
+            newTP = targetTP;
         }
-
-        // Break-even lock logic (still using SL)
-        if(TSEnableBreakEvenLock && newSL > breakEvenPrice)
-        {
-            newSL = breakEvenPrice;
-        }
-
-        if(currentSL != 0 && newSL >= currentSL) return;
-        if(newSL <= ask) return;
     }
 
-    // Skip if SL still same with current
-    if (newSL == currentSL) return;
+    // ================================================================
+    // TRAILING STOP MANAGEMENT
+    // ================================================================
+    double newSL = currentSL; // Default to current
+    bool shouldModifySL = false;
 
+    if(EnableTrailing) 
+    {
+        // Filter by profit threshold if enabled (only trail if profit > threshold)
+        double profitThreshold = MinBreakEvenProfit * ProfitThresholdMultiplier;
+        bool canTrail = (!TrailingSLOnProfitableOnly || profit >= profitThreshold);
+        
+        if(canTrail)
+        {
+            // Calculate effective Trailing Distance
+            double effectiveDist = TrailingDistanceValue + slAdjustment; // Adaptive TS
+            
+            // Ensure distance is safe (not negative)
+            if(effectiveDist < (TrailingValueMultiplier * 0.1)) effectiveDist = TrailingValueMultiplier * 0.1;
+            
+            // Calculate trailing distance
+            double finalTrailingPoints = ConvertToPoints(TSInputType, effectiveDist, volume);
+            double trailingDistancePrice = finalTrailingPoints * _Point;
+            
+            long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+            long freezeLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+            
+            double minStopDistance = stopLevel * _Point;
+            double minFreezeDistance = freezeLevel * _Point;
+            double minDistance = MathMax(minStopDistance, minFreezeDistance);
+            
+            double breakEvenPrice = CalculateBreakEvenPrice(ticket, posType, entryPrice, volume);
+            
+            double calculatedSL = 0;
+
+            // Buy position trailing logic
+            if(posType == POSITION_TYPE_BUY)
+            {
+                double profitPoints = (currentPrice - entryPrice) / _Point;
+                if(profitPoints >= finalTrailingPoints) // Use finalTrailingPoints check logic from original
+                {
+                    calculatedSL = currentPrice - trailingDistancePrice;
+                    double maxAllowedSL = SymbolInfoDouble(_Symbol, SYMBOL_BID) - minDistance;
+                    
+                    if(calculatedSL > maxAllowedSL) calculatedSL = maxAllowedSL;
+                    
+                    // Break-even lock
+                    if(TrailingEnableBreakEvenLock && calculatedSL < breakEvenPrice) calculatedSL = breakEvenPrice;
+                    
+                    // Only modify if moving UP
+                    if(currentSL == 0 || calculatedSL > currentSL)
+                    {
+                        if(calculatedSL < SymbolInfoDouble(_Symbol, SYMBOL_BID)) // Safety
+                        {
+                            newSL = calculatedSL;
+                            shouldModifySL = true;
+                        }
+                    }
+                }
+            }
+            // Sell position trailing logic
+            else
+            {
+                double profitPoints = (entryPrice - currentPrice) / _Point;
+                if(profitPoints >= finalTrailingPoints)
+                {
+                    calculatedSL = currentPrice + trailingDistancePrice;
+                    double minAllowedSL = SymbolInfoDouble(_Symbol, SYMBOL_ASK) + minDistance;
+                    
+                    if(calculatedSL < minAllowedSL) calculatedSL = minAllowedSL;
+                    
+                    // Break-even lock
+                    if(TrailingEnableBreakEvenLock && calculatedSL > breakEvenPrice) calculatedSL = breakEvenPrice;
+                    
+                    // Only modify if moving DOWN
+                    if(currentSL == 0 || calculatedSL < currentSL)
+                    {
+                        if(calculatedSL > SymbolInfoDouble(_Symbol, SYMBOL_ASK)) // Safety
+                        {
+                            newSL = calculatedSL;
+                            shouldModifySL = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Skip if nothing changed
+    if(!shouldModifySL && MathAbs(newTP - currentTP) < _Point) return;
+    
+    // Normalize
     newSL = NormalizeDouble(newSL, _Digits);
-
-    LogPrint("+-----------------------------------------+");
-    LogPrint("TRAILING STOP MANAGEMENT");
-    LogPrint("TICKET: ", ticket, " | Profit: $", profit);
-    LogPrint("Current Price: ", currentPrice, " | Entry Price: ", entryPrice);
-    LogPrint("Current SL: ", currentSL, " -> New SL: ", newSL);
-    LogPrint("TSEnableBreakEvenLock: ", TSEnableBreakEvenLock ? "Yes" : "No");
-    LogPrint("+-----------------------------------------+");
+    newTP = NormalizeDouble(newTP, _Digits);
+    
+    // Skip if SL is visually same (if modifier flag was triggered but value didn't change enough - redundant check)
+    if(shouldModifySL && MathAbs(newSL - currentSL) < _Point && MathAbs(newTP - currentTP) < _Point) return;
 
     // Validate new SL
-    if(!IsSLValid(posType, newSL))
+    if(shouldModifySL && !IsSLValid(posType, newSL))
     {
-        LogPrint("SL too close / invalid, skipping modification. Ticket: ", ticket);
+        LogPrint("SL invalid, skipping. Ticket: ", ticket);
         return;
     }
 
+    LogPrint("+-----------------------------------------+");
+    LogPrint("POSITION UPDATE (", adaptiveReason, ")");
+    LogPrint("Ticket: ", ticket, " | Profit: $", profit);
+    LogPrint("Signal: Init=", initialScore, " -> Current=", currentScore, " (Delta: ", scoreDelta, ")");
+    if(shouldModifySL) LogPrint("SL: ", currentSL, " -> ", newSL, " (Dist: ", (TrailingDistanceValue + slAdjustment), ")");
+    if(MathAbs(newTP - currentTP) > _Point) LogPrint("TP: ", currentTP, " -> ", newTP, " (Base+Adj: ", (TPValue + tpAdjustment), ")");
+    LogPrint("+-----------------------------------------+");
+
     // Try to modify
-    if(!ModifyPosition(ticket, newSL, currentTP))
+    if(!ModifyPosition(ticket, newSL, newTP))
     {
-        LogPrint("SL modify failed. Ticket: ", ticket);
+        LogPrint("Modify failed. Ticket: ", ticket);
+        
+        // ================================================================
+        // EMERGENCY CLOSE MECHANISM
+        // ================================================================
+        // Trigger if modification failed AND profit is substantial
+        // Prevents losing "substantial" profit due to inability to trail
+        
+        double minSubstantialProfit = MinBreakEvenProfit * 3.0; // Define substantial as 3x minimum target
+        
+        if(profit >= minSubstantialProfit)
+        {
+            LogPrint("!! EMERGENCY CLOSE TRIGGERED !!");
+            ClosePosition(ticket);
+        }
+    }
+}
+    
+// +------------------------------------------------------------------+
+// | Register Position to Managed Array                               |
+// +------------------------------------------------------------------+
+void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, int signalScore)
+{
+    // Resize array
+    ArrayResize(g_ManagedPositions, g_ManagedPositionCount + 1);
+    
+    // Fill position data
+    g_ManagedPositions[g_ManagedPositionCount].ticket = ticket;
+    g_ManagedPositions[g_ManagedPositionCount].type = type;
+    g_ManagedPositions[g_ManagedPositionCount].signalScore = signalScore;
+    
+    g_ManagedPositionCount++;
+    
+    // Update counters
+    if(type == POSITION_TYPE_BUY) g_BuyPositionCount++;
+    else g_SellPositionCount++;
+    
+    LogPrint("Registered position. Ticket: ", ticket, 
+             " | Type: ", EnumToString(type),
+             " | Score: ", signalScore, 
+             " | Open Buys: ", g_BuyPositionCount, " | Open Sells: ", g_SellPositionCount);
+}
+
+// +------------------------------------------------------------------+
+// | Remove Position from Managed Array                               |
+// +------------------------------------------------------------------+
+void RemoveManagedPosition(ulong ticket)
+{
+    for(int i = 0; i < g_ManagedPositionCount; i++)
+    {
+        if(g_ManagedPositions[i].ticket == ticket)
+        {
+            // Update counters before removing
+            if(g_ManagedPositions[i].type == POSITION_TYPE_BUY) g_BuyPositionCount--;
+            else g_SellPositionCount--;
+            
+            // Safety check for negative counters
+            if(g_BuyPositionCount < 0) g_BuyPositionCount = 0;
+            if(g_SellPositionCount < 0) g_SellPositionCount = 0;
+
+            // Shift array elements left
+            for(int j = i; j < g_ManagedPositionCount - 1; j++)
+            {
+                g_ManagedPositions[j] = g_ManagedPositions[j + 1];
+            }
+            
+            g_ManagedPositionCount--;
+            ArrayResize(g_ManagedPositions, g_ManagedPositionCount);
+            
+            LogPrint("Removed position: ", ticket, 
+                     " | Remaining Open Buys: ", g_BuyPositionCount, 
+                     " | Remaining Open Sells: ", g_SellPositionCount);
+            break;
+        }
     }
 }
 
 // +------------------------------------------------------------------+
-// | Position Management Functions                                    |
+// | Sync Managed Positions with Broker                               |
+// | Removes closed positions from managed array                      |
 // +------------------------------------------------------------------+
+void SyncManagedPositions()
+{
+    for(int i = g_ManagedPositionCount - 1; i >= 0; i--)
+    {
+        // Check if position still exists
+        if(!PositionSelectByTicket(g_ManagedPositions[i].ticket))
+        {
+            // Position closed, remove from array
+            RemoveManagedPosition(g_ManagedPositions[i].ticket);
+        }
+    }
+}
+
+// +------------------------------------------------------------------+
+// | Get Managed Position by Ticket                                   |
+// +------------------------------------------------------------------+
+int GetManagedPositionIndex(ulong ticket)
+{
+    for(int i = 0; i < g_ManagedPositionCount; i++)
+    {
+        if(g_ManagedPositions[i].ticket == ticket)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // Open position with dynamic lot sizing AND fixed SL/TP
-void OpenPosition(ENUM_ORDER_TYPE orderType)
+void OpenPosition(ENUM_ORDER_TYPE orderType, int signalScore = 0)
 {   
     if (!IsAllowedToOpenPosition()) return;
 
@@ -1387,7 +1644,8 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
     
-    double currentLot = CalculateDynamicLotSize();
+    // Pass signal score for dynamic lot sizing
+    double currentLot = CalculateDynamicLotSize(signalScore);
     
     double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -1405,7 +1663,8 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
     // Calculate and set Take Profit
     if(EnableTakeProfit)
     {
-        double tpPoints = ConvertToPoints(TPInputType, TPValue, currentLot);
+        double effectiveTPValue = TPValue;
+        double tpPoints = ConvertToPoints(TPInputType, effectiveTPValue, currentLot);
         
         if(orderType == ORDER_TYPE_BUY)
         {
@@ -1450,6 +1709,7 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
             LogPrint("Order opened successfully. Ticket: ", result.order, 
                   ", Type: ", orderType == ORDER_TYPE_BUY ? "BUY" : "SELL",
                   ", Lot Size: ", currentLot,
+                  ", Signal Score: ", signalScore,
                   " (Peak: $", lastPeakEquity, 
                   ", Current: $", currentEquity,
                   ", Drop: ", equityDropPercentage, "%)");
@@ -1461,6 +1721,34 @@ void OpenPosition(ENUM_ORDER_TYPE orderType)
             if(EnableTakeProfit)
             {
                 LogPrint("  TP: ", request.tp);
+            }
+            
+            // Register position to managed array
+            ENUM_POSITION_TYPE posType = (orderType == ORDER_TYPE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+            RegisterManagedPosition(result.order, posType, signalScore);
+            
+            // Update Candle Counters
+            datetime currentBarTime = iTime(_Symbol, _Period, 0);
+            if(g_CurrentBarTime != currentBarTime)
+            {
+                g_CurrentBarTime = currentBarTime;
+                g_BuysOnCurrentBar = 0;
+                g_SellsOnCurrentBar = 0;
+            }
+            
+            if(orderType == ORDER_TYPE_BUY) g_BuysOnCurrentBar++;
+            else g_SellsOnCurrentBar++;
+            
+            // Update global last position tracking
+            if(orderType == ORDER_TYPE_BUY)
+            {
+                g_LastBuyTime = TimeCurrent();
+                g_LastBuyPrice = price;
+            }
+            else
+            {
+                g_LastSellTime = TimeCurrent();
+                g_LastSellPrice = price;
             }
         }
         else
@@ -1750,66 +2038,59 @@ int CountOpenOrdersByType(ENUM_POSITION_TYPE posType)
 // +------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| Calculate ATR-based lot size                                      |
+//| Calculate Dynamic Lot Size - Equity Drop & Signal Strength Based |
+//| Lot increases based on:                                           |
+//|   1. Equity drop from peak (EquityDropPercent per step)          |
+//|   2. Strong signal strength (MinSignalStrengthForLot threshold)   |
 //+------------------------------------------------------------------+
-double CalculateDynamicLotSize()
+double CalculateDynamicLotSize(int signalScore = 0)
 {
     if(!EnableDynamicLots) return BaseLotSize;
     
-    // Get ATR value
-    int atrHandle = iATR(_Symbol, PERIOD_CURRENT, ATRPeriod);
-    if(atrHandle == INVALID_HANDLE)
+    double currentLot = BaseLotSize;
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    
+    // ================================================================
+    // 1. EQUITY DROP-BASED LOT INCREASE
+    // ================================================================
+    // Calculate equity drop from peak as percentage
+    double equityDropPercent = 0;
+    if(peakEquity > 0)
     {
-        LogPrint("ERROR: Failed to create ATR indicator handle");
-        return BaseLotSize;
+        equityDropPercent = ((peakEquity - currentEquity) / peakEquity) * 100.0;
     }
     
-    double atrBuffer[];
-    ArraySetAsSeries(atrBuffer, true);
-    
-    if(CopyBuffer(atrHandle, 0, 0, 1, atrBuffer) <= 0)
+    // Each EquityDropPercent step adds LotStepSize
+    int equitySteps = 0;
+    if(equityDropPercent > 0 && EquityDropPercent > 0)
     {
-        LogPrint("ERROR: Failed to copy ATR data");
-        IndicatorRelease(atrHandle);
-        return BaseLotSize;
+        equitySteps = (int)(equityDropPercent / EquityDropPercent);
     }
     
-    double atrValue = atrBuffer[0];
-    IndicatorRelease(atrHandle);
+    double equityLotIncrease = equitySteps * LotStepSize;
+    currentLot += equityLotIncrease;
     
-    if(atrValue <= 0)
+    // ================================================================
+    // 2. SIGNAL STRENGTH-BASED LOT INCREASE
+    // ================================================================
+    // If signal score is above threshold, add extra lot steps
+    double signalLotIncrease = 0;
+    if(signalScore >= MinSignalStrengthForLot)
     {
-        LogPrint("ERROR: Invalid ATR value");
-        return BaseLotSize;
+        // For every 2 points above threshold, add one lot step
+        int signalSteps = (signalScore - MinSignalStrengthForLot) / 2;
+        signalLotIncrease = signalSteps * LotStepSize;
+        currentLot += signalLotIncrease;
     }
     
-    // Calculate lot size based on risk and ATR
-    double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-    double riskAmount = accountBalance * (RiskPercent / 100.0);
-    
-    // Get point value
-    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-    
-    if(tickSize == 0 || point == 0)
-    {
-        LogPrint("ERROR: Invalid symbol specifications");
-        return BaseLotSize;
-    }
-    
-    // Calculate pip value (for standard lots)
-    double pipValue = tickValue * (point / tickSize);
-    
-    // Calculate lot size: Risk Amount / (ATR in pips * pip value per lot)
-    double atrInPips = atrValue / point;
-    double currentLot = riskAmount / (atrInPips * pipValue * ATRMultiplier);
-    
-    // Apply min/max limits
+    // ================================================================
+    // APPLY LIMITS
+    // ================================================================
+    // Apply user-defined limits
     if(currentLot < BaseLotSize) currentLot = BaseLotSize;
     if(currentLot > MaxLotSize) currentLot = MaxLotSize;
 
-    // Lot Size Validation
+    // Apply broker limits
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
     double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -1820,7 +2101,9 @@ double CalculateDynamicLotSize()
     // Round to valid lot step
     currentLot = MathFloor(currentLot / lotStep) * lotStep;
     
-    // Validate account has enough money for this lot size
+    // ================================================================
+    // MARGIN CHECK
+    // ================================================================
     double marginNeeded = 0;
 
     if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, currentLot, SymbolInfoDouble(_Symbol, SYMBOL_ASK), marginNeeded))
@@ -1873,6 +2156,11 @@ double CalculateDynamicLotSize()
         LogPrint("WARNING: Reduced lot from calculated to affordable: ", currentLot, 
               " (Required margin: $", marginNeeded, ", Available: $", availableMargin, ")");
     }
+    
+    LogPrint("Dynamic Lot Calculation: Base=", BaseLotSize, 
+             " | Equity Drop Steps=", equitySteps, " (+", equityLotIncrease, ")",
+             " | Signal Steps=", (signalScore >= MinSignalStrengthForLot ? (signalScore - MinSignalStrengthForLot) / 2 : 0), " (+", signalLotIncrease, ")",
+             " | Final Lot=", currentLot);
     
     return currentLot;
 }
@@ -3000,7 +3288,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v23.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v25.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -3039,12 +3327,12 @@ void CheckDiscordAlert()
 {
     if(DiscordWebhookURL == "")
     {
-        LogPrint("WARNING: Discord alerts enabled but webhook URL is empty!");
+        Print("WARNING: Discord alerts enabled but webhook URL is empty!");
     }
     else if(StringFind(DiscordWebhookURL, "https://discord.com/api/webhooks/") != 0 &&
             StringFind(DiscordWebhookURL, "https://discordapp.com/api/webhooks/") != 0)
     {
-        LogPrint("WARNING: Discord webhook URL format may be incorrect!");
+        Print("WARNING: Discord webhook URL format may be incorrect!");
     }
     else
     {   
