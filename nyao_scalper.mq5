@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v26.0      |
+// |                                          Nyao Scalper v27.0      |
 // |              Indicator-Based Signal Strength Trading System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "26.0"
+#property version   "27.0"
 #property description "Auto Trading EA Robot with Indicator-Based Signal Strength & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -33,7 +33,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v26.0"
+input group " Nyao Scalper v27.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -42,19 +42,24 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 input group "📊 Indicator Settings"
-input int RSI_Period = 5;                                 // RSI Period
 input int EMA_FastPeriod = 5;                             // EMA Fast Period
 input int EMA_SlowPeriod = 13;                            // EMA Slow Period
 input int Bollinger_Period = 14;                          // Bollinger Bands Period
 input double Bollinger_Deviation = 1.8;                   // Bollinger Bands Deviation
+input int RSI_Period = 5;                                 // RSI Period
+input int RSI_OversoldLevel = 30;                         // RSI Oversold Level (Default 30)
+input int RSI_OverboughtLevel = 70;                       // RSI Overbought Level (Default 70)
 input int Stoch_KPeriod = 5;                              // Stochastic %K Period
 input int Stoch_DPeriod = 3;                              // Stochastic %D Period
 input int Stoch_Slowing = 2;                              // Stochastic Slowing
+input int Stoch_OversoldLevel = 20;                       // Stochastic Oversold Level (Default 20)
+input int Stoch_OverboughtLevel = 80;                     // Stochastic Overbought Level (Default 80)
+input int SR_LookbackPeriod = 50;                         // Support/Resistance Lookback Period
 
 input group "⚖️ Score Weight Settings"
-input int WeightRSI = 3;                                  // RSI Weight (Score 0-3 × Weight)
-input int WeightEMA = 3;                                  // EMA Weight (Score 0-3 × Weight)
+input int WeightEMA = 4;                                  // EMA Weight (Score 0-5 × Weight)
 input int WeightBollinger = 2;                            // Bollinger Bands Weight (Score 0-2 × Weight)
+input int WeightRSI = 3;                                  // RSI Weight (Score 0-3 × Weight)
 input int WeightStochastic = 2;                           // Stochastic Weight (Score 0-2 × Weight)
 input int ScoreCandleWick = 2;                            // Candle Wick Rejection Score
 input int ScoreCandleMomentum = 2;                        // Candle Momentum Shift Score
@@ -72,14 +77,14 @@ input double SellDuplicateMultiplier = 1.5;               // Min Distance Multip
 input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
-input int MinBuySignalScore = 3;                          // Min Signal Strength Score to Buy
-input int MinSellSignalScore = 3;                         // Min Signal Strength Score to Sell
+input int MinBuySignalScore = 10;                         // Min Signal Strength Score to Buy
+input int MinSellSignalScore = 10;                        // Min Signal Strength Score to Sell
 input bool EnablePyramiding = true;                       // Enable Pyramiding Positions
-input int MinPyramidingBuySignalScore = 6;                // Min Signal Strength Score to Pyramiding Buy
-input int MinPyramidingSellSignalScore = 6;               // Min Signal Strength Score to Pyramiding Sell
+input int MinPyramidingBuySignalScore = 16;               // Min Signal Strength Score to Pyramiding Buy
+input int MinPyramidingSellSignalScore = 16;              // Min Signal Strength Score to Pyramiding Sell
 input int MaxPositionsPerCandle = 6;                      // Max Positions Per Candle
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
-input int MinSignalStrengthToHold = 1;                    // Min Signal Score to Hold Losing Position
+input int MinSignalStrengthToHold = 8;                    // Min Signal Score to Hold Losing Position
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
 
 input group "🧮 Dynamic Lot Sizing Settings"
@@ -87,7 +92,7 @@ input bool EnableDynamicLots = true;                      // Enable Dynamic Lot 
 input double EquityDropPercent = 0.0;                     // Equity Drop % per Lot Step
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
 input double MaxLotSize = 0.05;                           // Max Lot Size
-input int MinSignalStrengthForLot = 10;                   // Min Signal Score for Lot Increase
+input int MinSignalStrengthForLot = 20;                   // Min Signal Score for Lot Increase
 
 input group "🏦 Equity Settings"
 input double MinEquityPercent = 70.0;                     // Min Equity % from Peak - Pause Trading when Reached
@@ -114,8 +119,8 @@ input group "💸 Trailing TP/SL Settings"
 input bool EnableTrailing = true;                         // Enable Trailing TP/SL
 input bool TrailingEnableBreakEvenLock = true;            // Enable Trailing Break-Even Lock
 input bool TrailingSLOnProfitableOnly = true;             // Trailing SL on Profitable Position Only
-input bool EnableAdaptiveTP = true;                       // Enable Adaptive TP
-input bool EnableAdaptiveSL = true;                       // Enable Adaptive SL
+input bool EnableAdaptiveTP = false;                      // Enable Adaptive TP
+input bool EnableAdaptiveSL = false;                      // Enable Adaptive SL
 input ENUM_INPUT_TYPE TSInputType = INPUT_DOLLAR;         // Trailing Distance Input Type
 input double TrailingDistanceValue = 0.2;                 // Trailing Distance Value
 input double TrailingValueMultiplier = 0.2;               // Trailing Value Multiplier
@@ -474,7 +479,7 @@ int InitializeEA()
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v26.0 Initialized Successfully");
+    Print("Nyao Scalper v27.0 Initialized Successfully");
     Print("Indicators initialized: RSI(", RSI_Period, "), EMA(", EMA_FastPeriod, "/", EMA_SlowPeriod, 
              "), BB(", Bollinger_Period, "), Stoch(", Stoch_KPeriod, ",", Stoch_DPeriod, ",", Stoch_Slowing, ")");
     Print("+-----------------------------------------+");
@@ -507,7 +512,7 @@ void OnDeinit(const int reason)
     ObjectsDeleteAll(0, "NyaoDash_");
     Comment(""); // Clear any residual comments
     
-    Print("Nyao Scalper v26.0 Deinitialized");
+    Print("Nyao Scalper v27.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -1022,16 +1027,16 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
         
         if(isUptrend)
         {
-            if(emaFastPrev <= emaSlowPrev) { emaBuyScore = 3; strength.reasoning += "[EMA Cross] "; }
-            else if(currentPrice > emaFast) { emaBuyScore = 2; }
-            else { emaBuyScore = 1; }
+            if(emaFastPrev <= emaSlowPrev) { emaBuyScore = 5; strength.reasoning += "[EMA Cross] "; }
+            else if(currentPrice > emaFast) { emaBuyScore = 4; }
+            else { emaBuyScore = 2; }
         }
         
         if(isDowntrend)
         {
-            if(emaFastPrev >= emaSlowPrev) { emaSellScore = 3; strength.reasoning += "[EMA Cross] "; }
-            else if(currentPrice < emaFast) { emaSellScore = 2; }
-            else { emaSellScore = 1; }
+            if(emaFastPrev >= emaSlowPrev) { emaSellScore = 5; strength.reasoning += "[EMA Cross] "; }
+            else if(currentPrice < emaFast) { emaSellScore = 4; }
+            else { emaSellScore = 2; }
         }
         
         strength.buyScore += emaBuyScore * WeightEMA;
@@ -1040,47 +1045,7 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     }
 
     // ================================================================
-    // 2. RSI SCORE (Weight: 3x)
-    // ================================================================
-    double rsiBuffer[];
-    ArraySetAsSeries(rsiBuffer, true);
-    
-    if(CopyBuffer(g_RSI_Handle, 0, 0, 3, rsiBuffer) >= 3)
-    {
-        double rsi = rsiBuffer[0];
-        double rsiPrev = rsiBuffer[1];
-        int rsiBuyScore = 0;
-        int rsiSellScore = 0;
-        
-        if(rsi < 30)
-        {
-             if(rsi > rsiPrev) { rsiBuyScore = 3; strength.reasoning += "[RSI Hook Up] "; }
-             else { rsiBuyScore = 1; }
-        }
-        else if(rsi < 40 && rsi > rsiPrev && isUptrend)
-        {
-             rsiBuyScore = 2;
-             strength.reasoning += "[RSI Dip] ";
-        }
-        
-        if(rsi > 70)
-        {
-            if(rsi < rsiPrev) { rsiSellScore = 3; strength.reasoning += "[RSI Hook Down] "; }
-            else { rsiSellScore = 1; }
-        }
-        else if(rsi > 60 && rsi < rsiPrev && isDowntrend)
-        {
-             rsiSellScore = 2;
-             strength.reasoning += "[RSI Rally] ";
-        }
-        
-        strength.buyScore += rsiBuyScore * WeightRSI;
-        strength.sellScore += rsiSellScore * WeightRSI;
-        strength.rsiScore = (orderType == ORDER_TYPE_BUY) ? rsiBuyScore : rsiSellScore;
-    }
-    
-    // ================================================================
-    // 3. BOLLINGER BANDS SCORE (Weight: 2x)
+    // 2. BOLLINGER BANDS SCORE (Weight: 2x)
     // ================================================================
     double bbMiddle[], bbUpper[], bbLower[];
     ArraySetAsSeries(bbMiddle, true);
@@ -1118,6 +1083,46 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     }
     
     // ================================================================
+    // 3. RSI SCORE (Weight: 3x)
+    // ================================================================
+    double rsiBuffer[];
+    ArraySetAsSeries(rsiBuffer, true);
+    
+    if(CopyBuffer(g_RSI_Handle, 0, 0, 3, rsiBuffer) >= 3)
+    {
+        double rsi = rsiBuffer[0];
+        double rsiPrev = rsiBuffer[1];
+        int rsiBuyScore = 0;
+        int rsiSellScore = 0;
+        
+        if(rsi < RSI_OversoldLevel)
+        {
+             if(rsi > rsiPrev) { rsiBuyScore = 3; strength.reasoning += "[RSI Hook Up] "; }
+             else { rsiBuyScore = 1; }
+        }
+        else if(rsi < (RSI_OversoldLevel + 10) && rsi > rsiPrev && isUptrend)
+        {
+             rsiBuyScore = 2;
+             strength.reasoning += "[RSI Dip] ";
+        }
+        
+        if(rsi > RSI_OverboughtLevel)
+        {
+             if(rsi < rsiPrev) { rsiSellScore = 3; strength.reasoning += "[RSI Hook Down] "; }
+             else { rsiSellScore = 1; }
+        }
+        else if(rsi > (RSI_OverboughtLevel - 10) && rsi < rsiPrev && isDowntrend)
+        {
+             rsiSellScore = 2;
+             strength.reasoning += "[RSI Rally] ";
+        }
+        
+        strength.buyScore += rsiBuyScore * WeightRSI;
+        strength.sellScore += rsiSellScore * WeightRSI;
+        strength.rsiScore = (orderType == ORDER_TYPE_BUY) ? rsiBuyScore : rsiSellScore;
+    }
+
+    // ================================================================
     // 4. STOCHASTIC SCORE (Weight: 2x)
     // ================================================================
     double stochK[], stochD[];
@@ -1134,13 +1139,13 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
         int stochBuyScore = 0;
         int stochSellScore = 0;
         
-        if(k < 20)
+        if(k < Stoch_OversoldLevel)
         {
             if(k > d && kPrev <= dPrev) { stochBuyScore = 2; strength.reasoning += "[Stoch Cross] "; }
             else if(k > kPrev) { stochBuyScore = 1; }
         }
         
-        if(k > 80)
+        if(k > Stoch_OverboughtLevel)
         {
             if(k < d && kPrev >= dPrev) { stochSellScore = 2; strength.reasoning += "[Stoch Cross] "; }
             else if(k < kPrev) { stochSellScore = 1; }
@@ -1224,8 +1229,7 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     int breakoutBuyScore = 0;
     int breakoutSellScore = 0;
 
-
-    int lookback = 50;
+    int lookback = SR_LookbackPeriod;
     int highestIndex = iHighest(_Symbol, _Period, MODE_HIGH, lookback, 1);
     int lowestIndex = iLowest(_Symbol, _Period, MODE_LOW, lookback, 1);
     
@@ -3387,7 +3391,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v26.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v27.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -3487,7 +3491,7 @@ void UpdateDashboard()
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v26.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v27.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic
