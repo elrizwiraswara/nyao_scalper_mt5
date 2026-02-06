@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v25.0      |
+// |                                          Nyao Scalper v26.0      |
 // |              Indicator-Based Signal Strength Trading System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "25.0"
+#property version   "26.0"
 #property description "Auto Trading EA Robot with Indicator-Based Signal Strength & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -33,7 +33,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v25.0"
+input group " Nyao Scalper v26.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -65,7 +65,7 @@ input group "📝 Order & Position Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
-input int MaxOpenOrders = 6;                              // Max Consecutive Open Orders
+input int MaxOpenOrders = 8;                              // Max Consecutive Open Orders
 input double ZonePoints = 500;                            // Zone Points to Avoid Duplicate Signals
 input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
@@ -77,10 +77,10 @@ input int MinSellSignalScore = 3;                         // Min Signal Strength
 input bool EnablePyramiding = true;                       // Enable Pyramiding Positions
 input int MinPyramidingBuySignalScore = 6;                // Min Signal Strength Score to Pyramiding Buy
 input int MinPyramidingSellSignalScore = 6;               // Min Signal Strength Score to Pyramiding Sell
-input int MaxPositionsPerCandle = 4;                      // Max Positions Per Candle
+input int MaxPositionsPerCandle = 6;                      // Max Positions Per Candle
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
 input int MinSignalStrengthToHold = 1;                    // Min Signal Score to Hold Losing Position
-input int MaxHoldingLossPositions = 6;                    // Max Losing Positions to Hold (0 = Close Immediately)
+input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -474,7 +474,7 @@ int InitializeEA()
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v25.0 Initialized Successfully");
+    Print("Nyao Scalper v26.0 Initialized Successfully");
     Print("Indicators initialized: RSI(", RSI_Period, "), EMA(", EMA_FastPeriod, "/", EMA_SlowPeriod, 
              "), BB(", Bollinger_Period, "), Stoch(", Stoch_KPeriod, ",", Stoch_DPeriod, ",", Stoch_Slowing, ")");
     Print("+-----------------------------------------+");
@@ -503,7 +503,7 @@ void OnDeinit(const int reason)
     if(g_Bollinger_Handle != INVALID_HANDLE) IndicatorRelease(g_Bollinger_Handle);
     if(g_Stochastic_Handle != INVALID_HANDLE) IndicatorRelease(g_Stochastic_Handle);
     
-    Print("Nyao Scalper v25.0 Deinitialized");
+    Print("Nyao Scalper v26.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -749,6 +749,39 @@ int SellSignal()
     return 0;
 }
 
+// +------------------------------------------------------------------+
+// | Get Last Position Ticket by Type                                 |
+// | Returns the ticket of the most recently opened position          |
+// +------------------------------------------------------------------+
+ulong GetLastPositionTicket(ENUM_POSITION_TYPE type)
+{
+    ulong lastTicket = 0;
+    datetime lastTime = 0;
+
+    // OPTIMIZATION: Iterate through managed positions array 
+    // instead of scanning all account positions
+    for(int i = 0; i < g_ManagedPositionCount; i++)
+    {
+        ulong ticket = g_ManagedPositions[i].ticket;
+        
+        // Initial filter by cached type
+        if(g_ManagedPositions[i].type != type) continue;
+
+        // Verify position still exists and get exact time
+        if(PositionSelectByTicket(ticket))
+        {
+             datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+             if(posTime > lastTime)
+             {
+                 lastTime = posTime;
+                 lastTicket = ticket;
+             }
+        }
+    }
+    
+    return lastTicket;
+}
+
 // FAST duplicate buy filter - O(1) using globals
 // Returns true if conditions allow a trade.
 // Sets isPyramiding=true if we are adding to a position on the same candle.
@@ -766,6 +799,39 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
     if(buysOnCandle >= limit)
     {
         return false;
+    }
+
+    // Check Last Position Profit (Pyramiding Logic)
+    // Only allow pyramiding on the SAME CANDLE if the last position is in profit
+    ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_BUY);
+    if(lastTicket > 0)
+    {
+        if(PositionSelectByTicket(lastTicket))
+        {
+            datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+            datetime posBarTime = (posTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+            
+            // Only apply strict profit check if on the SAME CANDLE
+            if(posBarTime == currentBarTime)
+            {
+                double profit = PositionGetDouble(POSITION_PROFIT);
+                double currentSL = PositionGetDouble(POSITION_SL);
+                double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+
+                // 1. Must be in profit
+                if(profit <= 0)
+                {
+                    return false;
+                }
+                
+                // 2. Must have profitable SL (SL > OpenPrice)
+                // If SL is 0 or less than open price, it's not secured -> Block
+                if(currentSL == 0 || currentSL <= openPrice)
+                {
+                    return false;
+                }
+            }
+        }
     }
 
     // Check if we have a previous buy position
@@ -809,6 +875,39 @@ bool CheckSellConditions(double price, bool &isPyramiding)
     if(sellsOnCandle >= limit)
     {
         return false;
+    }
+
+    // Check Last Position Profit (Pyramiding Logic)
+    // Only allow pyramiding on the SAME CANDLE if the last position is in profit
+    ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_SELL);
+    if(lastTicket > 0)
+    {
+        if(PositionSelectByTicket(lastTicket))
+        {
+            datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+            datetime posBarTime = (posTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+            
+            // Only apply strict profit check if on the SAME CANDLE
+            if(posBarTime == currentBarTime)
+            {
+                double profit = PositionGetDouble(POSITION_PROFIT);
+                double currentSL = PositionGetDouble(POSITION_SL);
+                double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+
+                // 1. Must be in profit
+                if(profit <= 0)
+                {
+                    return false;
+                }
+
+                // 2. Must have profitable SL (SL < OpenPrice)
+                // If SL is 0 or greater than open price, it's not secured -> Block
+                if(currentSL == 0 || currentSL >= openPrice)
+                {
+                    return false;
+                }
+            }
+        }
     }
 
     // Check if we have a previous sell position
@@ -1261,7 +1360,6 @@ void ManageLosingPositions()
             // Decision logic based on signal strength:
             // 1. Signal still strong (currentScore >= initial or above threshold) = HOLD
             // 2. Signal weakened significantly (dropped by half or below threshold) = CLOSE
-            // 3. Over max hold count = Close the weakest
             
             bool shouldClose = false;
             string closeReason = "";
@@ -1272,12 +1370,6 @@ void ManageLosingPositions()
             {
                 shouldClose = true;
                 closeReason = "Signal Below Threshold (" + IntegerToString(currentScore) + " < " + IntegerToString(MinSignalStrengthToHold) + ")";
-            }
-            // Check 2: Over max hold count
-            else if(holdCount >= MaxHoldingLossPositions)
-            {
-                shouldClose = true;
-                closeReason = "Max Hold Limit Exceeded (" + IntegerToString(holdCount) + "/" + IntegerToString(MaxHoldingLossPositions) + ")";
             }
             
             if(shouldClose)
@@ -3288,7 +3380,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v25.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v26.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
