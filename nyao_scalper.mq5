@@ -503,6 +503,10 @@ void OnDeinit(const int reason)
     if(g_Bollinger_Handle != INVALID_HANDLE) IndicatorRelease(g_Bollinger_Handle);
     if(g_Stochastic_Handle != INVALID_HANDLE) IndicatorRelease(g_Stochastic_Handle);
     
+    // Cleanup Dashboard Objects
+    ObjectsDeleteAll(0, "NyaoDash_");
+    Comment(""); // Clear any residual comments
+    
     Print("Nyao Scalper v26.0 Deinitialized");
 }
 
@@ -611,6 +615,9 @@ void OnTick()
 
     // Check for Trade Report
     CheckTradeReport();
+    
+    // Update On-Chart Dashboard
+    UpdateDashboard();
 }
 
 // +------------------------------------------------------------------+
@@ -3430,4 +3437,129 @@ void CheckDiscordAlert()
     {   
         CheckAlgoTradingStatus();
     }
+}
+
+// +------------------------------------------------------------------+
+// | Update On-Chart Dashboard (Object Based)                          |
+// +------------------------------------------------------------------+
+void DrawDashboardLabel(string name, string text, int x, int y, int fontSize, color clr, bool bold = false)
+{
+    if(ObjectFind(0, name) < 0)
+    {
+        ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+        ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+        ObjectSetInteger(0, name, OBJPROP_BACK, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    }
+    
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+    ObjectSetString(0, name, OBJPROP_FONT, bold ? "Arial Bold" : "Arial");
+}
+
+void UpdateDashboard()
+{
+    // Clear old comment based dashboard
+    Comment("");
+
+    // Layout Constants
+    int startX = 20;
+    int startY = 20;
+    int lineHeight = 18; // Increased line spacing
+    int headersize = 10;
+    int textsize = 9;
+    int detailsSize = 8;
+    
+    color colorHeader = clrGold;
+    color colorText = clrWhite;
+    color colorBuy = clrLime;
+    color colorSell = clrRed;
+    color colorNeutral = clrGray;
+    color colorBg = C'30,30,30'; // Dark Gray
+    color colorBorder = clrGold;
+
+    int currentY = startY;
+
+    // Header
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v26.0", startX, currentY, 11, colorHeader, true);
+    currentY += lineHeight + 5;
+
+    // Status logic
+    string status = "Active";
+    color statusColor = clrLime;
+    if(isPaused) { status = "PAUSED (" + IntegerToString(currentPauseDuration) + "m)"; statusColor = clrOrange; }
+    else if(isOutsideTradingHours) { status = "Closed (Time)"; statusColor = clrGray; }
+    else if(targetEquityReached) { status = "STOPPED (Target)"; statusColor = clrRed; }
+    else if(minimumEquityReached) { status = "STOPPED (Min Equity)"; statusColor = clrRed; }
+
+    DrawDashboardLabel("NyaoDash_Status", "Status: " + status, startX, currentY, textsize, statusColor, true);
+    currentY += lineHeight;
+
+    // Account Info
+    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    double equityDrop = (peakEquity > 0) ? ((peakEquity - equity) / peakEquity) * 100.0 : 0.0;
+    
+    DrawDashboardLabel("NyaoDash_Bal", StringFormat("Balance: $%.2f", balance), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("NyaoDash_Eq", StringFormat("Equity: $%.2f", equity), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("NyaoDash_Peak", StringFormat("Peak: $%.2f (Drop: %.1f%%)", peakEquity, equityDrop), startX, currentY, textsize, colorText);
+    currentY += lineHeight + 5;
+
+    // Signal Strength
+    SignalStrength buyStrength = GetSignalStrength(ORDER_TYPE_BUY);
+    SignalStrength sellStrength = GetSignalStrength(ORDER_TYPE_SELL);
+    int buyReq = MinBuySignalScore;
+    int sellReq = MinSellSignalScore;
+    if(g_BuyPositionCount > 0) buyReq = MinPyramidingBuySignalScore;
+    if(g_SellPositionCount > 0) sellReq = MinPyramidingSellSignalScore;
+
+    DrawDashboardLabel("NyaoDash_SigHead", "SIGNAL STRENGTH:", startX, currentY, headersize, colorHeader, true);
+    currentY += lineHeight;
+
+    // Buy Row
+    string buyText = StringFormat("BUY: %d / %d  %s", buyStrength.totalScore, buyReq, buyStrength.reasoning);
+    DrawDashboardLabel("NyaoDash_Buy", buyText, startX, currentY, textsize, buyStrength.totalScore >= buyReq ? colorBuy : colorText, true);
+    currentY += lineHeight;
+    
+    string buyDet = StringFormat("RSI:%d EMA:%d BB:%d Sto:%d Cdl:%d", 
+                  buyStrength.rsiScore, buyStrength.emaScore, buyStrength.bollingerScore, 
+                  buyStrength.stochasticScore, buyStrength.candleScore);
+    DrawDashboardLabel("NyaoDash_BuyDet", buyDet, startX, currentY, detailsSize, colorText);
+    currentY += lineHeight + 2;
+
+    // Sell Row
+    string sellText = StringFormat("SELL: %d / %d  %s", sellStrength.totalScore, sellReq, sellStrength.reasoning);
+    DrawDashboardLabel("NyaoDash_Sell", sellText, startX, currentY, textsize, sellStrength.totalScore >= sellReq ? colorSell : colorText, true);
+    currentY += lineHeight;
+
+    string sellDet = StringFormat("RSI:%d EMA:%d BB:%d Sto:%d Cdl:%d", 
+                  sellStrength.rsiScore, sellStrength.emaScore, sellStrength.bollingerScore, 
+                  sellStrength.stochasticScore, sellStrength.candleScore);
+    DrawDashboardLabel("NyaoDash_SellDet", sellDet, startX, currentY, detailsSize, colorText);
+    currentY += lineHeight + 10;
+
+    // Statistics
+    TradeStats daily, allTime;
+    GetTradeStats(daily, allTime);
+    double allTimeNetProfit = allTime.profit + allTime.loss;
+    
+    DrawDashboardLabel("NyaoDash_StatHead", "STATISTICS:", startX, currentY, headersize, colorHeader, true);
+    currentY += lineHeight;
+    
+    DrawDashboardLabel("NyaoDash_Trades", StringFormat("Trades: %d (W:%d / L:%d)", allTime.count, allTime.won, allTime.lost), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+
+    DrawDashboardLabel("NyaoDash_PL", StringFormat("Profit: $%.2f | Loss: $%.2f", allTime.profit, allTime.loss), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    
+    color profitColor = allTimeNetProfit >= 0 ? colorBuy : colorSell;
+    DrawDashboardLabel("NyaoDash_Net", StringFormat("NET PROFIT: $%.2f", allTimeNetProfit), startX, currentY, textsize, profitColor, true);
 }
