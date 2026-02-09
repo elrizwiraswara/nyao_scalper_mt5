@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v28.0      |
+// |                                          Nyao Scalper v31.0      |
 // |              Indicator-Based Signal Strength Trading System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "28.0"
+#property version   "31.0"
 #property description "Auto Trading EA Robot with Indicator-Based Signal Strength & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -33,7 +33,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v28.0"
+input group " Nyao Scalper v31.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -42,8 +42,20 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 
-input group "📊 Signal Settings"
+input group "📊 Indicator Settings"
 input int DirectionalLookbackCount = 10;                  // Number of same-direction candles to scan
+input int DirectionalBodyLookback = 6;                    // Lookback for directional body analysis
+input int EMACrossLookback = 3;                           // Lookback for EMA Cross (Trend)
+input int EMAFastPeriod = 6;                              // EMA Fast Period
+input int EMASlowPeriod = 15;                             // EMA Slow Period
+input int RSIPeriod = 8;                                  // RSI Period
+input int ATRPeriod = 8;                                  // ATR Period
+input int ATRAvgLookback = 25;                            // ATR Average Lookback
+input int ChopLookback = 5;                               // Chop Index Lookback
+input int ImpulseLookback = 4;                            // Impulse Lookback
+input double ImpulseBoostWeight = 1.0;                    // Impulse Boost Weight
+input double VelocityWindow = 2.0;                        // Velocity Window (Score Delta)
+input double VelocitySizeWeight = 1.0;                    // Velocity Weight for Position Sizing
 
 input group "📝 Order & Position Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
@@ -56,14 +68,14 @@ input double SellDuplicateMultiplier = 1.5;               // Min Distance Multip
 input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
-input double MinBuySignalScore = 5.0;                         // Min Signal Strength Score to Buy (0.0 - 10.0)
-input double MinSellSignalScore = 5.0;                        // Min Signal Strength Score to Sell (0.0 - 10.0)
-input bool EnablePyramiding = true;                           // Enable Pyramiding Positions
-input double MinPyramidingBuySignalScore = 8.0;               // Min Signal Strength Score to Pyramiding Buy (0.0 - 10.0)
-input double MinPyramidingSellSignalScore = 8.0;              // Min Signal Strength Score to Pyramiding Sell (0.0 - 10.0)
-input int MaxPositionsPerCandle = 6;                          // Max Positions Per Candle
-input bool EnableLossManagement = true;                       // Enable Adaptive Loss Management
-input double HoldScoreRatio = 0.8;                            // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
+input double MinBuySignalScore = 5.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
+input double MinSellSignalScore = 5.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
+input bool EnablePyramiding = true;                       // Enable Pyramiding Positions
+input double MinPyramidingBuySignalScore = 8.0;           // Min Signal Strength Score to Pyramiding Buy (0.0 - 10.0)
+input double MinPyramidingSellSignalScore = 8.0;          // Min Signal Strength Score to Pyramiding Sell (0.0 - 10.0)
+input int MaxPositionsPerCandle = 6;                      // Max Positions Per Candle
+input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
+input double HoldScoreRatio = 0.8;                        // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
 
 input group "🧮 Dynamic Lot Sizing Settings"
@@ -187,7 +199,16 @@ struct SignalStrength
     
     // Scores
     double finalScore;         // 0.00-10.00 Score
+    double trendScore;         // Trend Component (0-3)
+    double momentumScore;      // Momentum Component (0-3)
+    double chopScore;          // Chop Component (0-2)
+    double peakScore;          // Peak Component (0-1)
+    double volatilityScore;    // Volatility Component (0-1)
     
+    double impulseStrength;    // 0.0-1.0 Impulse Strength
+    double velocity;           // Current Score - Previous Score
+    double normalizedVelocity; // 0.0-1.0 Normalized Velocity
+
     string reasoning;          // Detailed explanation
     
     // Other score components (internal use)
@@ -226,9 +247,16 @@ double g_LastSellPrice = 0;
 
 // Last signal tracking per candle (for multi-signal logic)
 datetime g_LastBuySignalBarTime = 0;
-int g_LastBuySignalScore = 0;
+double g_LastBuySignalScore = 0; // Score(1)
+double g_LastBuySignalScorePrev = 0; // Score(2)
+double g_LastBuyVelocity = 0; // For position sizing
+double g_LastBuyNormalizedVelocity = 0; // For position sizing
+
 datetime g_LastSellSignalBarTime = 0;
-int g_LastSellSignalScore = 0;
+double g_LastSellSignalScore = 0; // Score(1)
+double g_LastSellSignalScorePrev = 0; // Score(2)
+double g_LastSellVelocity = 0; // For position sizing
+double g_LastSellNormalizedVelocity = 0; // For position sizing
 
 // Trade Statistics Structure
 struct TradeStats
@@ -431,7 +459,7 @@ int InitializeEA()
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v28.0 Initialized Successfully");
+    Print("Nyao Scalper v31.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -458,7 +486,7 @@ void OnDeinit(const int reason)
     ObjectsDeleteAll(0, "NyaoDash_");
     Comment(""); // Clear any residual comments
     
-    Print("Nyao Scalper v28.0 Deinitialized");
+    Print("Nyao Scalper v31.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -503,6 +531,32 @@ void OnTick()
 
     // Check for market close time
     CheckMarketClose();
+
+    // Update Signal Globals on New Bar (for Velocity Tracking)
+    datetime currentBarTime = iTime(_Symbol, _Period, 0);
+    if(g_CurrentBarTime != currentBarTime)
+    {
+        // Update History Scores
+        g_LastBuySignalScorePrev = g_LastBuySignalScore;
+        // Recalculate Score(1) which is the just-closed candle
+        // We can't trust the live variable, so we re-calc
+        // Actually, Score(1) now is what Score(0) was a moment ago? 
+        // No, simplest is to calculate Score(1) fresh.
+        // But GetSignalStrength(..., false) gives Score(1).
+        
+        // Update Buy Stats
+        SignalStrength buyStr = GetSignalStrength(ORDER_TYPE_BUY, false); // Index 1
+        g_LastBuySignalScore = buyStr.finalScore;
+        
+        // Update Sell Stats
+        SignalStrength sellStr = GetSignalStrength(ORDER_TYPE_SELL, false); // Index 1
+        g_LastSellSignalScore = sellStr.finalScore;
+        
+        // Update Bar Time (will be updated in OpenPosition too, but good to have here)
+        g_CurrentBarTime = currentBarTime;
+        g_BuysOnCurrentBar = 0;
+        g_SellsOnCurrentBar = 0;
+    }
 
     if (isOutsideTradingHours || isLeverageDiffFromInitial || isNearMarketClose)
     {   
@@ -763,38 +817,7 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
         return false;
     }
 
-    // Check Last Position Profit (Pyramiding Logic)
-    // Only allow pyramiding on the SAME CANDLE if the last position is in profit
     ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_BUY);
-    if(lastTicket > 0)
-    {
-        if(PositionSelectByTicket(lastTicket))
-        {
-            datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
-            datetime posBarTime = (posTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
-            
-            // Only apply strict profit check if on the SAME CANDLE
-            if(posBarTime == currentBarTime)
-            {
-                double profit = PositionGetDouble(POSITION_PROFIT);
-                double currentSL = PositionGetDouble(POSITION_SL);
-                double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-
-                // 1. Must be in profit
-                if(profit <= 0)
-                {
-                    return false;
-                }
-                
-                // 2. Must have profitable SL (SL > OpenPrice)
-                // If SL is 0 or less than open price, it's not secured -> Block
-                if(currentSL == 0 || currentSL <= openPrice)
-                {
-                    return false;
-                }
-            }
-        }
-    }
 
     // Check if we have a previous buy position
     // Only consider it pyramiding if we actually have an open position (lastTicket > 0)
@@ -846,38 +869,7 @@ bool CheckSellConditions(double price, bool &isPyramiding)
         return false;
     }
 
-    // Check Last Position Profit (Pyramiding Logic)
-    // Only allow pyramiding on the SAME CANDLE if the last position is in profit
     ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_SELL);
-    if(lastTicket > 0)
-    {
-        if(PositionSelectByTicket(lastTicket))
-        {
-            datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
-            datetime posBarTime = (posTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
-            
-            // Only apply strict profit check if on the SAME CANDLE
-            if(posBarTime == currentBarTime)
-            {
-                double profit = PositionGetDouble(POSITION_PROFIT);
-                double currentSL = PositionGetDouble(POSITION_SL);
-                double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-
-                // 1. Must be in profit
-                if(profit <= 0)
-                {
-                    return false;
-                }
-
-                // 2. Must have profitable SL (SL < OpenPrice)
-                // If SL is 0 or greater than open price, it's not secured -> Block
-                if(currentSL == 0 || currentSL >= openPrice)
-                {
-                    return false;
-                }
-            }
-        }
-    }
 
     // Check if we have a previous sell position
     // Only consider it pyramiding if we actually have an open position (lastTicket > 0)
@@ -933,12 +925,20 @@ void ManagePositions()
 }
 
 // +------------------------------------------------------------------+
-// | Signal Strength Analysis                                         |
+// | Signal Strength Analysis (Upgraded)                              |
 // +------------------------------------------------------------------+
 SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentCandle = false)
 {
     SignalStrength strength;
     strength.finalScore = 0;
+    strength.trendScore = 0;
+    strength.momentumScore = 0;
+    strength.chopScore = 0;
+    strength.peakScore = 0;
+    strength.volatilityScore = 0;
+    strength.impulseStrength = 0;
+    strength.velocity = 0;
+    strength.normalizedVelocity = 0;
     strength.avgBody = 0;
     strength.bodySignal = 0;
     strength.ratio = 0;
@@ -953,88 +953,244 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     // 1. Determine Signal Candle Index
     int signalIndex = includeCurrentCandle ? 0 : 1;
     
-    // 2. Fetch Candle Data
-    double close = iClose(_Symbol, _Period, signalIndex);
-    double open = iOpen(_Symbol, _Period, signalIndex);
-    double high = iHigh(_Symbol, _Period, signalIndex);
-    double low = iLow(_Symbol, _Period, signalIndex);
-    
-    // 2. Determine Logic Direction based on Order Type
+    // 2. Determine Logic Direction
     bool isBuy = (orderType == ORDER_TYPE_BUY);
     bool isSell = (orderType == ORDER_TYPE_SELL);
     
-    // 3. Initialize Score
-    double score = 10.0;
+    // ==================================================================
+    // INDICATOR CALCULATIONS (On-demand, constant time via iFunctions)
+    // ==================================================================
+    // Handles are cached by MT5 automatically for identical parameters
+    int hEMA_Fast = iMA(_Symbol, _Period, EMAFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    int hEMA_Slow = iMA(_Symbol, _Period, EMASlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    int hRSI      = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
+    int hATR      = iATR(_Symbol, _Period, ATRPeriod);
     
-    // 4. Scan backward for DirectionalLookbackCount
+    double bufEMA_Fast[], bufEMA_Slow[], bufRSI[], bufATR[];
+    ArraySetAsSeries(bufEMA_Fast, true);
+    ArraySetAsSeries(bufEMA_Slow, true);
+    ArraySetAsSeries(bufRSI, true);
+    ArraySetAsSeries(bufATR, true);
+    
+    // Copy minimal buffers 
+    int needed = MathMax(ImpulseLookback, MathMax(DirectionalBodyLookback, ATRAvgLookback)) + 5;
+    if (needed < 30) needed = 30; // Safety buffer
+    
+    if(CopyBuffer(hEMA_Fast, 0, signalIndex, 3, bufEMA_Fast) < 3) return strength;
+    if(CopyBuffer(hEMA_Slow, 0, signalIndex, 3, bufEMA_Slow) < 3) return strength;
+    if(CopyBuffer(hRSI, 0, signalIndex, 3, bufRSI) < 3) return strength;
+    if(CopyBuffer(hATR, 0, signalIndex, needed, bufATR) < needed) return strength; // Need more for ATR avg
+    
+    // Fetch Price Data
+    MqlRates rates[];
+    ArraySetAsSeries(rates, true);
+    if(CopyRates(_Symbol, _Period, signalIndex, needed, rates) < needed) return strength;
+
+    // 1. TREND SCORE (Max 3)
+    // Logic: EMA Alignment + Slope
+    double emaFast = bufEMA_Fast[0];
+    double emaSlow = bufEMA_Slow[0];
+    double emaFastPrev = bufEMA_Fast[1];
+    
+    bool trendAligned = false;
+    if (isBuy) trendAligned = (emaFast > emaSlow);
+    else trendAligned = (emaFast < emaSlow);
+    
+    if (trendAligned) strength.trendScore += 1.5;
+    
+    // Slope confirmation
+    bool slopeAligned = false;
+    if (isBuy) slopeAligned = (emaFast > emaFastPrev);
+    else slopeAligned = (emaFast < emaFastPrev);
+    
+    if (slopeAligned) strength.trendScore += 1.5;
+    
+    // Cap Trend Score
+    if(strength.trendScore > 3.0) strength.trendScore = 3.0;
+
+    // 2. MOMENTUM SCORE (Max 3) + IMPULSE UPGRADE
+    // Calculate Base Body Strength
+    double currentBody = MathAbs(rates[0].close - rates[0].open);
     double sumBody = 0;
-    int count = 0;
-    int i = signalIndex + 1; // Start from previous candle
-    int barsAvailable = iBars(_Symbol, _Period);
-    
-    while(count < DirectionalLookbackCount && i < barsAvailable)
+    int validCandles = 0;
+    for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
     {
-        double cClose = iClose(_Symbol, _Period, i);
-        double cOpen = iOpen(_Symbol, _Period, i);
-        double body = MathAbs(cClose - cOpen);
-        
-        if (isBuy && cClose > cOpen)
-        {
-            sumBody += body;
-            count++;
-        }
-        else if (isSell && cClose <= cOpen)
-        {
-            sumBody += body;
-            count++;
-        }
-        i++;
+        sumBody += MathAbs(rates[i].close - rates[i].open);
+        validCandles++;
     }
+    double avgRecentBody = (validCandles > 0) ? sumBody / validCandles : currentBody;
     
-    if (count > 0)
-        strength.avgBody = sumBody / count;
+    // Base Momentum Score derived from RSI and Body
+    double rsi = bufRSI[0];
+    double baseMomentum = 0;
+    
+    if (isBuy)
+    {
+        if (rsi > 50 && rsi < 80) baseMomentum += 1.0; // Sweet spot
+        if (rsi > 60) baseMomentum += 0.5;
+        if (currentBody > avgRecentBody) baseMomentum += 1.5;
+    }
     else
-        strength.avgBody = MathAbs(close - open);
-        
-    strength.bodySignal = MathAbs(close - open);
-    
-    // 5. Calculate Body Ratio Penalty
-    if (strength.avgBody > 0)
     {
-        strength.ratio = strength.bodySignal / strength.avgBody;
-        
-        if (strength.ratio < 1.0)
-        {
-            strength.penaltyBody = (1.0 - strength.ratio) * 5.0;
-            score -= strength.penaltyBody;
-            strength.reasoning += StringFormat("[Body Penalty: -%.1f] ", strength.penaltyBody);
-        }
+        if (rsi < 50 && rsi > 20) baseMomentum += 1.0;
+        if (rsi < 40) baseMomentum += 0.5;
+        if (currentBody > avgRecentBody) baseMomentum += 1.5;
     }
     
-    // 6. Wick Analysis
-    double maxOpenClose = MathMax(open, close);
-    double minOpenClose = MathMin(open, close);
-    strength.upperWick = high - maxOpenClose;
-    strength.lowerWick = minOpenClose - low;
+    strength.momentumScore = baseMomentum; // Start with base
     
-    if (strength.avgBody > 0)
+    // IMPULSE DETECTION LAYER
+    // a. Body Acceleration
+    double bodyAccel = 0;
+    if (avgRecentBody > 0) bodyAccel = currentBody / avgRecentBody;
+    if (bodyAccel > 3.0) bodyAccel = 3.0; // Cap internal accel
+    
+    // b. Range Expansion
+    double currentRange = rates[0].high - rates[0].low;
+    double sumRange = 0;
+    for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
     {
-        if (isBuy)
-            strength.rejection = strength.upperWick / strength.avgBody;
-        else
-            strength.rejection = strength.lowerWick / strength.avgBody;
-            
+        sumRange += (rates[i].high - rates[i].low);
+    }
+    double avgRecentRange = (validCandles > 0) ? sumRange / validCandles : currentRange;
+    
+    double rangeAccel = 0;
+    if (avgRecentRange > 0) rangeAccel = currentRange / avgRecentRange;
+    if (rangeAccel > 3.0) rangeAccel = 3.0;
+    
+    // c. Directional Continuity
+    int sameDirCount = 0;
+    for(int i=0; i<ImpulseLookback && i<needed; i++)
+    {
+        bool candleBullish = (rates[i].close > rates[i].open);
+        bool candleBearish = (rates[i].close < rates[i].open);
+        
+        if (isBuy && candleBullish) sameDirCount++;
+        else if (isSell && candleBearish) sameDirCount++;
+        else break; // Consecutive chain broken
+    }
+    double continuityScore = (double)sameDirCount / ImpulseLookback;
+    if(continuityScore > 1.0) continuityScore = 1.0;
+    
+    // Combine Impulse Strength
+    // Formula: ImpulseStrength = clamp((0.5bodyAccel + 0.3rangeAccel + 0.2*continuityScore)/2.0, 0..1)
+    // Note: Accel can be > 1, so division by 2.0 helps normalize, but we must clamp.
+    double rawImpulse = (0.5 * bodyAccel + 0.3 * rangeAccel + 0.2 * continuityScore) / 2.0;
+    strength.impulseStrength = rawImpulse;
+    if (strength.impulseStrength > 1.0) strength.impulseStrength = 1.0;
+    if (strength.impulseStrength < 0.0) strength.impulseStrength = 0.0;
+    
+    // Apply Impulse Boost to Momentum Score
+    // MomentumScore = MomentumScore * (1 + ImpulseBoostWeight * ImpulseStrength)
+    strength.momentumScore = strength.momentumScore * (1.0 + ImpulseBoostWeight * strength.impulseStrength);
+    
+    // Cap Momentum Score
+    if (strength.momentumScore > 3.0) strength.momentumScore = 3.0;
+
+    // 3. CHOP SCORE (Max 2)
+    // Logic: Low ATR variance or Choppiness Index approximation
+    double currentATR = bufATR[0];
+    double avgATR = 0;
+    // Calculate avgATR from buffer (using ATRAvgLookback)
+    // We already copied enough ATR data
+    if (needed >= ATRAvgLookback) {
+         double sumATR = 0;
+         for(int i=0; i<ATRAvgLookback && i<needed; i++) sumATR += bufATR[i];
+         avgATR = sumATR / ATRAvgLookback;
+    } else {
+         avgATR = currentATR;
+    }
+
+    double volRatio = 0;
+    if(avgATR > 0) volRatio = currentATR / avgATR;
+    
+    // If volume is rising (volRatio > 1.0), it's likely not chop
+    if (volRatio > 1.0) strength.chopScore = 2.0;
+    else if (volRatio > 0.8) strength.chopScore = 1.0;
+    else strength.chopScore = 0.5; // low volatility = chop risk
+    
+    if (strength.chopScore > 2.0) strength.chopScore = 2.0;
+
+    // 4. PEAK & VOLATILITY SCORES (Max 1 each)
+    strength.volatilityScore = (volRatio > 1.2) ? 1.0 : 0.5;
+    
+    bool breakout = false;
+    double localExtreme = isBuy ? rates[1].high : rates[1].low; // Start with previous
+    for(int i=2; i<=5; i++)
+    {
+         if(isBuy) localExtreme = MathMax(localExtreme, rates[i].high);
+         else localExtreme = MathMin(localExtreme, rates[i].low);
+    }
+    
+    if(isBuy && rates[0].close > localExtreme) breakout = true;
+    if(isSell && rates[0].close < localExtreme) breakout = true;
+    
+    if(breakout) strength.peakScore = 1.0;
+    
+    // 5. WICK / REJECTION PENALTY (Preserved/Updated)
+    double maxOpenClose = MathMax(rates[0].open, rates[0].close);
+    double minOpenClose = MathMin(rates[0].open, rates[0].close);
+    strength.upperWick = rates[0].high - maxOpenClose;
+    strength.lowerWick = minOpenClose - rates[0].low;
+    strength.bodySignal = currentBody;
+    strength.avgBody = avgRecentBody;
+    
+    if (currentBody > 0)
+    {
+        if (isBuy) strength.rejection = strength.upperWick / currentBody;
+        else strength.rejection = strength.lowerWick / currentBody;
+        
         strength.penaltyWick = strength.rejection * 2.0;
-        score -= strength.penaltyWick;
-        if(strength.penaltyWick > 0.1) strength.reasoning += StringFormat("[Wick Penalty: -%.1f] ", strength.penaltyWick);
+    }
+    // No penalty applied to score yet, handled in final summation or subtraction
+
+    // FINAL SCORE AGGREGATION
+    double rawScore = strength.trendScore + strength.momentumScore + strength.chopScore + strength.peakScore + strength.volatilityScore;
+    
+    // Apply Penalties (Wick)
+    rawScore -= strength.penaltyWick;
+    
+    // Clamp Final
+    strength.finalScore = rawScore;
+    if (strength.finalScore < 0) strength.finalScore = 0;
+    if (strength.finalScore > 10.0) strength.finalScore = 10.0;
+    
+    // VELOCITY TRACKING
+    double prevScore = 0;
+    if (isBuy)
+    {
+        // Use Global History (Updated on New Bar)
+        if (includeCurrentCandle) prevScore = g_LastBuySignalScore; // Index 0 vs Index 1
+        else prevScore = g_LastBuySignalScorePrev; // Index 1 vs Index 2
+    }
+    else
+    {
+        if (includeCurrentCandle) prevScore = g_LastSellSignalScore;
+        else prevScore = g_LastSellSignalScorePrev;
     }
     
-    // 7. Clamp Score
-    if (score < 0) score = 0;
-    if (score > 10) score = 10;
+    double velocity = strength.finalScore - prevScore;
+    strength.velocity = velocity;
     
-    strength.finalScore = score;
+    // Normalized Velocity
+    strength.normalizedVelocity = (velocity + VelocityWindow) / (2.0 * VelocityWindow);
+    if(strength.normalizedVelocity < 0) strength.normalizedVelocity = 0;
+    if(strength.normalizedVelocity > 1.0) strength.normalizedVelocity = 1.0;
     
+    // Update Globals for Position Sizing (Latest Call Wins)
+    if(isBuy) {
+        g_LastBuyVelocity = strength.velocity;
+        g_LastBuyNormalizedVelocity = strength.normalizedVelocity;
+    } else {
+        g_LastSellVelocity = strength.velocity;
+        g_LastSellNormalizedVelocity = strength.normalizedVelocity;
+    }
+    
+    // Debug Construction
+    strength.reasoning = StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f", 
+        strength.trendScore, strength.momentumScore, strength.impulseStrength,
+        strength.chopScore, strength.peakScore, strength.volatilityScore, strength.normalizedVelocity);
+        
     return strength;
 }
 
@@ -1467,21 +1623,15 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
         }
     }
     
-    // Calculate and set Stop Loss
-    if(EnableStopLoss)
-    {
-        double slPoints = ConvertToPoints(SLInputType, SLValue, currentLot);
-        
-        if(orderType == ORDER_TYPE_BUY)
-        {
-            request.sl = NormalizeDouble(price - (slPoints * _Point), _Digits);
-        }
-        else
-        {
-            request.sl = NormalizeDouble(price + (slPoints * _Point), _Digits);
-        }
-    }
+    // Re-calculate or fetch global velocity
+    double velocityBoost = 0;
+    if (orderType == ORDER_TYPE_BUY) velocityBoost = g_LastBuyNormalizedVelocity;
+    else velocityBoost = g_LastSellNormalizedVelocity;
     
+    // Recalculate lot with velocity
+    currentLot = CalculateDynamicLotSize(signalScore, velocityBoost);
+    request.volume = currentLot;
+
     bool orderResult = OrderSend(request, result);
     
     if(orderResult)
@@ -1833,17 +1983,16 @@ int CountOpenOrdersByType(ENUM_POSITION_TYPE posType)
 //| Lot increases based on:                                           |
 //|   1. Equity drop from peak (EquityDropPercent per step)          |
 //|   2. Strong signal strength (MinSignalStrengthForLot threshold)   |
+//|   3. Velocity Boost (New)                                         |
 //+------------------------------------------------------------------+
-double CalculateDynamicLotSize(double signalScore = 0)
+double CalculateDynamicLotSize(double signalScore = 0, double normalizedVelocity = 0)
 {
     if(!EnableDynamicLots) return BaseLotSize;
     
     double currentLot = BaseLotSize;
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     
-    // ================================================================
     // 1. EQUITY DROP-BASED LOT INCREASE
-    // ================================================================
     // Calculate equity drop from peak as percentage
     double equityDropPercent = 0;
     if(peakEquity > 0)
@@ -1861,9 +2010,7 @@ double CalculateDynamicLotSize(double signalScore = 0)
     double equityLotIncrease = equitySteps * LotStepSize;
     currentLot += equityLotIncrease;
     
-    // ================================================================
     // 2. SIGNAL STRENGTH-BASED LOT INCREASE
-    // ================================================================
     // If signal score is above threshold, add extra lot steps
     double signalLotIncrease = 0;
     if(signalScore >= MinSignalStrengthForLot)
@@ -1874,13 +2021,23 @@ double CalculateDynamicLotSize(double signalScore = 0)
         currentLot += signalLotIncrease;
     }
     
-    // ================================================================
     // APPLY LIMITS
-    // ================================================================
     // Apply user-defined limits
     if(currentLot < BaseLotSize) currentLot = BaseLotSize;
     if(currentLot > MaxLotSize) currentLot = MaxLotSize;
 
+    // 3. VELOCITY BOOST 
+    // lotSizeMultiplier *= velocityBoost
+    // velocityBoost = 1 + normalizedVelocity * VelocitySizeWeight
+    double velocityBoost = 1.0 + (normalizedVelocity * VelocitySizeWeight);
+    currentLot *= velocityBoost;
+    
+    // Clamp to Max Lot Size
+    if(currentLot > MaxLotSize) currentLot = MaxLotSize;
+    
+    // Round to 2 decimal places (standard lot step)
+    currentLot = NormalizeDouble(currentLot, 2);
+    
     // Apply broker limits
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -3079,7 +3236,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v28.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v31.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -3179,7 +3336,7 @@ void UpdateDashboard()
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v28.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v31.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic
@@ -3239,8 +3396,7 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_CurrentBuy", currentBuyText, startX, currentY, detailsSize, colorText);
     currentY += lineHeight;
     
-    string buyDet = StringFormat("AvgBody:%.*f Ratio:%.2f WickPen:%.1f", 
-                  _Digits, buyStrength.avgBody, buyStrength.ratio, buyStrength.penaltyWick);
+    string buyDet = StringFormat("%s", buyStrength.reasoning);
     DrawDashboardLabel("NyaoDash_BuyDet", buyDet, startX, currentY, detailsSize, colorText);
     currentY += lineHeight + 2;
 
@@ -3253,8 +3409,7 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_CurrentSell", currentSellText, startX, currentY, detailsSize, colorText);
     currentY += lineHeight;
 
-    string sellDet = StringFormat("AvgBody:%.*f Ratio:%.2f WickPen:%.1f", 
-                  _Digits, sellStrength.avgBody, sellStrength.ratio, sellStrength.penaltyWick);
+    string sellDet = StringFormat("%s",sellStrength.reasoning);
     DrawDashboardLabel("NyaoDash_SellDet", sellDet, startX, currentY, detailsSize, colorText);
     currentY += lineHeight + 10;
 
