@@ -1,11 +1,11 @@
 // +------------------------------------------------------------------+
-// |                                          Nyao Scalper v31.0      |
+// |                                          Nyao Scalper v32.0      |
 // |              Indicator-Based Signal Strength Trading System      |
 // |              with Equity & Risk Management + Discord Alerts      |
 // |                                    © Copyright Nyao Scalper      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "31.0"
+#property version   "32.0"
 #property description "Auto Trading EA Robot with Indicator-Based Signal Strength & Position Management."
 #property description "Do with your own risk. Results may vary based on market conditions."
 #property strict
@@ -33,7 +33,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v31.0"
+input group " Nyao Scalper v32.0"
 input group "「結果が出ない努力はただの言い訳」"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
@@ -70,7 +70,7 @@ input double VolatilityScoreHigh = 1.0;                   // Volatility Score Hi
 input double VolatilityScoreLow = 0.5;                    // Volatility Score Low
 input double PeakScoreWeight = 1.0;                       // Peak Breakout Score Weight
 input double WickRejectionWeight = 1.0;                   // Wick Rejection Penalty Weight
-input double MinBodyRatio = 1.5;                          // Min Body Ratio for Wick Calculation (prevents div/0)
+input double MinBodyRatio = 1.5;                          // Min Body Ratio for Wick Calculation
 
 input group "📝 Order & Position Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
@@ -93,19 +93,19 @@ input double MinPyramidingSellSignalScore = 8.0;          // Min Signal Strength
 input int MaxPositionsPerCandle = 3;                      // Max Positions Per Candle
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
 input double HoldScoreRatio = 0.1;                        // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
-input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
+input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
 input double EquityDropPercent = 10.0;                    // Equity Drop % per Lot Step
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
 input double MaxLotSize = 0.05;                           // Max Lot Size
-input double MinSignalStrengthForLot = 10.0;               // Min Signal Score for Lot Increase
+input double MinSignalStrengthForLot = 10.0;              // Min Signal Score for Lot Increase
 
 input group "🏦 Equity Settings"
 input double MinEquityPercent = 70.0;                     // Min Equity % from Peak - Pause Trading when Reached
 input double MaxDrawdownFromPeak = 0;                     // Max Equity $ Drawdown - Pause Trading when Reached (0 = Disabled)
-input int PauseMinutes = 5;                               // Pause Duration when Reached (Minutes)
+input int PauseMinutes = 5;                               // Pause Duration (Minutes)
 input double PauseMinutesMultiplier = 1.5;                // Multiply Pause Duration on Each Trigger
 input int MaxPauseMinutes = 120;                          // Max Pause Duration Minutes (0 = Max 24,855 days)
 input int MaxMinEquityTriggers = 0;                       // Max Times Trigger - Stop Trading when Reached (0 = Unlimited)
@@ -119,9 +119,9 @@ input ENUM_INPUT_TYPE TPInputType = INPUT_DOLLAR;         // TP Input Type
 input double TPValue = 10.0;                              // TP Value
 
 input group "📉 Stop Loss Settings"
-input bool EnableStopLoss = false;                        // Enable Stop Loss
-input ENUM_INPUT_TYPE SLInputType = INPUT_DOLLAR;         // SL Input Type
-input double SLValue = 10.0;                              // SL Value
+input bool EnableStopLoss = true;                         // Enable Stop Loss
+input ENUM_INPUT_TYPE SLInputType = INPUT_PERCENT;        // SL Input Type
+input double SLValue = 20.0;                              // SL Value
 
 input group "💸 Trailing TP/SL Settings"
 input bool EnableTrailing = true;                         // Enable Trailing TP/SL
@@ -157,12 +157,11 @@ input bool EnableLogging = false;                         // Enable EA Logging (
 const string EA_PASSWORD = "";
 
 // Password Dialog Controls
-CDialog g_PasswordDialog;
-CEdit g_PasswordEdit;
-CButton g_PasswordSubmitBtn;
-CLabel g_PasswordLabel;
-bool g_PasswordVerified = false;
-bool g_PasswordDialogActive = false;
+CDialog passwordDialog;
+CEdit passwordEdit;
+CButton passwordSubmitBtn;
+bool passwordVerified = false;
+bool passwordDialogActive = false;
 
 double initialBalance = 0;                                // Initial Account Balance     
 double peakEquity = 0;                                    // Peak Equity Recorded
@@ -186,7 +185,6 @@ bool marketCloseAlertSent = false;                        // Flag for near marke
 bool algoTradingStatus = false;                           // Flag for algo trading status
 
 // Duplicate Signal Filter Variables
-datetime lastReverseTime = 0;
 datetime startTime = 0;                                   // EA Start Time
 datetime lastDailyReportTime = 0;                         // Last time daily report was sent
 double lastReportEquity = 0;                              // Equity at last report
@@ -196,8 +194,11 @@ int totalPauseCount = 0;                                  // Total number of tim
 double totalPauseDurationMinutes = 0;                     // Total duration of pauses in minutes
 
 // Multi-Entry tracking
-datetime lastMultiEntryTime = 0;
-int g_ATR_PyramidingHandle = INVALID_HANDLE;     // Handle for Pyramiding ATR calculation
+int atrPyramidingHandle = INVALID_HANDLE;                // Handle for Pyramiding ATR calculation
+int emaFastHandle = INVALID_HANDLE;                      // Handle for Fast EMA
+int emaSlowHandle = INVALID_HANDLE;                      // Handle for Slow EMA
+int rsiHandle = INVALID_HANDLE;                          // Handle for RSI
+int atrSignalHandle = INVALID_HANDLE;                    // Handle for Signal ATR
 
 // Signal Strength Structure - Indicator-Based Scoring System
 // Weights are adjustable via Score Weight Settings inputs
@@ -233,34 +234,34 @@ struct ManagedPosition
 };
 
 // Managed positions array
-ManagedPosition g_ManagedPositions[];
-int g_ManagedPositionCount = 0;
+ManagedPosition managedPositions[];
+int managedPositionCount = 0;
 
 // Internal Position Counters (for O(1) checks)
-int g_BuyPositionCount = 0;
-int g_SellPositionCount = 0;
+int buyPositionCount = 0;
+int sellPositionCount = 0;
 
 // Candle-based Pyramiding Counters
-datetime g_CurrentBarTime = 0;
-int g_BuysOnCurrentBar = 0;
-int g_SellsOnCurrentBar = 0;
+datetime currentBarTime = 0;
+int buysOnCurrentBar = 0;
+int sellsOnCurrentBar = 0;
 
 // Last Position Tracking (for O(1) duplicate checks)
-datetime g_LastBuyTime = 0;
-double g_LastBuyPrice = 0;
-datetime g_LastSellTime = 0;
-double g_LastSellPrice = 0;
+datetime lastBuyTime = 0;
+double lastBuyPrice = 0;
+datetime lastSellTime = 0;
+double lastSellPrice = 0;
 
-// Last signal tracking per candle (for multi-signal logic)
-double g_LastBuySignalScore = 0; // Score(1)
-double g_LastBuySignalScorePrev = 0; // Score(2)
-double g_LastBuyVelocity = 0; // For position sizing
-double g_LastBuyNormalizedVelocity = 0; // For position sizing
+// Last signal tracking per candle 
+double lastBuySignalScore = 0; 
+double lastBuySignalScorePrev = 0; 
+double lastBuyVelocity = 0; 
+double lastBuyNormalizedVelocity = 0; 
 
-double g_LastSellSignalScore = 0; // Score(1)
-double g_LastSellSignalScorePrev = 0; // Score(2)
-double g_LastSellVelocity = 0; // For position sizing
-double g_LastSellNormalizedVelocity = 0; // For position sizing
+double lastSellSignalScore = 0; 
+double lastSellSignalScorePrev = 0; 
+double lastSellVelocity = 0; 
+double lastSellNormalizedVelocity = 0; 
 
 // Trade Statistics Structure
 struct TradeStats
@@ -283,25 +284,25 @@ struct TradeStats
 // +------------------------------------------------------------------+
 bool CreatePasswordDialog()
 {
-    if(!g_PasswordDialog.Create(0, "PasswordDialog", 0, 10, 10, 324, 120))
+    if(!passwordDialog.Create(0, "PasswordDialog", 0, 10, 10, 324, 120))
         return false;
     
-    g_PasswordDialog.Caption("Enter Password to Use Nyao Scalper EA");
+    passwordDialog.Caption("Enter Password to Use Nyao Scalper EA");
     
-    if(!g_PasswordEdit.Create(0, "PasswordEdit", 0, 5, 10, 300, 35))
+    if(!passwordEdit.Create(0, "PasswordEdit", 0, 5, 10, 300, 35))
         return false;
 
-    g_PasswordEdit.Text("");
+    passwordEdit.Text("");
 
-    if(!g_PasswordDialog.Add(g_PasswordEdit))
+    if(!passwordDialog.Add(passwordEdit))
         return false;
     
-    if(!g_PasswordSubmitBtn.Create(0, "PasswordSubmit", 0, 5, 45, 100, 75))
+    if(!passwordSubmitBtn.Create(0, "PasswordSubmit", 0, 5, 45, 100, 75))
         return false;
 
-    g_PasswordSubmitBtn.Text("Submit");
+    passwordSubmitBtn.Text("Submit");
 
-    if(!g_PasswordDialog.Add(g_PasswordSubmitBtn))
+    if(!passwordDialog.Add(passwordSubmitBtn))
         return false;
     
     return true;
@@ -315,8 +316,8 @@ int OnInit()
     // Password protection - show dialog if password is set
     if(EA_PASSWORD != "")
     {
-        g_PasswordVerified = false;
-        g_PasswordDialogActive = true;
+        passwordVerified = false;
+        passwordDialogActive = true;
         
         if(!CreatePasswordDialog())
         {
@@ -329,8 +330,8 @@ int OnInit()
     }
     else
     {
-        g_PasswordVerified = true;
-        g_PasswordDialogActive = false;
+        passwordVerified = true;
+        passwordDialogActive = false;
     }
     
     // Continue with normal initialization
@@ -374,6 +375,42 @@ int InitializeEA()
         return(INIT_PARAMETERS_INCORRECT);
     }
 
+    // Initialize Signal Indicators
+    emaFastHandle = iMA(_Symbol, _Period, EMAFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    if(emaFastHandle == INVALID_HANDLE)
+    {
+        Print("Error creating Fast EMA handle!");
+        return(INIT_FAILED);
+    }
+    
+    emaSlowHandle = iMA(_Symbol, _Period, EMASlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    if(emaSlowHandle == INVALID_HANDLE)
+    {
+        Print("Error creating Slow EMA handle!");
+        return(INIT_FAILED);
+    }
+    
+    rsiHandle = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
+    if(rsiHandle == INVALID_HANDLE)
+    {
+        Print("Error creating RSI handle!");
+        return(INIT_FAILED);
+    }
+    
+    atrSignalHandle = iATR(_Symbol, _Period, ATRPeriod);
+    if(atrSignalHandle == INVALID_HANDLE)
+    {
+        Print("Error creating Signal ATR handle!");
+        return(INIT_FAILED);
+    }
+
+    atrPyramidingHandle = iATR(_Symbol, _Period, PyramidingLookback);
+    if(atrPyramidingHandle == INVALID_HANDLE)
+    {
+        Print("Error creating ATR handle for Pyramiding!");
+        return(INIT_FAILED);
+    }
+
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     lastPeakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -396,8 +433,8 @@ int InitializeEA()
     algoTradingStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
     // Initialize managed positions array
-    ArrayResize(g_ManagedPositions, 0);
-    g_ManagedPositionCount = 0;
+    ArrayResize(managedPositions, 0);
+    managedPositionCount = 0;
     
     // Scan and register existing positions
     for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -434,48 +471,40 @@ int InitializeEA()
         
         // Reconstruct Candle Counters for existing positions
         datetime posBarTime = (posTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
-        datetime currentBarTime = iTime(_Symbol, _Period, 0);
+        datetime curBarTime = iTime(_Symbol, _Period, 0);
         
         // Initialize current bar time if needed
-        if(g_CurrentBarTime == 0) g_CurrentBarTime = currentBarTime;
+        if(currentBarTime == 0) currentBarTime = curBarTime;
         
         if(posBarTime == currentBarTime)
         {
-            if(type == POSITION_TYPE_BUY) g_BuysOnCurrentBar++;
-            else g_SellsOnCurrentBar++;
+            if(type == POSITION_TYPE_BUY) buysOnCurrentBar++;
+            else sellsOnCurrentBar++;
         }
         
         if(type == POSITION_TYPE_BUY)
         {
-            if(posTime > g_LastBuyTime)
+            if(posTime > lastBuyTime)
             {
-                g_LastBuyTime = posTime;
-                g_LastBuyPrice = posPrice;
+                lastBuyTime = posTime;
+                lastBuyPrice = posPrice;
             }
         }
         else if(type == POSITION_TYPE_SELL)
         {
-            if(posTime > g_LastSellTime)
+            if(posTime > lastSellTime)
             {
-                g_LastSellTime = posTime;
-                g_LastSellPrice = posPrice;
+                lastSellTime = posTime;
+                lastSellPrice = posPrice;
             }
         }
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v31.0 Initialized Successfully");
+    Print("Nyao Scalper v32.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
-    
-    // Initialize Pyramiding ATR Handle
-    g_ATR_PyramidingHandle = iATR(_Symbol, _Period, PyramidingLookback);
-    if(g_ATR_PyramidingHandle == INVALID_HANDLE)
-    {
-        Print("Error creating ATR handle for Pyramiding!");
-        return(INIT_FAILED);
-    }
     
     return(INIT_SUCCEEDED);
 }
@@ -486,10 +515,10 @@ int InitializeEA()
 void OnDeinit(const int reason)
 {   
     // Cleanup password dialog if active
-    if(g_PasswordDialogActive)
+    if(passwordDialogActive)
     {
-        g_PasswordDialog.Destroy();
-        g_PasswordDialogActive = false;
+        passwordDialog.Destroy();
+        passwordDialogActive = false;
     }
     
     // Cleanup Dashboard Objects
@@ -497,9 +526,13 @@ void OnDeinit(const int reason)
     Comment("");
     
     // Release ATR Handle
-    IndicatorRelease(g_ATR_PyramidingHandle);
+    IndicatorRelease(atrPyramidingHandle);
+    IndicatorRelease(emaFastHandle);
+    IndicatorRelease(emaSlowHandle);
+    IndicatorRelease(rsiHandle);
+    IndicatorRelease(atrSignalHandle);
     
-    Print("Nyao Scalper v31.0 Deinitialized");
+    Print("Nyao Scalper v32.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -508,10 +541,7 @@ void OnDeinit(const int reason)
 void OnTick()
 {   
     // Block trading until password is verified
-    if(!g_PasswordVerified)
-    {
-        return;
-    }
+    if(!passwordVerified) return;
     
     // Check Algo Trading status
     CheckAlgoTradingStatus();
@@ -547,26 +577,26 @@ void OnTick()
     CheckMarketClose();
 
     // Update Signal Globals on New Bar (for Velocity Tracking)
-    datetime currentBarTime = iTime(_Symbol, _Period, 0);
-    if(g_CurrentBarTime != currentBarTime)
+    datetime currBarTime = iTime(_Symbol, _Period, 0);
+    if(currentBarTime != currBarTime)
     {
         // Update History Scores
         // Recalculate Score(1) which is the just-closed candle
         // We can't trust the live variable, so we re-calc
-        g_LastBuySignalScorePrev = g_LastBuySignalScore;
+        lastBuySignalScorePrev = lastBuySignalScore;
         
         // Update Buy Stats
         SignalStrength buyStr = GetSignalStrength(ORDER_TYPE_BUY, false); // Index 1
-        g_LastBuySignalScore = buyStr.finalScore;
+        lastBuySignalScore = buyStr.finalScore;
         
         // Update Sell Stats
         SignalStrength sellStr = GetSignalStrength(ORDER_TYPE_SELL, false); // Index 1
-        g_LastSellSignalScore = sellStr.finalScore;
+        lastSellSignalScore = sellStr.finalScore;
         
         // Update Bar Time (will be updated in OpenPosition too, but good to have here)
-        g_CurrentBarTime = currentBarTime;
-        g_BuysOnCurrentBar = 0;
-        g_SellsOnCurrentBar = 0;
+        currentBarTime = currentBarTime;
+        buysOnCurrentBar = 0;
+        sellsOnCurrentBar = 0;
     }
 
     if (isOutsideTradingHours || isLeverageDiffFromInitial || isNearMarketClose)
@@ -641,21 +671,21 @@ void OnTick()
 // +------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-    if(g_PasswordDialogActive)
+    if(passwordDialogActive)
     {
-        g_PasswordDialog.OnEvent(id, lparam, dparam, sparam);
+        passwordDialog.OnEvent(id, lparam, dparam, sparam);
         
         // Check for submit button click
         if(id == CHARTEVENT_OBJECT_CLICK && sparam == "PasswordSubmit")
         {
-            string enteredPassword = g_PasswordEdit.Text();
+            string enteredPassword = passwordEdit.Text();
             
             if(enteredPassword == EA_PASSWORD)
             {
                 // Password correct - close dialog and initialize EA
-                g_PasswordDialog.Destroy();
-                g_PasswordDialogActive = false;
-                g_PasswordVerified = true;
+                passwordDialog.Destroy();
+                passwordDialogActive = false;
+                passwordVerified = true;
                 
                 Print("Password verified! EA is now active.");
                 
@@ -668,7 +698,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
             else
             {
                 Alert("Invalid password! Please try again.");
-                g_PasswordEdit.Text("");
+                passwordEdit.Text("");
             }
         }
     }
@@ -683,7 +713,7 @@ void CheckForTradingSignal()
     double buySignal = BuySignal();
     double sellSignal = SellSignal();
 
-    // Process BUY signals
+    // Process signals
     if (buySignal > sellSignal)
     {
         if (!EnableBuyOrders) return;
@@ -772,10 +802,10 @@ double SellSignal()
 bool CheckBuyConditions(double price, bool &isPyramiding)
 {
     isPyramiding = false;
-    datetime currentBarTime = iTime(_Symbol, _Period, 0);
+    datetime currBarTime = iTime(_Symbol, _Period, 0);
 
     // Determine effective count
-    int buysOnCandle = (g_CurrentBarTime == currentBarTime) ? g_BuysOnCurrentBar : 0;
+    int buysOnCandle = (currentBarTime == currBarTime) ? buysOnCurrentBar : 0;
     
     // Check Pyramiding Limits per Candle
     int limit = EnablePyramiding ? MaxPositionsPerCandle : 1;
@@ -786,7 +816,7 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
     }
     
     // Prevent opposite direction trades on the same candle
-    if(g_SellsOnCurrentBar > 0)
+    if(sellsOnCurrentBar > 0)
     {
         return false;
     }
@@ -795,10 +825,10 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
 
     // Check if we have a previous buy position
     // Only consider it pyramiding if we actually have an open position (lastTicket > 0)
-    if(g_LastBuyTime > 0 && lastTicket > 0)
+    if(lastBuyTime > 0 && lastTicket > 0)
     {
         // Fast bar time calculation
-        datetime lastPosBarTime = (g_LastBuyTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+        datetime lastPosBarTime = (lastBuyTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
         
         // Only check distance if opened on SAME bar
         if(lastPosBarTime == currentBarTime)
@@ -806,7 +836,7 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
             isPyramiding = true; // Adding within the same bar
             
             double minDistance = ZonePoints * _Point * BuyDuplicateMultiplier;
-            double distance = MathAbs(price - g_LastBuyPrice);
+            double distance = MathAbs(price - lastBuyPrice);
             
             if(distance < minDistance)
             {
@@ -819,7 +849,7 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
             
             // Efficient Average Range (ATR) Check - O(1)
             double atrBuffer[1];
-            if(CopyBuffer(g_ATR_PyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
+            if(CopyBuffer(atrPyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
             double avgRange = atrBuffer[0];
             
             if(avgRange > 0 && currentRun > (avgRange * PyramidingMaxCandleRatio))
@@ -838,10 +868,10 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
 bool CheckSellConditions(double price, bool &isPyramiding)
 {
     isPyramiding = false;
-    datetime currentBarTime = iTime(_Symbol, _Period, 0);
+    datetime currBarTime = iTime(_Symbol, _Period, 0);
     
     // Determine effective count
-    int sellsOnCandle = (g_CurrentBarTime == currentBarTime) ? g_SellsOnCurrentBar : 0;
+    int sellsOnCandle = (currentBarTime == currBarTime) ? sellsOnCurrentBar : 0;
     
     // Check Pyramiding Limits per Candle
     int limit = EnablePyramiding ? MaxPositionsPerCandle : 1;
@@ -852,7 +882,7 @@ bool CheckSellConditions(double price, bool &isPyramiding)
     }
 
     // Prevent opposite direction trades on the same candle
-    if(g_BuysOnCurrentBar > 0)
+    if(buysOnCurrentBar > 0)
     {
         return false;
     }
@@ -861,10 +891,10 @@ bool CheckSellConditions(double price, bool &isPyramiding)
 
     // Check if we have a previous sell position
     // Only consider it pyramiding if we actually have an open position (lastTicket > 0)
-    if(g_LastSellTime > 0 && lastTicket > 0)
+    if(lastSellTime > 0 && lastTicket > 0)
     {
         // Fast bar time calculation
-        datetime lastPosBarTime = (g_LastSellTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+        datetime lastPosBarTime = (lastSellTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
         
         // Only check distance if opened on SAME bar
         if(lastPosBarTime == currentBarTime)
@@ -872,7 +902,7 @@ bool CheckSellConditions(double price, bool &isPyramiding)
             isPyramiding = true; // Adding within the same bar
             
             double minDistance = ZonePoints * _Point * SellDuplicateMultiplier;
-            double distance = MathAbs(price - g_LastSellPrice);
+            double distance = MathAbs(price - lastSellPrice);
             
             if(distance < minDistance)
             {
@@ -885,7 +915,7 @@ bool CheckSellConditions(double price, bool &isPyramiding)
             
             // Efficient Average Range (ATR) Check - O(1)
             double atrBuffer[1];
-            if(CopyBuffer(g_ATR_PyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
+            if(CopyBuffer(atrPyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
             double avgRange = atrBuffer[0];
             
             if(avgRange > 0 && currentRun > (avgRange * PyramidingMaxCandleRatio))
@@ -960,10 +990,10 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     
     // INDICATOR CALCULATIONS (On-demand, constant time via iFunctions)
     // Handles are cached by MT5 automatically for identical parameters
-    int hEMA_Fast = iMA(_Symbol, _Period, EMAFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
-    int hEMA_Slow = iMA(_Symbol, _Period, EMASlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
-    int hRSI      = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
-    int hATR      = iATR(_Symbol, _Period, ATRPeriod);
+    // int hEMA_Fast = iMA(_Symbol, _Period, EMAFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    // int hEMA_Slow = iMA(_Symbol, _Period, EMASlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    // int hRSI      = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
+    // int hATR      = iATR(_Symbol, _Period, ATRPeriod);
     
     double bufEMA_Fast[], bufEMA_Slow[], bufRSI[], bufATR[];
     ArraySetAsSeries(bufEMA_Fast, true);
@@ -975,10 +1005,10 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     int needed = MathMax(ImpulseLookback, MathMax(DirectionalBodyLookback, ATRAvgLookback)) + 5;
     if (needed < 30) needed = 30; // Safety buffer
     
-    if(CopyBuffer(hEMA_Fast, 0, signalIndex, 3, bufEMA_Fast) < 3) return strength;
-    if(CopyBuffer(hEMA_Slow, 0, signalIndex, 3, bufEMA_Slow) < 3) return strength;
-    if(CopyBuffer(hRSI, 0, signalIndex, 3, bufRSI) < 3) return strength;
-    if(CopyBuffer(hATR, 0, signalIndex, needed, bufATR) < needed) return strength; // Need more for ATR avg
+    if(CopyBuffer(emaFastHandle, 0, signalIndex, 3, bufEMA_Fast) < 3) return strength;
+    if(CopyBuffer(emaSlowHandle, 0, signalIndex, 3, bufEMA_Slow) < 3) return strength;
+    if(CopyBuffer(rsiHandle, 0, signalIndex, 3, bufRSI) < 3) return strength;
+    if(CopyBuffer(atrSignalHandle, 0, signalIndex, needed, bufATR) < needed) return strength; // Need more for ATR avg
     
     // Fetch Price Data
     MqlRates rates[];
@@ -1134,7 +1164,7 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     strength.bodySignal = currentBody;
     strength.avgBody = avgRecentBody;
     
-    // Use a smoothed body size to prevent "division by zero" explosion on doji candles
+    // Use a smoothed body size to prevent division by zero explosion on doji candles
     double safeBody = MathMax(currentBody, avgRecentBody * MinBodyRatio); 
     
     if (safeBody > 0)
@@ -1144,7 +1174,6 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
         
         strength.penaltyWick = strength.rejection * WickRejectionWeight;
     }
-    // No penalty applied to score yet, handled in final summation or subtraction
 
     // FINAL SCORE AGGREGATION
     double rawScore = strength.trendScore + strength.momentumScore + strength.chopScore + strength.peakScore + strength.volatilityScore;
@@ -1162,13 +1191,13 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     if (isBuy)
     {
         // Use Global History (Updated on New Bar)
-        if (includeCurrentCandle) prevScore = g_LastBuySignalScore; // Index 0 vs Index 1
-        else prevScore = g_LastBuySignalScorePrev; // Index 1 vs Index 2
+        if (includeCurrentCandle) prevScore = lastBuySignalScore; // Index 0 vs Index 1
+        else prevScore = lastBuySignalScorePrev; // Index 1 vs Index 2
     }
     else
     {
-        if (includeCurrentCandle) prevScore = g_LastSellSignalScore;
-        else prevScore = g_LastSellSignalScorePrev;
+        if (includeCurrentCandle) prevScore = lastSellSignalScore;
+        else prevScore = lastSellSignalScorePrev;
     }
     
     double velocity = strength.finalScore - prevScore;
@@ -1181,11 +1210,11 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     
     // Update Globals for Position Sizing (Latest Call Wins)
     if(isBuy) {
-        g_LastBuyVelocity = strength.velocity;
-        g_LastBuyNormalizedVelocity = strength.normalizedVelocity;
+        lastBuyVelocity = strength.velocity;
+        lastBuyNormalizedVelocity = strength.normalizedVelocity;
     } else {
-        g_LastSellVelocity = strength.velocity;
-        g_LastSellNormalizedVelocity = strength.normalizedVelocity;
+        lastSellVelocity = strength.velocity;
+        lastSellNormalizedVelocity = strength.normalizedVelocity;
     }
     
     // Debug Construction
@@ -1201,7 +1230,9 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
 // | Uses current signal strength vs initial to manage positions      |
 // +------------------------------------------------------------------+
 void ManageLosingPositions()
-{
+{   
+    if(!EnableLossManagement)return;
+    
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
@@ -1217,7 +1248,7 @@ void ManageLosingPositions()
         int posIndex = GetManagedPositionIndex(ticket);
         if (posIndex != -1)
         {
-            initialScore = g_ManagedPositions[posIndex].signalScore;
+            initialScore = managedPositions[posIndex].signalScore;
         }
         else
         {
@@ -1300,7 +1331,7 @@ void ManageTrailingTPSL(ulong ticket)
     int posIndex = GetManagedPositionIndex(ticket);
     if(posIndex != -1)
     {
-        initialScore = g_ManagedPositions[posIndex].signalScore;
+        initialScore = managedPositions[posIndex].signalScore;
     }
     
     // ADAPTIVE LOGIC (Delta Based)
@@ -1469,9 +1500,10 @@ void ManageTrailingTPSL(ulong ticket)
         
         // EMERGENCY CLOSE MECHANISM
         // Trigger if modification failed AND profit is substantial
-        // Prevents losing "substantial" profit due to inability to trail
+        // Prevents losing substantial profit due to inability to trail
         
-        double minSubstantialProfit = MinBreakEvenProfit * 3.0; // Define substantial as 3x minimum target
+        // Define substantial as 3x minimum target profit
+        double minSubstantialProfit = MinBreakEvenProfit * 3.0; 
         
         if(profit >= minSubstantialProfit)
         {
@@ -1488,52 +1520,52 @@ void ManageTrailingTPSL(ulong ticket)
 void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signalScore)
 {
     // Resize array
-    ArrayResize(g_ManagedPositions, g_ManagedPositionCount + 1);
+    ArrayResize(managedPositions, managedPositionCount + 1);
     
     // Fill position data
-    g_ManagedPositions[g_ManagedPositionCount].ticket = ticket;
-    g_ManagedPositions[g_ManagedPositionCount].type = type;
-    g_ManagedPositions[g_ManagedPositionCount].signalScore = signalScore;
+    managedPositions[managedPositionCount].ticket = ticket;
+    managedPositions[managedPositionCount].type = type;
+    managedPositions[managedPositionCount].signalScore = signalScore;
     
-    g_ManagedPositionCount++;
+    managedPositionCount++;
     
     // Update counters
-    if(type == POSITION_TYPE_BUY) g_BuyPositionCount++;
-    else g_SellPositionCount++;
+    if(type == POSITION_TYPE_BUY) buyPositionCount++;
+    else sellPositionCount++;
     
     LogPrint("Registered position. Ticket: ", ticket, 
              " | Type: ", EnumToString(type),
              " | Score: ", signalScore, 
-             " | Open Buys: ", g_BuyPositionCount, " | Open Sells: ", g_SellPositionCount);
+             " | Open Buys: ", buyPositionCount, " | Open Sells: ", sellPositionCount);
 }
 
 // Remove Position from Managed Array
 void RemoveManagedPosition(ulong ticket)
 {
-    for(int i = 0; i < g_ManagedPositionCount; i++)
+    for(int i = 0; i < managedPositionCount; i++)
     {
-        if(g_ManagedPositions[i].ticket == ticket)
+        if(managedPositions[i].ticket == ticket)
         {
             // Update counters before removing
-            if(g_ManagedPositions[i].type == POSITION_TYPE_BUY) g_BuyPositionCount--;
-            else g_SellPositionCount--;
+            if(managedPositions[i].type == POSITION_TYPE_BUY) buyPositionCount--;
+            else sellPositionCount--;
             
             // Safety check for negative counters
-            if(g_BuyPositionCount < 0) g_BuyPositionCount = 0;
-            if(g_SellPositionCount < 0) g_SellPositionCount = 0;
+            if(buyPositionCount < 0) buyPositionCount = 0;
+            if(sellPositionCount < 0) sellPositionCount = 0;
 
             // Shift array elements left
-            for(int j = i; j < g_ManagedPositionCount - 1; j++)
+            for(int j = i; j < managedPositionCount - 1; j++)
             {
-                g_ManagedPositions[j] = g_ManagedPositions[j + 1];
+                managedPositions[j] = managedPositions[j + 1];
             }
             
-            g_ManagedPositionCount--;
-            ArrayResize(g_ManagedPositions, g_ManagedPositionCount);
+            managedPositionCount--;
+            ArrayResize(managedPositions, managedPositionCount);
             
             LogPrint("Removed position: ", ticket, 
-                     " | Remaining Open Buys: ", g_BuyPositionCount, 
-                     " | Remaining Open Sells: ", g_SellPositionCount);
+                     " | Remaining Open Buys: ", buyPositionCount, 
+                     " | Remaining Open Sells: ", sellPositionCount);
             break;
         }
     }
@@ -1543,13 +1575,11 @@ void RemoveManagedPosition(ulong ticket)
 // Removes closed positions from managed array
 void SyncManagedPositions()
 {
-    for(int i = g_ManagedPositionCount - 1; i >= 0; i--)
+    for(int i = managedPositionCount - 1; i >= 0; i--)
     {
-        // Check if position still exists
-        if(!PositionSelectByTicket(g_ManagedPositions[i].ticket))
+        if(!PositionSelectByTicket(managedPositions[i].ticket))
         {
-            // Position closed, remove from array
-            RemoveManagedPosition(g_ManagedPositions[i].ticket);
+            RemoveManagedPosition(managedPositions[i].ticket);
         }
     }
 }
@@ -1557,9 +1587,9 @@ void SyncManagedPositions()
 // Get Managed Position by Ticket    
 int GetManagedPositionIndex(ulong ticket)
 {
-    for(int i = 0; i < g_ManagedPositionCount; i++)
+    for(int i = 0; i < managedPositionCount; i++)
     {
-        if(g_ManagedPositions[i].ticket == ticket)
+        if(managedPositions[i].ticket == ticket)
         {
             return i;
         }
@@ -1574,11 +1604,11 @@ ulong GetLastPositionTicket(ENUM_POSITION_TYPE type)
     ulong lastTicket = 0;
     datetime lastTime = 0;
 
-    for(int i = 0; i < g_ManagedPositionCount; i++)
+    for(int i = 0; i < managedPositionCount; i++)
     {
-        ulong ticket = g_ManagedPositions[i].ticket;
+        ulong ticket = managedPositions[i].ticket;
         
-        if(g_ManagedPositions[i].type != type) continue;
+        if(managedPositions[i].type != type) continue;
 
         if(PositionSelectByTicket(ticket))
         {
@@ -1654,8 +1684,8 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     
     // Re-calculate or fetch global velocity
     double velocityBoost = 0;
-    if (orderType == ORDER_TYPE_BUY) velocityBoost = g_LastBuyNormalizedVelocity;
-    else velocityBoost = g_LastSellNormalizedVelocity;
+    if (orderType == ORDER_TYPE_BUY) velocityBoost = lastBuyNormalizedVelocity;
+    else velocityBoost = lastSellNormalizedVelocity;
     
     // Recalculate lot with velocity
     currentLot = CalculateDynamicLotSize(signalScore, velocityBoost);
@@ -1677,20 +1707,20 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
             }
             
             LogPrint("Order opened successfully. Ticket: ", result.order, 
-                  ", Type: ", orderType == ORDER_TYPE_BUY ? "BUY" : "SELL",
-                  ", Lot Size: ", currentLot,
-                  ", Signal Score: ", signalScore,
-                  " (Peak: $", lastPeakEquity, 
-                  ", Current: $", currentEquity,
-                  ", Drop: ", equityDropPercentage, "%)");
+                     ", Type: ", orderType == ORDER_TYPE_BUY ? "BUY" : "SELL",
+                     ", Lot Size: ", currentLot,
+                     ", Signal Score: ", signalScore,
+                     " (Peak: $", lastPeakEquity, 
+                     ", Current: $", currentEquity,
+                     ", Drop: ", equityDropPercentage, "%)");
             
             if(EnableStopLoss)
             {
-                LogPrint("  SL: ", request.sl);
+                LogPrint(" | SL: ", request.sl);
             }
             if(EnableTakeProfit)
             {
-                LogPrint("  TP: ", request.tp);
+                LogPrint(" | TP: ", request.tp);
             }
             
             // Register position to managed array
@@ -1698,27 +1728,27 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
             RegisterManagedPosition(result.order, posType, signalScore);
             
             // Update Candle Counters
-            datetime currentBarTime = iTime(_Symbol, _Period, 0);
-            if(g_CurrentBarTime != currentBarTime)
+            datetime currBarTime = iTime(_Symbol, _Period, 0);
+            if(currentBarTime != currBarTime)
             {
-                g_CurrentBarTime = currentBarTime;
-                g_BuysOnCurrentBar = 0;
-                g_SellsOnCurrentBar = 0;
+                currentBarTime = currBarTime;
+                buysOnCurrentBar = 0;
+                sellsOnCurrentBar = 0;
             }
             
-            if(orderType == ORDER_TYPE_BUY) g_BuysOnCurrentBar++;
-            else g_SellsOnCurrentBar++;
+            if(orderType == ORDER_TYPE_BUY) buysOnCurrentBar++;
+            else sellsOnCurrentBar++;
             
             // Update global last position tracking
             if(orderType == ORDER_TYPE_BUY)
             {
-                g_LastBuyTime = TimeCurrent();
-                g_LastBuyPrice = price;
+                lastBuyTime = TimeCurrent();
+                lastBuyPrice = price;
             }
             else
             {
-                g_LastSellTime = TimeCurrent();
-                g_LastSellPrice = price;
+                lastSellTime = TimeCurrent();
+                lastSellPrice = price;
             }
         }
         else
@@ -1841,7 +1871,7 @@ bool ModifyPosition(ulong ticket, double newSL, double newTP)
     if(NormalizeDouble(newSL, _Digits) == NormalizeDouble(currentSL, _Digits) && 
        NormalizeDouble(newTP, _Digits) == NormalizeDouble(currentTP, _Digits))
     {
-        return true; // No change needed
+        return true;
     }
     
     // Send modification request
@@ -2078,9 +2108,7 @@ double CalculateDynamicLotSize(double signalScore = 0, double normalizedVelocity
     // Round to valid lot step
     currentLot = MathFloor(currentLot / lotStep) * lotStep;
     
-    // ================================================================
     // MARGIN CHECK
-    // ================================================================
     double marginNeeded = 0;
 
     if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, currentLot, SymbolInfoDouble(_Symbol, SYMBOL_ASK), marginNeeded))
@@ -2271,10 +2299,7 @@ double ConvertToPoints(ENUM_INPUT_TYPE inputType, double value, double lotSize)
                 }
                 else
                 {
-                    LogPrint("Error: Invalid tick value (", tickValue, 
-                          "), tick size (", tickSize, 
-                          "), point (", point,
-                          "), or lot size (", lotSize, ")");
+                    LogPrint("Error: Invalid tick value (", tickValue, "), tick size (", tickSize, "), point (", point, "), or lot size (", lotSize, ")");
                 }
             }
             break;
@@ -2348,7 +2373,7 @@ string IsHighImpactNewsTime(int minutesBefore, int minutesAfter, ulong &eventID)
                     if(country.currency != symbolBaseCurrency && 
                        country.currency != symbolQuoteCurrency)
                     {
-                        continue; // Skip unrelated currencies
+                        continue;
                     }
                     
                     // Check if we're within the event window (before OR after)
@@ -2358,7 +2383,7 @@ string IsHighImpactNewsTime(int minutesBefore, int minutesAfter, ulong &eventID)
                     
                     if(serverTime < pauseStart || serverTime > pauseEnd)
                     {
-                        continue; // Outside event window
+                        continue;
                     }
                     
                     eventID = values[i].event_id;
@@ -3022,7 +3047,7 @@ void GetTradeStats(TradeStats& daily, TradeStats& allTime)
     daily.count = 0; daily.won = 0; daily.lost = 0;
     daily.profit = 0; daily.loss = 0;
     daily.maxProfit = 0; daily.minProfit = DBL_MAX;
-    daily.maxLoss = 0; daily.minLoss = -DBL_MAX; // maxLoss is most negative, minLoss is closest to 0 (-0.01)
+    daily.maxLoss = 0; daily.minLoss = -DBL_MAX; 
 
     allTime.count = 0; allTime.won = 0; allTime.lost = 0;
     allTime.profit = 0; allTime.loss = 0;
@@ -3048,7 +3073,6 @@ void GetTradeStats(TradeStats& daily, TradeStats& allTime)
                             HistoryDealGetDouble(ticket, DEAL_SWAP) + 
                             HistoryDealGetDouble(ticket, DEAL_COMMISSION);
 
-            // Filter for exits
             if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT) {
                 // ALL TIME STATS
                 allTime.count++;
@@ -3060,10 +3084,8 @@ void GetTradeStats(TradeStats& daily, TradeStats& allTime)
                 } else {
                     allTime.lost++;
                     allTime.loss += profit;
-                    // Loss is negative. Max loss = most negative (smallest value). Min loss = least negative (largest value).
-                    // "Largest Loss" -> -100. "Smallest Loss" -> -1.
-                    if(profit < allTime.maxLoss) allTime.maxLoss = profit; // e.g. -100 < 0
-                    if(profit > allTime.minLoss) allTime.minLoss = profit; // e.g. -1 > -DBL_MAX
+                    if(profit < allTime.maxLoss) allTime.maxLoss = profit; 
+                    if(profit > allTime.minLoss) allTime.minLoss = profit; 
                 }
 
                 // SESSION STATS (Since Last Report or Start)
@@ -3265,7 +3287,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v31.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v32.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -3349,7 +3371,7 @@ void UpdateDashboard()
     // Layout Constants
     int startX = 20;
     int startY = 20;
-    int lineHeight = 18; // Increased line spacing
+    int lineHeight = 18;
     int headersize = 10;
     int textsize = 9;
     int detailsSize = 8;
@@ -3359,13 +3381,13 @@ void UpdateDashboard()
     color colorBuy = clrLime;
     color colorSell = clrRed;
     color colorNeutral = clrGray;
-    color colorBg = C'30,30,30'; // Dark Gray
+    color colorBg = C'30,30,30';
     color colorBorder = clrGold;
 
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v31.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v32.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic
