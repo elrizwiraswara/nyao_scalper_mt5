@@ -41,7 +41,6 @@ input group "+-----------------------------------------+"
 // +------------------------------------------------------------------+
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
-
 input group "📊 Indicator Settings"
 input int DirectionalBodyLookback = 20;                   // Lookback for directional body analysis
 input int EMAFastPeriod = 6;                              // EMA Fast Period
@@ -70,7 +69,8 @@ input double ChopScoreLow = 0.5;                          // Chop Score Low (Cho
 input double VolatilityScoreHigh = 1.0;                   // Volatility Score High
 input double VolatilityScoreLow = 0.5;                    // Volatility Score Low
 input double PeakScoreWeight = 1.0;                       // Peak Breakout Score Weight
-input double WickRejectionWeight = 2.0;                   // Wick Rejection Penalty Weight
+input double WickRejectionWeight = 1.0;                   // Wick Rejection Penalty Weight
+input double MinBodyRatio = 1.5;                          // Min Body Ratio for Wick Calculation (prevents div/0)
 
 input group "📝 Order & Position Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
@@ -80,25 +80,27 @@ input int MaxOpenOrders = 8;                              // Max Consecutive Ope
 input double ZonePoints = 500;                            // Zone Points to Avoid Duplicate Signals
 input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
-input double MinBreakEvenProfit = 1.5;                    // Min Profit to Trigger Break-Even ($)
+input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
 input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
 input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 input bool EnablePyramiding = true;                       // Enable Pyramiding Positions
-input double MinPyramidingBuySignalScore = 9.0;           // Min Signal Strength Score to Pyramiding Buy (0.0 - 10.0)
-input double MinPyramidingSellSignalScore = 9.0;          // Min Signal Strength Score to Pyramiding Sell (0.0 - 10.0)
+input int PyramidingLookback = 15;                        // Lookback period for Pyramiding Peak Protection
+input double PyramidingMaxCandleRatio = 0.5;              // Max Candle Body Ratio for Pyramiding (Peak Protection)
+input double MinPyramidingBuySignalScore = 8.0;           // Min Signal Strength Score to Pyramiding Buy (0.0 - 10.0)
+input double MinPyramidingSellSignalScore = 8.0;          // Min Signal Strength Score to Pyramiding Sell (0.0 - 10.0)
 input int MaxPositionsPerCandle = 3;                      // Max Positions Per Candle
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
-input double HoldScoreRatio = 0.5;                        // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
+input double HoldScoreRatio = 0.1;                        // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold (0 = Close Immediately)
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
-input double EquityDropPercent = 0.0;                     // Equity Drop % per Lot Step
+input double EquityDropPercent = 10.0;                    // Equity Drop % per Lot Step
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
 input double MaxLotSize = 0.05;                           // Max Lot Size
-input double MinSignalStrengthForLot = 9.0;               // Min Signal Score for Lot Increase
+input double MinSignalStrengthForLot = 10.0;               // Min Signal Score for Lot Increase
 
 input group "🏦 Equity Settings"
 input double MinEquityPercent = 70.0;                     // Min Equity % from Peak - Pause Trading when Reached
@@ -195,11 +197,10 @@ double totalPauseDurationMinutes = 0;                     // Total duration of p
 
 // Multi-Entry tracking
 datetime lastMultiEntryTime = 0;
+int g_ATR_PyramidingHandle = INVALID_HANDLE;     // Handle for Pyramiding ATR calculation
 
-// +------------------------------------------------------------------+
-// | Signal Strength Structure - Indicator-Based Scoring System       |
-// | Weights are adjustable via Score Weight Settings inputs          |
-// +------------------------------------------------------------------+
+// Signal Strength Structure - Indicator-Based Scoring System
+// Weights are adjustable via Score Weight Settings inputs
 struct SignalStrength
 {
     double avgBody;                                       // Average body size of matching candles
@@ -222,10 +223,8 @@ struct SignalStrength
     string reasoning;                                     // Detailed explanation
 };
 
-// +------------------------------------------------------------------+
-// | Managed Position Structure - For Position Tracking               |
-// | Stores position info to avoid repeated MQL function calls        |
-// +------------------------------------------------------------------+
+// Managed Position Structure - For Position Tracking 
+// Stores position info to avoid repeated MQL function calls
 struct ManagedPosition
 {
     ulong ticket;                                         // Position ticket ID
@@ -470,6 +469,14 @@ int InitializeEA()
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
     
+    // Initialize Pyramiding ATR Handle
+    g_ATR_PyramidingHandle = iATR(_Symbol, _Period, PyramidingLookback);
+    if(g_ATR_PyramidingHandle == INVALID_HANDLE)
+    {
+        Print("Error creating ATR handle for Pyramiding!");
+        return(INIT_FAILED);
+    }
+    
     return(INIT_SUCCEEDED);
 }
 
@@ -488,6 +495,9 @@ void OnDeinit(const int reason)
     // Cleanup Dashboard Objects
     ObjectsDeleteAll(0, "NyaoDash_");
     Comment("");
+    
+    // Release ATR Handle
+    IndicatorRelease(g_ATR_PyramidingHandle);
     
     Print("Nyao Scalper v31.0 Deinitialized");
 }
@@ -756,35 +766,6 @@ double SellSignal()
     return 0;
 }
 
-// +------------------------------------------------------------------+
-// | Get Last Position Ticket by Type                                 |
-// | Returns the ticket of the most recently opened position          |
-// +------------------------------------------------------------------+
-ulong GetLastPositionTicket(ENUM_POSITION_TYPE type)
-{
-    ulong lastTicket = 0;
-    datetime lastTime = 0;
-
-    for(int i = 0; i < g_ManagedPositionCount; i++)
-    {
-        ulong ticket = g_ManagedPositions[i].ticket;
-        
-        if(g_ManagedPositions[i].type != type) continue;
-
-        if(PositionSelectByTicket(ticket))
-        {
-             datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
-             if(posTime > lastTime)
-             {
-                 lastTime = posTime;
-                 lastTicket = ticket;
-             }
-        }
-    }
-    
-    return lastTicket;
-}
-
 // FAST duplicate buy filter - O(1) using globals
 // Returns true if conditions allow a trade.
 // Sets isPyramiding=true if we are adding to a position on the same candle.
@@ -828,6 +809,20 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
             double distance = MathAbs(price - g_LastBuyPrice);
             
             if(distance < minDistance)
+            {
+                return false;
+            }
+            
+            // PEAK PROTECTION (Don't buy at top of huge candle)
+            double openCurrent = iOpen(_Symbol, _Period, 0);
+            double currentRun = price - openCurrent; // Points moved up from open
+            
+            // Efficient Average Range (ATR) Check - O(1)
+            double atrBuffer[1];
+            if(CopyBuffer(g_ATR_PyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
+            double avgRange = atrBuffer[0];
+            
+            if(avgRange > 0 && currentRun > (avgRange * PyramidingMaxCandleRatio))
             {
                 return false;
             }
@@ -880,6 +875,20 @@ bool CheckSellConditions(double price, bool &isPyramiding)
             double distance = MathAbs(price - g_LastSellPrice);
             
             if(distance < minDistance)
+            {
+                return false;
+            }
+
+            // PEAK PROTECTION (Don't sell at bottom of huge candle)
+            double openCurrent = iOpen(_Symbol, _Period, 0);
+            double currentRun = openCurrent - price; // Points moved down from open
+            
+            // Efficient Average Range (ATR) Check - O(1)
+            double atrBuffer[1];
+            if(CopyBuffer(g_ATR_PyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
+            double avgRange = atrBuffer[0];
+            
+            if(avgRange > 0 && currentRun > (avgRange * PyramidingMaxCandleRatio))
             {
                 return false;
             }
@@ -1125,10 +1134,13 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
     strength.bodySignal = currentBody;
     strength.avgBody = avgRecentBody;
     
-    if (currentBody > 0)
+    // Use a smoothed body size to prevent "division by zero" explosion on doji candles
+    double safeBody = MathMax(currentBody, avgRecentBody * MinBodyRatio); 
+    
+    if (safeBody > 0)
     {
-        if (isBuy) strength.rejection = strength.upperWick / currentBody;
-        else strength.rejection = strength.lowerWick / currentBody;
+        if (isBuy) strength.rejection = strength.upperWick / safeBody;
+        else strength.rejection = strength.lowerWick / safeBody;
         
         strength.penaltyWick = strength.rejection * WickRejectionWeight;
     }
@@ -1470,7 +1482,7 @@ void ManageTrailingTPSL(ulong ticket)
 }
     
 // +------------------------------------------------------------------+
-// | Register Position to Managed Array                               |
+// | Positions Management                                             |
 // +------------------------------------------------------------------+
 // Register managed position with initial score
 void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signalScore)
@@ -1495,9 +1507,7 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
              " | Open Buys: ", g_BuyPositionCount, " | Open Sells: ", g_SellPositionCount);
 }
 
-// +------------------------------------------------------------------+
-// | Remove Position from Managed Array                               |
-// +------------------------------------------------------------------+
+// Remove Position from Managed Array
 void RemoveManagedPosition(ulong ticket)
 {
     for(int i = 0; i < g_ManagedPositionCount; i++)
@@ -1529,10 +1539,8 @@ void RemoveManagedPosition(ulong ticket)
     }
 }
 
-// +------------------------------------------------------------------+
-// | Sync Managed Positions with Broker                               |
-// | Removes closed positions from managed array                      |
-// +------------------------------------------------------------------+
+// Sync Managed Positions with Broker
+// Removes closed positions from managed array
 void SyncManagedPositions()
 {
     for(int i = g_ManagedPositionCount - 1; i >= 0; i--)
@@ -1546,9 +1554,7 @@ void SyncManagedPositions()
     }
 }
 
-// +------------------------------------------------------------------+
-// | Get Managed Position by Ticket                                   |
-// +------------------------------------------------------------------+
+// Get Managed Position by Ticket    
 int GetManagedPositionIndex(ulong ticket)
 {
     for(int i = 0; i < g_ManagedPositionCount; i++)
@@ -1559,6 +1565,33 @@ int GetManagedPositionIndex(ulong ticket)
         }
     }
     return -1;
+}
+
+// Get Last Position Ticket by Type
+// Returns the ticket of the most recently opened position
+ulong GetLastPositionTicket(ENUM_POSITION_TYPE type)
+{
+    ulong lastTicket = 0;
+    datetime lastTime = 0;
+
+    for(int i = 0; i < g_ManagedPositionCount; i++)
+    {
+        ulong ticket = g_ManagedPositions[i].ticket;
+        
+        if(g_ManagedPositions[i].type != type) continue;
+
+        if(PositionSelectByTicket(ticket))
+        {
+             datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+             if(posTime > lastTime)
+             {
+                 lastTime = posTime;
+                 lastTicket = ticket;
+             }
+        }
+    }
+    
+    return lastTicket;
 }
 
 // Open Position
@@ -1976,10 +2009,10 @@ int CountOpenOrdersByType(ENUM_POSITION_TYPE posType)
 
 //+------------------------------------------------------------------+
 //| Calculate Dynamic Lot Size - Equity Drop & Signal Strength Based |
-//| Lot increases based on:                                           |
+//| Lot increases based on:                                          |
 //|   1. Equity drop from peak (EquityDropPercent per step)          |
-//|   2. Strong signal strength (MinSignalStrengthForLot threshold)   |
-//|   3. Velocity Boost (New)                                         |
+//|   2. Strong signal strength (MinSignalStrengthForLot threshold)  |
+//|   3. Velocity Boost                                              |
 //+------------------------------------------------------------------+
 double CalculateDynamicLotSize(double signalScore = 0, double normalizedVelocity = 0)
 {
