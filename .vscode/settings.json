@@ -1,0 +1,46 @@
+{
+  "files.associations": {
+    "*.mqh": "mqlh",
+    "*.mq4": "mql4",
+    "*.mq5": "mql5"
+  },
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      {
+        "scope": "token.error.mql",
+        "settings": {
+          "foreground": "#F44747"
+        }
+      },
+      {
+        "scope": "token.done.mql",
+        "settings": {
+          "foreground": "#029c23d3"
+        }
+      },
+      {
+        "scope": "token.warning.mql",
+        "settings": {
+          "foreground": "#ff9d00"
+        }
+      },
+      {
+        "scope": "token.info.mql",
+        "settings": {
+          "foreground": "#0861fc"
+        }
+      },
+      {
+        "scope": "token.heading.mql",
+        "settings": {
+          "foreground": "#6796E6"
+        }
+      }
+    ]
+  },
+  "files.exclude": {
+    "**/*.ex4": true,
+    "**/*.ex5": true
+  },
+  "C_Cpp.errorSquiggles": "Disabled"
+}
