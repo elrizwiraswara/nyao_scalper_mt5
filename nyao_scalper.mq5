@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v34.0                                               |
+// | Nyao Scalper v35.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "34.0"
+#property version   "35.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -39,7 +39,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v34.0"
+input group " Nyao Scalper v35.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
@@ -47,35 +47,39 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 input group "🚦 Indicator Settings"
-input int RSI_Period = 14;                                // RSI Period
-input int Lookback = 50;                                  // Lookback Period for Signal Confirmation
+input int RSI_Period = 20;                                // RSI Period
+input int Lookback = 20;                                  // Lookback Period for Signal Confirmation
 input double ZonePoints = 10000;                          // Zone Points to Avoid Duplicate Signals (Smaller = Less Signals)
 input double BuyRSIMax  = 80;                             // Overbought Value - Buy when RSI is below this
 input double SellRSIMin = 20;                             // Oversold Value - Sell when RSI is above this
-input double MinCandleRangeMultiplier = 0.5;              // Minimum Candle Size (Aggressiveness)
-input double MaxCandleRangeMultiplier = 5.0;              // Maximum Candle Size (Spike filter)
+input double MinCandleRangeMultiplier = 0.1;              // Minimum Candle Size (Aggressiveness)
+input double MaxCandleRangeMultiplier = 1.0;              // Maximum Candle Size (Spike filter)
+input double MaxSpreadMultiplier = 0.0;                   // Max Spread Multiplier (0 = Disabled)
+input ENUM_TIMEFRAMES SR_Timeframe = PERIOD_M1;           // Support/Resistance Timeframe (Higher = More Stable)
 
 input group "📝 Order Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
-input int MaxOpenOrders = 25;                             // Maximum Consecutive Open Orders
-input double BuyDuplicateMultiplier  = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
-input double SellDuplicateMultiplier = 0.1;               // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
-input double MinBreakEvenProfit = 1.5;                    // Minimum Profit to Trigger Break-Even ($)
+input int MaxOpenOrders = 15;                             // Maximum Consecutive Open Orders
+input double BuyDuplicateMultiplier  = 0.05;              // Minimum Distance Multiplier to Avoid Duplicate Buy Signals
+input double SellDuplicateMultiplier = 0.05;              // Minimum Distance Multiplier to Avoid Duplicate Sell Signals
+input double MinBreakEvenProfit = 0.20;                   // Minimum Profit to Trigger Break-Even ($)
 input bool EnableAutoReverse = true;                      // Enable Auto Reverse on Opposite Signal
-input int ReverseCooldownMinutes = 2;                     // Cooldown Duration Minutes after Reverse (0 = No Cooldown)
+input int ReverseCooldownMinutes = 1;                     // Cooldown Duration Minutes after Reverse (0 = No Cooldown)
 input bool EnableAutoHedge = true;                        // Enable Auto Hedge on Opposite Signal
-input int MaxHedgeDurationMinutes = 480;                  // Max Hedge Duration (Minutes)
+input int MaxHedgeDurationMinutes = 60;                   // Max Hedge Duration (Minutes)
 input bool EnablePyramiding = true;                       // Enable Pyramiding (Open new position on winning position)
 input int MaxPyramidingPositions = 5;                     // Max Total Pyramiding Positions
-input double PyramidingThresholdMultiplier = 1;           // Multiplier for MinBreakEvenProfit to Trigger Pyramiding
+input double MinPyramidingPoints = 100;                   // Minimum Points in Profit Before Pyramiding
+input double MinPyramidDistanceMultiplier = 0;            // Min Distance Between Pyramid Entries (× ZonePoints)
+input int InvalidationPersistenceTicks = 2;               // Invalidation Must Persist for N Ticks Before Acting
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
-input double EquityDropPercent = 5.0;                     // Equity Drop % per Lot Step
+input double EquityDropPercent = 3.0;                     // Equity Drop % per Lot Step
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
-input double MaxLotSize = 0.1;                            // Maximum Lot Size
+input double MaxLotSize = 0.05;                           // Maximum Lot Size
 
 input group "🏦 Equity Settings"
 input double MinEquityPercent = 50.0;                     // Min Equity % from Peak - Pause Trading when Reached
@@ -98,12 +102,12 @@ input bool EnableTrailingStop = true;                     // Enable Trailing Sto
 input bool TSEnableBreakEvenLock = true;                  // Enable Break-Even Lock Point
 input bool TSOnProfitableOnly = true;                     // TS on Profitable Position Only
 input ENUM_INPUT_TYPE TSInputType = INPUT_DOLLAR;         // TS Input Type
-input double TSValue = 0.05;                              // TS Initial Value
+input double TSValue = 0.03;                              // TS Initial Value
 
 input group "📉 Stop Loss Settings"
 input bool EnableStopLoss = true;                         // Enable Stop Loss
 input ENUM_INPUT_TYPE SLInputType = INPUT_PERCENT;        // SL Input Type
-input double SLValue = 20;                                // SL Value
+input double SLValue = 10;                                // SL Value
 
 input group "🤖 Robot Settings"
 input int MagicNumber = 6926268;                          // Magic Number
@@ -163,6 +167,15 @@ double rsi[];
 // Duplicate Signal Filter Variables
 double lastBuyPrice = 0;
 double lastSellPrice = 0;
+
+// New-bar gate for signal evaluation (S2)
+datetime lastSignalBarTime = 0;
+
+// Candle boundary gate for pyramiding (P3)
+datetime lastPyramidBarTime = 0;
+
+// Invalidation persistence tracking (I4)
+int consecutiveInvalidationCount[];  // Per-ticket persistence counter
 datetime lastReverseTime = 0;
 datetime startTime = 0;                                   // EA Start Time
 datetime lastDailyReportTime = 0;                         // Last time daily report was sent
@@ -340,7 +353,7 @@ int InitializeEA()
     algoTradingStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v34.0 Initialized Successfully");
+    Print("Nyao Scalper v35.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -370,7 +383,7 @@ void OnDeinit(const int reason)
     ArrayFree(rsi);
     ArrayFree(activePairs);
     
-    Print("Nyao Scalper v34.0 Deinitialized");
+    Print("Nyao Scalper v35.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -568,18 +581,18 @@ bool LowerHigh()
 // +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
-// | Get Support & Resistance                                         |
+// | Get Support & Resistance (Multi-Timeframe)                       |
 // +------------------------------------------------------------------+
 double GetSupport(int shift)
 {
-   int index = iLowest(_Symbol, _Period, MODE_LOW, Lookback, shift);
-   return iLow(_Symbol, _Period, index);
+   int index = iLowest(_Symbol, SR_Timeframe, MODE_LOW, Lookback, shift);
+   return iLow(_Symbol, SR_Timeframe, index);
 }
 
 double GetResistance(int shift)
 {
-   int index = iHighest(_Symbol, _Period, MODE_HIGH, Lookback, shift);
-   return iHigh(_Symbol, _Period, index);
+   int index = iHighest(_Symbol, SR_Timeframe, MODE_HIGH, Lookback, shift);
+   return iHigh(_Symbol, SR_Timeframe, index);
 }
 // +------------------------------------------------------------------+
 
@@ -630,27 +643,109 @@ bool AllowNewSell(double price)
 // +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
+// | Spread Filter (W3)                                               |
+// +------------------------------------------------------------------+
+double GetAverageSpread(int periods)
+{
+   double totalSpread = 0;
+   for(int i = 1; i <= periods; i++)
+   {
+      double high = iHigh(_Symbol, _Period, i);
+      double low  = iLow(_Symbol, _Period, i);
+      double close = iClose(_Symbol, _Period, i);
+      double open  = iOpen(_Symbol, _Period, i);
+      // Estimate spread from candle data as a proxy
+      totalSpread += (high - low) - MathAbs(close - open);
+   }
+   return totalSpread / periods;
+}
+
+bool IsSpreadAcceptable()
+{
+   if(MaxSpreadMultiplier <= 0) return true; // Disabled
+   
+   double currentSpread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point;
+   double avgRange = 0;
+   for(int i = 1; i <= Lookback; i++)
+      avgRange += CandleRange(i);
+   avgRange /= Lookback;
+   
+   if(avgRange <= 0) return true;
+   
+   // Compare spread to average candle range
+   if(currentSpread > avgRange * MaxSpreadMultiplier) return false;
+   
+   return true;
+}
+// +------------------------------------------------------------------+
+
+// +------------------------------------------------------------------+
+// | Count Buy/Sell Orders (S3: for duplicate filter reset)           |
+// +------------------------------------------------------------------+
+int CountBuyOrders()
+{
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(PositionSelectByTicket(ticket))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == MagicNumber &&
+            (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
+            count++;
+      }
+   }
+   return count;
+}
+
+int CountSellOrders()
+{
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(PositionSelectByTicket(ticket))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == MagicNumber &&
+            (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_SELL)
+            count++;
+      }
+   }
+   return count;
+}
+// +------------------------------------------------------------------+
+
+// +------------------------------------------------------------------+
 // | Buy Signal                                                       |
 // +------------------------------------------------------------------+
-bool BuySignal()
+bool BuySignal(bool readOnly = false)
 {
    if(CopyBuffer(rsiHandle, 0, 0, 3, rsi) <= 0) return false;
 
+   // W3: Spread filter
+   if(!IsSpreadAcceptable()) return false;
+
    double close1  = iClose(_Symbol, _Period, 1);
+   double open1   = iOpen(_Symbol, _Period, 1);
    double support = GetSupport(1);
 
    bool nearSupport = MathAbs(close1 - support) <= ZonePoints * _Point;
 
    if(!IsTradableCandle(1)) return false;
 
+   // W1: Bullish close alone is not enough — require body significance
+   bool bullishWithConviction = (close1 > open1) && (CandleBody(1) > GetAverageCandleBody(10) * 0.5);
+
    if(
       nearSupport &&
       rsi[1] < BuyRSIMax &&                     
-      (HigherLow() || FakeBreakBuy(support) || iClose(_Symbol, _Period, 1) > iOpen(_Symbol, _Period, 1)) &&
-      AllowNewBuy(close1)
+      (HigherLow() || FakeBreakBuy(support) || (bullishWithConviction && HigherLow())) &&
+      (readOnly || AllowNewBuy(close1))
      )
    {
-      lastBuyPrice = close1;
+      if(!readOnly) lastBuyPrice = close1;
       return true;
    }
 
@@ -660,25 +755,32 @@ bool BuySignal()
 // +------------------------------------------------------------------+
 // | Sell Signal                                                      |
 // +------------------------------------------------------------------+
-bool SellSignal()
+bool SellSignal(bool readOnly = false)
 {
    if(CopyBuffer(rsiHandle, 0, 0, 3, rsi) <= 0) return false;
 
+   // W3: Spread filter
+   if(!IsSpreadAcceptable()) return false;
+
    double close1 = iClose(_Symbol, _Period, 1);
+   double open1  = iOpen(_Symbol, _Period, 1);
    double resistance = GetResistance(1);
 
    bool nearResistance = MathAbs(close1 - resistance) <= ZonePoints * _Point;
 
    if(!IsTradableCandle(1)) return false;
 
+   // W1: Bearish close alone is not enough — require body significance
+   bool bearishWithConviction = (close1 < open1) && (CandleBody(1) > GetAverageCandleBody(10) * 0.5);
+
    if(
       nearResistance &&
       rsi[1] > SellRSIMin &&                     
-      (LowerHigh() || FakeBreakSell(resistance) || iClose(_Symbol, _Period, 1) < iOpen(_Symbol, _Period, 1)) &&
-      AllowNewSell(close1)
+      (LowerHigh() || FakeBreakSell(resistance) || (bearishWithConviction && LowerHigh())) &&
+      (readOnly || AllowNewSell(close1))
      )
    {
-      lastSellPrice = close1;
+      if(!readOnly) lastSellPrice = close1;
       return true;
    }
 
@@ -805,9 +907,25 @@ int CountOpenOrders()
 // +------------------------------------------------------------------+
 void CheckForTradingSignal()
 {   
+    // S2: New-bar gate - signals use bar[1] data, only need to evaluate once per new bar
+    datetime currentBarTime = iTime(_Symbol, _Period, 0);
+    if(currentBarTime == lastSignalBarTime) return;
+    lastSignalBarTime = currentBarTime;
+
+    // S3: Reset duplicate filters when all positions of that type are closed
+    if(CountBuyOrders() == 0) lastBuyPrice = 0;
+    if(CountSellOrders() == 0) lastSellPrice = 0;
+
     // Check Signals
     bool buySignal = BuySignal();
     bool sellSignal = SellSignal();
+
+    // S1: Mutual exclusion - if both fire, neither acts (conflicting signals = no edge)
+    if(buySignal && sellSignal)
+    {
+        LogPrint("Signal conflict: both buy and sell triggered. Skipping.");
+        return;
+    }
 
     // Get current prices
     double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -1003,24 +1121,31 @@ bool PriceActionAgainstPosition(ENUM_POSITION_TYPE type)
     double close3 = iClose(_Symbol, _Period, 3);
     double open3 = iOpen(_Symbol, _Period, 3);
     
+    double avgBody = GetAverageCandleBody(10);
+    double minBodyThreshold = avgBody * 0.5;
+    
     if(type == POSITION_TYPE_BUY)
     {
         int bearishCount = 0;
-        if(close1 < open1) bearishCount++;
-        if(close2 < open2) bearishCount++;
-        if(close3 < open3) bearishCount++;
+        double totalBearishBody = 0;
+        if(close1 < open1) { bearishCount++; totalBearishBody += MathAbs(close1 - open1); }
+        if(close2 < open2) { bearishCount++; totalBearishBody += MathAbs(close2 - open2); }
+        if(close3 < open3) { bearishCount++; totalBearishBody += MathAbs(close3 - open3); }
         
-        return bearishCount >= 2;
+        // I3: Require both count AND body significance
+        return bearishCount >= 2 && (totalBearishBody / MathMax(bearishCount, 1)) > minBodyThreshold;
     }
     
     if(type == POSITION_TYPE_SELL)
     {
         int bullishCount = 0;
-        if(close1 > open1) bullishCount++;
-        if(close2 > open2) bullishCount++;
-        if(close3 > open3) bullishCount++;
+        double totalBullishBody = 0;
+        if(close1 > open1) { bullishCount++; totalBullishBody += MathAbs(close1 - open1); }
+        if(close2 > open2) { bullishCount++; totalBullishBody += MathAbs(close2 - open2); }
+        if(close3 > open3) { bullishCount++; totalBullishBody += MathAbs(close3 - open3); }
         
-        return bullishCount >= 2;
+        // I3: Require both count AND body significance
+        return bullishCount >= 2 && (totalBullishBody / MathMax(bullishCount, 1)) > minBodyThreshold;
     }
     
     return false;
@@ -1031,13 +1156,15 @@ bool PriceActionAgainstPosition(ENUM_POSITION_TYPE type)
 // +------------------------------------------------------------------+
 bool VolumeWeaknessDetected(ENUM_POSITION_TYPE type)
 {
+    // I2: Extended to 20-bar average with 1.5x threshold
     long volume1 = iVolume(_Symbol, _Period, 1);
-    long volume2 = iVolume(_Symbol, _Period, 2);
-    long volume3 = iVolume(_Symbol, _Period, 3);
     
     if(volume1 <= 0) return false;
     
-    double avgVolume = (volume1 + volume2 + volume3) / 3.0;
+    double avgVolume = 0;
+    for(int i = 1; i <= 20; i++)
+        avgVolume += (double)iVolume(_Symbol, _Period, i);
+    avgVolume /= 20.0;
     
     double close1 = iClose(_Symbol, _Period, 1);
     double open1 = iOpen(_Symbol, _Period, 1);
@@ -1045,14 +1172,14 @@ bool VolumeWeaknessDetected(ENUM_POSITION_TYPE type)
     if(type == POSITION_TYPE_BUY)
     {
         bool bearishCandle = close1 < open1;
-        bool highVolume = volume1 > avgVolume * 1.2;
+        bool highVolume = volume1 > avgVolume * 1.5;
         return bearishCandle && highVolume;
     }
     
     if(type == POSITION_TYPE_SELL)
     {
         bool bullishCandle = close1 > open1;
-        bool highVolume = volume1 > avgVolume * 1.2;
+        bool highVolume = volume1 > avgVolume * 1.5;
         return bullishCandle && highVolume;
     }
     
@@ -1100,6 +1227,7 @@ bool TrendReversalDetected(ENUM_POSITION_TYPE type)
 // +------------------------------------------------------------------+
 bool ConfirmedBreakAgainstPosition(ENUM_POSITION_TYPE type)
 {
+    // I1: Require FULL BODY below/above level (distinct from KeyLevelBroken)
     double close1 = iClose(_Symbol, _Period, 1);
     double close2 = iClose(_Symbol, _Period, 2);
     double open1  = iOpen(_Symbol, _Period, 1);
@@ -1108,22 +1236,22 @@ bool ConfirmedBreakAgainstPosition(ENUM_POSITION_TYPE type)
     {
         double support = GetSupport(1);
         
-        bool closeBelowSupport = close1 < support;
+        // Full body must be below support (stricter than just close below)
+        bool fullBodyBelowSupport = (MathMax(open1, close1)) < support;
         bool previousCloseBelowSupport = close2 < support;
-        bool bodyBelowSupport = (MathMax(open1, close1)) < support;
         
-        return closeBelowSupport && (previousCloseBelowSupport || bodyBelowSupport);
+        return fullBodyBelowSupport && previousCloseBelowSupport;
     }
     
     if(type == POSITION_TYPE_SELL)
     {
         double resistance = GetResistance(1);
         
-        bool closeAboveResistance = close1 > resistance;
+        // Full body must be above resistance (stricter than just close above)
+        bool fullBodyAboveResistance = (MathMin(open1, close1)) > resistance;
         bool previousCloseAboveResistance = close2 > resistance;
-        bool bodyAboveResistance = (MathMin(open1, close1)) > resistance;
         
-        return closeAboveResistance && (previousCloseAboveResistance || bodyAboveResistance);
+        return fullBodyAboveResistance && previousCloseAboveResistance;
     }
     
     return false;
@@ -1163,7 +1291,8 @@ InvalidationDetails GetDetailedInvalidationScore(ulong ticket)
     if(details.priceActionAgainst) details.totalScore += 1;
     if(details.volumeWeakness) details.totalScore += 1;
     if(details.trendReversal) details.totalScore += 2;
-    if(details.confirmedBreak) details.totalScore += 2;
+    // I1: ConfirmedBreak only scores if KeyLevelBroken is NOT already true (prevents double-counting)
+    if(details.confirmedBreak && !details.keyLevelBroken) details.totalScore += 2;
     
     if(details.totalScore > 0)
     {
@@ -1437,16 +1566,31 @@ void ManageWinningPositions(ulong ticket)
 {
     if(!EnablePyramiding || MaxPyramidingPositions <= 0) return;
 
+    // P3: Candle boundary gate - only allow pyramiding at candle boundaries
+    datetime currentBarTime = iTime(_Symbol, _Period, 0);
+    if(currentBarTime == lastPyramidBarTime) return;
+
     if(!PositionSelectByTicket(ticket)) return;
 
-    double profit = PositionGetDouble(POSITION_PROFIT);
     ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
 
-    if(profit < MinBreakEvenProfit * PyramidingThresholdMultiplier) return;
+    // P2: Use points-based threshold instead of dollar-based (normalized for lot size)
+    double currentPrice = (posType == POSITION_TYPE_BUY) ? 
+                           SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
+                           SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double profitPoints = 0;
+    if(posType == POSITION_TYPE_BUY)
+        profitPoints = (currentPrice - entryPrice) / _Point;
+    else
+        profitPoints = (entryPrice - currentPrice) / _Point;
+    
+    if(profitPoints < MinPyramidingPoints) return;
 
     int sameTypePositions = 0;
     ulong lastPositionTicket = 0;
     datetime lastPositionTime = 0;
+    double lastEntryPrice = 0;
 
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
@@ -1463,6 +1607,7 @@ void ManageWinningPositions(ulong ticket)
                     {
                         lastPositionTime = openTime;
                         lastPositionTicket = t;
+                        lastEntryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
                     }
                 }
             }
@@ -1472,6 +1617,10 @@ void ManageWinningPositions(ulong ticket)
     if(sameTypePositions >= MaxPyramidingPositions) return;
     if(ticket != lastPositionTicket) return;
 
+    // P1: Minimum price distance between pyramid entries
+    double minPyramidDistance = ZonePoints * _Point * MinPyramidDistanceMultiplier;
+    if(MathAbs(currentPrice - lastEntryPrice) < minPyramidDistance) return;
+
     InvalidationDetails details = GetDetailedInvalidationScore(ticket);
     
     if(details.totalScore >= 5)
@@ -1480,11 +1629,15 @@ void ManageWinningPositions(ulong ticket)
         return;
     }
 
+    // P3: Record this candle as pyramided
+    lastPyramidBarTime = currentBarTime;
+
     LogPrint("+-----------------------------------------+");
     LogPrint("PYRAMIDING TRIGGERED");
-    LogPrint("Base Ticket: ", ticket, " | Profit: $", profit);
+    LogPrint("Base Ticket: ", ticket, " | Profit Points: ", profitPoints);
     LogPrint("Positions: ", sameTypePositions, "/", MaxPyramidingPositions);
     LogPrint("Invalidation Score: ", details.totalScore);
+    LogPrint("Price Distance: ", MathAbs(currentPrice - lastEntryPrice) / _Point, " points");
     LogPrint("+-----------------------------------------+");
     
     ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
@@ -1518,19 +1671,67 @@ void ManageLosingPositions(ulong ticket)
 
     InvalidationDetails details = GetDetailedInvalidationScore(ticket);
 
+    // I4: Invalidation persistence tracking
+    // Find or create persistence counter for this ticket
+    int ticketIndex = -1;
+    int countersSize = ArraySize(consecutiveInvalidationCount);
+    
+    // Simple approach: use position in array as ticket tracking
+    // We track whether the score has been consistently above threshold
+    static ulong trackedTickets[];
+    static int trackedCounters[];
+    int trackedSize = ArraySize(trackedTickets);
+    
+    for(int i = 0; i < trackedSize; i++)
+    {
+        if(trackedTickets[i] == ticket)
+        {
+            ticketIndex = i;
+            break;
+        }
+    }
+    
+    if(ticketIndex < 0)
+    {
+        // New ticket - add tracking entry
+        ticketIndex = trackedSize;
+        ArrayResize(trackedTickets, trackedSize + 1);
+        ArrayResize(trackedCounters, trackedSize + 1);
+        trackedTickets[ticketIndex] = ticket;
+        trackedCounters[ticketIndex] = 0;
+    }
+    
+    // Update persistence counter based on current score
+    if(details.totalScore >= 5)
+        trackedCounters[ticketIndex]++;
+    else
+        trackedCounters[ticketIndex] = 0; // Reset if score drops
+
     LogPrint("+-----------------------------------------+");
     LogPrint("POSITION INVALIDATION ANALYSIS");
     LogPrint("Ticket: ", ticket, " | Type: ", EnumToString(posType));
     LogPrint("Profit: $", profit, " | Volume: ", volume);
     LogPrint("TOTAL SCORE: ", details.totalScore, " / 13");
+    LogPrint("Persistence: ", trackedCounters[ticketIndex], "/", InvalidationPersistenceTicks);
     LogPrint("REASON: ", details.reason);
     LogPrint("+-----------------------------------------+");
+
+    // I4: Only act if invalidation has persisted for N consecutive ticks
+    if(trackedCounters[ticketIndex] < InvalidationPersistenceTicks) 
+    {
+        if(details.totalScore >= 5)
+            LogPrint("DECISION: INVALIDATION BUILDING (", trackedCounters[ticketIndex], "/", InvalidationPersistenceTicks, ") - MONITORING");
+        else
+            LogPrint("DECISION: WEAK/NO INVALIDATION - MONITORING");
+        return;
+    }
 
     if(details.totalScore >= 8 && EnableAutoReverse)
     {
         LogPrint("DECISION: STRONG INVALIDATION - REVERSING POSITION");
         
         lastReverseTime = TimeTradeServer();
+        trackedCounters[ticketIndex] = 0; // Reset after acting
         
         if(!ClosePosition(ticket))
         {
@@ -1546,6 +1747,7 @@ void ManageLosingPositions(ulong ticket)
     else if(details.totalScore >= 5 && EnableAutoHedge)
     {
         LogPrint("DECISION: MODERATE INVALIDATION - HEDGING POSITION");
+        trackedCounters[ticketIndex] = 0; // Reset after acting
         
         ENUM_ORDER_TYPE hedgeType = (posType == POSITION_TYPE_BUY) ? 
                                      ORDER_TYPE_SELL : ORDER_TYPE_BUY;
@@ -3137,7 +3339,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v34.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v35.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -3237,7 +3439,7 @@ void UpdateDashboard()
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v34.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v35.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic
@@ -3296,8 +3498,8 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_SigHead", "SIGNALS:", startX, currentY, headersize, colorHeader, true);
     currentY += lineHeight;
     
-    bool buySignal = BuySignal();
-    bool sellSignal = SellSignal();
+    bool buySignal = BuySignal(true);    // readOnly: don't update lastBuyPrice
+    bool sellSignal = SellSignal(true);  // readOnly: don't update lastSellPrice
     
     string buyText = buySignal ? "BUY: ACTIVE" : "BUY: -";
     DrawDashboardLabel("NyaoDash_Buy", buyText, startX, currentY, textsize, buySignal ? colorBuy : colorNeutral, buySignal);
