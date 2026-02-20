@@ -2351,8 +2351,11 @@ string IsHighImpactNewsTime(int minutesBefore, int minutesAfter, ulong &eventID)
     MqlCalendarValue values[];
     
     datetime serverTime = TimeTradeServer();
-    datetime start = serverTime - minutesBefore * 60;
-    datetime end = serverTime + minutesAfter * 60;
+    // Use the max of both windows to cover all events in their active pause window
+    // Add 120s buffer to avoid boundary exclusion issues in CalendarValueHistory
+    int lookRange = (int)MathMax(minutesBefore, minutesAfter);
+    datetime start = serverTime - lookRange * 60;
+    datetime end = serverTime + lookRange * 60 + 120;
     
     if(CalendarValueHistory(values, start, end))
     {
@@ -2712,7 +2715,7 @@ void CheckHighImpactNews()
         datetime currentServerTime = TimeTradeServer();
         MqlCalendarValue values[];
 
-        if(CalendarValueHistory(values, currentServerTime - 60, currentServerTime + NewsMinutesAfter * 60))
+        if(CalendarValueHistory(values, currentServerTime - NewsMinutesBefore * 60, currentServerTime + NewsMinutesAfter * 60 + 120))
         {
             for(int i = 0; i < ArraySize(values); i++)
             {
