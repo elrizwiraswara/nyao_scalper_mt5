@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v32.0                                               |
+// | Nyao Scalper v36.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "32.0"
+#property version   "36.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -17,9 +17,9 @@
 #property strict
 
 // Windows API for Algo Trading Button Control
-#define MT_WMCMD_EXPERTS   32851
+#define MT_WMCMD_EXPERTS 32851
 #define WM_COMMAND 0x0111
-#define GA_ROOT    2
+#define GA_ROOT 2
 #include <WinAPI\winapi.mqh>
 
 // Dialog Controls for Password Input
@@ -39,7 +39,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v32.0"
+input group " Nyao Scalper v36.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
@@ -91,9 +91,30 @@ input double LossThresholdMultiplier = 2.0;               // Threshold Multiplie
 input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
 input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
+input group "🩺 Loss Management Settings"
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
-input double HoldScoreRatio = 0.1;                        // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold
+input double MinHealthScore = 0.40;                       // Min Health Score to Hold Position (0.0 - 1.0)
+input double MaxAdverseATR = 1.5;                         // Max Adverse Movement in ATR Multiples
+input double HealthTrendWeight = 0.40;                    // Health Weight: Trend Alignment
+input double HealthRSIWeight = 0.25;                      // Health Weight: RSI Zone
+input double HealthATRWeight = 0.25;                      // Health Weight: Adverse Excursion
+input double HealthSwingWeight = 0.10;                    // Health Weight: Swing Level
+input double HealthRSIBuyMin = 45.0;                      // Health RSI Min for Buy Position
+input double HealthRSISellMax = 55.0;                     // Health RSI Max for Sell Position
+input int HealthSwingLookback = 20;                       // Swing Level Lookback Bars
+input int HealthGraceBars = 2;                            // Grace Period (Bars Before Health Check)
+input bool EnablePartialClose = true;                     // Enable Scaled Partial Close on Signal Decay
+input double PartialClose75Pct = 0.25;                    // Close % When Signal Drops to 75% of Initial
+input double PartialClose50Pct = 0.50;                    // Close % When Signal Drops to 50% of Initial
+input double PartialClose25Pct = 1.00;                    // Close % When Signal Drops to 25% of Initial (Remaining)
+input bool EnableHealthSLTightening = true;               // Tighten SL as Health Weakens
+input double SLTightenATRMultiplier = 1.5;                // ATR Multiplier for Tightened SL
+input double SLTightenMinHealthPct = 0.60;                // Start Tightening Below This Health %
+input bool EnableBreakEvenOnSpread = true;                // Lock SL to Entry After Profit > Spread Cost
+input double BreakEvenSpreadMultiplier = 1.5;             // Spread Multiplier for Break-Even Lock Trigger
+input bool EnableVirtualSLReentry = true;                 // Close at Threshold Then Re-evaluate & Re-enter
+input double ReentryMinSignalPct = 0.75;                  // Min % of Entry Signal Required to Re-enter
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -184,6 +205,12 @@ bool isOrderSendLocked = false;                           // Flag for locking Or
 bool marketCloseAlertSent = false;                        // Flag for near market close time
 bool algoTradingStatus = false;                           // Flag for algo trading status
 
+// Normalized Health Weights (computed in InitializeEA)
+double normHealthTrendWeight = 0;
+double normHealthRSIWeight = 0;
+double normHealthATRWeight = 0;
+double normHealthSwingWeight = 0;
+
 // Duplicate Signal Filter Variables
 datetime startTime = 0;                                   // EA Start Time
 datetime lastDailyReportTime = 0;                         // Last time daily report was sent
@@ -223,6 +250,19 @@ struct SignalStrength
     string reasoning;                                     // Detailed explanation
 };
 
+// Position Health Structure - Measurement-Based Revalidation
+// Evaluates whether a position's trade thesis is still valid
+struct PositionHealth
+{
+    double healthScore;                                   // 0.0 (dead) to 1.0 (fully healthy)
+    bool   trendValid;                                    // EMA still aligned with position direction?
+    bool   momentumValid;                                 // RSI still in favorable zone?
+    double adverseATR;                                    // How many ATRs moved against position
+    bool   swingValid;                                    // Price hasn't broken swing level?
+    bool   inGracePeriod;                                 // Position too new for health check?
+    string reason;                                        // Human-readable invalidation reason
+};
+
 // Managed Position Structure - For Position Tracking 
 // Stores position info to avoid repeated MQL function calls
 struct ManagedPosition
@@ -230,6 +270,9 @@ struct ManagedPosition
     ulong ticket;                                         // Position ticket ID
     ENUM_POSITION_TYPE type;                              // Buy or Sell
     double signalScore;                                   // Initial signal score
+    double entryPrice;                                    // Entry price for adverse excursion calc
+    int    partialCloseLevel;                             // 0=none, 1=75% triggered, 2=50% triggered, 3=fully closed
+    bool   breakEvenLocked;                               // Whether SL has been moved to break-even by loss mgmt
 };
 
 // Managed positions array
@@ -374,6 +417,30 @@ int InitializeEA()
         return(INIT_PARAMETERS_INCORRECT);
     }
 
+    // Normalize health weights to sum to 1.0
+    double healthWeightSum = HealthTrendWeight + HealthRSIWeight + HealthATRWeight + HealthSwingWeight;
+    if(healthWeightSum > 0)
+    {
+        normHealthTrendWeight = HealthTrendWeight / healthWeightSum;
+        normHealthRSIWeight   = HealthRSIWeight   / healthWeightSum;
+        normHealthATRWeight   = HealthATRWeight   / healthWeightSum;
+        normHealthSwingWeight = HealthSwingWeight  / healthWeightSum;
+        
+        if(MathAbs(healthWeightSum - 1.0) > 0.001)
+        {
+            Print("⚠️ Health weights sum to ", DoubleToString(healthWeightSum, 3), ", normalized to 1.0");
+        }
+    }
+    else
+    {
+        // Fallback: equal weights
+        normHealthTrendWeight = 0.25;
+        normHealthRSIWeight   = 0.25;
+        normHealthATRWeight   = 0.25;
+        normHealthSwingWeight = 0.25;
+        Print("⚠️ All health weights are 0, defaulting to equal weights (0.25 each)");
+    }
+
     // Initialize Signal Indicators
     emaFastHandle = iMA(_Symbol, _Period, EMAFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
     if(emaFastHandle == INVALID_HANDLE)
@@ -440,6 +507,7 @@ int InitializeEA()
         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
         
         ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        double posEntryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
         
         // For existing positions, try to calculate current signal strength as baseline
         // If calculation fails or returns 0, use a default safe value (MinBuySignalScore)
@@ -454,10 +522,7 @@ int InitializeEA()
         initialScore = strength.finalScore;
         if(initialScore <= 0) initialScore = (type == POSITION_TYPE_BUY) ? MinBuySignalScore : MinSellSignalScore;
         
-        initialScore = strength.finalScore;
-        if(initialScore <= 0) initialScore = (type == POSITION_TYPE_BUY) ? MinBuySignalScore : MinSellSignalScore;
-        
-        RegisterManagedPosition(ticket, type, initialScore);
+        RegisterManagedPosition(ticket, type, initialScore, posEntryPrice);
 
         // Update global last position tracking
         datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
@@ -495,7 +560,7 @@ int InitializeEA()
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v32.0 Initialized Successfully");
+    Print("Nyao Scalper v36.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -526,7 +591,7 @@ void OnDeinit(const int reason)
     IndicatorRelease(rsiHandle);
     IndicatorRelease(atrSignalHandle);
     
-    Print("Nyao Scalper v32.0 Deinitialized");
+    Print("Nyao Scalper v36.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -1137,12 +1202,215 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool includeCurrentC
 }
 
 // +------------------------------------------------------------------+
-// | Manage Losing Positions - Signal Strength Based                  |
-// | Uses current signal strength vs initial to manage positions      |
+// | Evaluate Position Health - Measurement-Based Revalidation        |
+// | Checks if the trade thesis is still valid                        |
+// +------------------------------------------------------------------+
+PositionHealth EvaluatePositionHealth(
+    ENUM_POSITION_TYPE posType, 
+    double entryPrice,
+    datetime posOpenTime,
+    double emaFast, 
+    double emaSlow, 
+    double rsi, 
+    double currentATR,
+    const MqlRates &rates[],
+    int ratesCount)
+{
+    PositionHealth health;
+    health.healthScore = 0;
+    health.trendValid = false;
+    health.momentumValid = false;
+    health.adverseATR = 0;
+    health.swingValid = true;
+    health.inGracePeriod = false;
+    health.reason = "";
+    
+    bool isBuy = (posType == POSITION_TYPE_BUY);
+    
+    // GRACE PERIOD CHECK
+    // Skip health evaluation for newly opened positions
+    if(HealthGraceBars > 0 && posOpenTime > 0)
+    {
+        int barsElapsed = iBarShift(_Symbol, _Period, posOpenTime, false);
+        if(barsElapsed < HealthGraceBars)
+        {
+            health.healthScore = 1.0;
+            health.trendValid = true;
+            health.momentumValid = true;
+            health.swingValid = true;
+            health.inGracePeriod = true;
+            health.reason = StringFormat("Grace period (%d/%d bars). ", barsElapsed, HealthGraceBars);
+            return health;
+        }
+    }
+    
+    // 1. TREND ALIGNMENT (Graduated: binary — trend IS or ISN'T aligned)
+    double trendScore = 0;
+    if(isBuy)
+        health.trendValid = (emaFast > emaSlow);
+    else
+        health.trendValid = (emaFast < emaSlow);
+    
+    if(health.trendValid)
+        trendScore = 1.0;
+    else
+        health.reason += "Trend crossed against position. ";
+    
+    // 2. RSI ZONE (Graduated: linear ramp from 0 to 1)
+    // Uses configurable thresholds instead of hardcoded 45/55
+    double rsiScore = 0;
+    if(isBuy)
+    {
+        // Buy: RSI should be above HealthRSIBuyMin
+        // Score ramps from 0 at HealthRSIBuyMin-15 to 1.0 at HealthRSIBuyMin
+        double rsiFloor = HealthRSIBuyMin - 15.0;
+        if(rsi >= HealthRSIBuyMin)
+        {
+            rsiScore = 1.0;
+            health.momentumValid = true;
+        }
+        else if(rsi > rsiFloor)
+        {
+            rsiScore = (rsi - rsiFloor) / (HealthRSIBuyMin - rsiFloor);
+            health.momentumValid = false;
+            health.reason += StringFormat("RSI weakening (RSI=%.1f, min=%.1f). ", rsi, HealthRSIBuyMin);
+        }
+        else
+        {
+            rsiScore = 0;
+            health.momentumValid = false;
+            health.reason += StringFormat("RSI regime shift (RSI=%.1f, min=%.1f). ", rsi, HealthRSIBuyMin);
+        }
+    }
+    else
+    {
+        // Sell: RSI should be below HealthRSISellMax
+        // Score ramps from 0 at HealthRSISellMax+15 to 1.0 at HealthRSISellMax
+        double rsiCeiling = HealthRSISellMax + 15.0;
+        if(rsi <= HealthRSISellMax)
+        {
+            rsiScore = 1.0;
+            health.momentumValid = true;
+        }
+        else if(rsi < rsiCeiling)
+        {
+            rsiScore = (rsiCeiling - rsi) / (rsiCeiling - HealthRSISellMax);
+            health.momentumValid = false;
+            health.reason += StringFormat("RSI weakening (RSI=%.1f, max=%.1f). ", rsi, HealthRSISellMax);
+        }
+        else
+        {
+            rsiScore = 0;
+            health.momentumValid = false;
+            health.reason += StringFormat("RSI regime shift (RSI=%.1f, max=%.1f). ", rsi, HealthRSISellMax);
+        }
+    }
+    
+    // 3. ADVERSE EXCURSION / ATR (Graduated: smooth falloff based on distance)
+    double currentPrice = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double adverseMove = 0;
+    
+    if(isBuy)
+        adverseMove = entryPrice - currentPrice;  // Positive = losing
+    else
+        adverseMove = currentPrice - entryPrice;  // Positive = losing
+    
+    double atrScore = 1.0;  // Default: fully healthy (not adverse)
+    if(currentATR > 0 && adverseMove > 0)
+    {
+        health.adverseATR = adverseMove / currentATR;
+        // Graduated: score drops linearly from 1.0 at 0 ATR to 0.0 at MaxAdverseATR
+        atrScore = MathMax(0.0, 1.0 - (health.adverseATR / MaxAdverseATR));
+        
+        if(health.adverseATR > MaxAdverseATR)
+            health.reason += StringFormat("Adverse excursion %.1f ATR > Max %.1f ATR. ", health.adverseATR, MaxAdverseATR);
+        else if(atrScore < 0.5)
+            health.reason += StringFormat("Adverse excursion %.1f ATR (score=%.2f). ", health.adverseATR, atrScore);
+    }
+    
+    // 4. SWING LEVEL (Graduated: binary — structure IS or ISN'T broken)
+    // Uses configurable lookback, excludes 2 most recent bars to avoid noise
+    double swingScore = 1.0;
+    int swingLookback = MathMax(5, HealthSwingLookback);  // Minimum 5 bars
+    
+    if(ratesCount >= swingLookback)
+    {
+        // Start from bar index 2 (skip 2 most recent to avoid noise)
+        int startBar = MathMin(2, ratesCount - 1);
+        
+        if(isBuy)
+        {
+            // Find recent swing low — if price broke below it, structure is broken
+            double swingLow = rates[startBar].low;
+            for(int j = startBar + 1; j < swingLookback && j < ratesCount; j++)
+                swingLow = MathMin(swingLow, rates[j].low);
+            
+            if(currentPrice < swingLow)
+            {
+                swingScore = 0;
+                health.swingValid = false;
+                health.reason += StringFormat("Price %.5f broke swing low %.5f (%d bars). ", currentPrice, swingLow, swingLookback);
+            }
+        }
+        else
+        {
+            // Find recent swing high — if price broke above it, structure is broken
+            double swingHigh = rates[startBar].high;
+            for(int j = startBar + 1; j < swingLookback && j < ratesCount; j++)
+                swingHigh = MathMax(swingHigh, rates[j].high);
+            
+            if(currentPrice > swingHigh)
+            {
+                swingScore = 0;
+                health.swingValid = false;
+                health.reason += StringFormat("Price %.5f broke swing high %.5f (%d bars). ", currentPrice, swingHigh, swingLookback);
+            }
+        }
+    }
+    
+    // AGGREGATE HEALTH SCORE (Graduated, using normalized weights)
+    health.healthScore = (trendScore  * normHealthTrendWeight)
+                       + (rsiScore    * normHealthRSIWeight)
+                       + (atrScore    * normHealthATRWeight)
+                       + (swingScore  * normHealthSwingWeight);
+    
+    if(health.reason == "")  health.reason = "All health checks passed.";
+    
+    return health;
+}
+
+// +------------------------------------------------------------------+
+// | Manage Losing Positions                                          |
+// | Scaled Partial Close, Dynamic SL Tightening, Break-Even Lock,    |
+// | Virtual SL + Re-entry                                            |
 // +------------------------------------------------------------------+
 void ManageLosingPositions()
 {   
-    if(!EnableLossManagement)return;
+    if(!EnableLossManagement) return;
+    
+    // Cache indicator data once before the position loop
+    double bufEMA_Fast[], bufEMA_Slow[], bufRSI[], bufATR[];
+    ArraySetAsSeries(bufEMA_Fast, true);
+    ArraySetAsSeries(bufEMA_Slow, true);
+    ArraySetAsSeries(bufRSI, true);
+    ArraySetAsSeries(bufATR, true);
+    
+    if(CopyBuffer(emaFastHandle, 0, 0, 2, bufEMA_Fast) < 2) return;
+    if(CopyBuffer(emaSlowHandle, 0, 0, 2, bufEMA_Slow) < 2) return;
+    if(CopyBuffer(rsiHandle, 0, 0, 2, bufRSI) < 2) return;
+    if(CopyBuffer(atrSignalHandle, 0, 0, 2, bufATR) < 2) return;
+    
+    // Use closed candle values (index 1) for stability
+    double emaFast   = bufEMA_Fast[1];
+    double emaSlow   = bufEMA_Slow[1];
+    double rsi       = bufRSI[1];
+    double currentATR = bufATR[1];
+    
+    // Cache rates for swing level check
+    int swingBars = MathMax(5, HealthSwingLookback);
+    MqlRates rates[];
+    ArraySetAsSeries(rates, true);
+    int ratesCopied = CopyRates(_Symbol, _Period, 1, swingBars, rates);
     
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
@@ -1153,40 +1421,330 @@ void ManageLosingPositions()
         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
         
         ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        datetime posOpenTime = (datetime)PositionGetInteger(POSITION_TIME);
+        double volume = PositionGetDouble(POSITION_VOLUME);
+        double profit = PositionGetDouble(POSITION_PROFIT);
+        double currentSL = PositionGetDouble(POSITION_SL);
+        double currentTP = PositionGetDouble(POSITION_TP);
         
-        // Get initial score
-        double initialScore = 0;
+        // Get managed position data
         int posIndex = GetManagedPositionIndex(ticket);
-        if (posIndex != -1)
+        if(posIndex == -1)
         {
-            initialScore = managedPositions[posIndex].signalScore;
-        }
-        else
-        {
-            RegisterManagedPosition(ticket, posType, 0);
+            double posEntryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+            RegisterManagedPosition(ticket, posType, 0, posEntryPrice);
             continue;
         }
-
-        ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-        SignalStrength currentStrength = GetSignalStrength(orderType, false);
-        double currentScore = currentStrength.finalScore;
         
-        // Check if score has dropped below acceptable ratio
-        double requiredScore = initialScore * HoldScoreRatio;
+        double entryPrice = managedPositions[posIndex].entryPrice;
+        double initialScore = managedPositions[posIndex].signalScore;
         
-        if (currentScore < requiredScore)
+        // Evaluate position health
+        PositionHealth health = EvaluatePositionHealth(posType, entryPrice, posOpenTime, 
+                                                       emaFast, emaSlow, rsi, currentATR, 
+                                                       rates, ratesCopied);
+        
+        // Skip all management during grace period
+        if(health.inGracePeriod) continue;
+        
+        // 1. BREAK-EVEN LOCK (when profit exceeds spread cost)
+        if(EnableBreakEvenOnSpread && !managedPositions[posIndex].breakEvenLocked)
+        {
+            double spreadPoints = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point;
+            double spreadCost = spreadPoints * volume * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+            double breakEvenTrigger = spreadCost * BreakEvenSpreadMultiplier;
+            
+            if(profit > breakEvenTrigger)
+            {
+                // Calculate break-even SL at entry price
+                double newBESL = NormalizeDouble(entryPrice, _Digits);
+                
+                // Validate: SL must be on the correct side
+                long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+                double minDist = stopLevel * _Point;
+                bool canLockBE = false;
+                
+                if(posType == POSITION_TYPE_BUY)
+                {
+                    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                    canLockBE = (newBESL < bid - minDist) && (currentSL == 0 || newBESL > currentSL);
+                }
+                else
+                {
+                    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                    canLockBE = (newBESL > ask + minDist) && (currentSL == 0 || newBESL < currentSL);
+                }
+                
+                if(canLockBE)
+                {
+                    if(ModifyPosition(ticket, newBESL, currentTP))
+                    {
+                        managedPositions[posIndex].breakEvenLocked = true;
+                        
+                        LogPrint("+-----------------------------------------+");
+                        LogPrint("[BREAK-EVEN LOCKED] Ticket: ", ticket);
+                        LogPrint("Profit: $", DoubleToString(profit, 2), " > Trigger: $", DoubleToString(breakEvenTrigger, 2));
+                        LogPrint("SL moved to entry: ", newBESL);
+                        LogPrint("+-----------------------------------------+");
+                    }
+                }
+            }
+        }
+        
+        // 2. SCALED PARTIAL CLOSE (signal decay based)
+        if(EnablePartialClose && initialScore > 0 && managedPositions[posIndex].partialCloseLevel < 3)
+        {
+            // Get current signal strength for position's direction
+            ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+            SignalStrength currentStrength = GetSignalStrength(orderType, true);
+            double currentScore = currentStrength.finalScore;
+            double signalRatio = currentScore / initialScore;
+            
+            // Re-read position volume (may have changed from previous partial close)
+            if(!PositionSelectByTicket(ticket)) continue;
+            volume = PositionGetDouble(POSITION_VOLUME);
+            
+            double minVol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+            double stepVol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+            
+            // Level 1: Signal drops to 75% -> Close 25%
+            if(managedPositions[posIndex].partialCloseLevel == 0 && signalRatio <= 0.75)
+            {
+                double closeVol = NormalizeVolume(volume * PartialClose75Pct);
+                double remaining = volume - closeVol;
+                
+                if(closeVol >= minVol && remaining >= minVol)
+                {
+                    if(PartialClosePosition(ticket, closeVol))
+                    {
+                        managedPositions[posIndex].partialCloseLevel = 1;
+                        LogPrint("+-----------------------------------------+");
+                        LogPrint("[PARTIAL CLOSE L1] Ticket: ", ticket);
+                        LogPrint("Signal: ", DoubleToString(currentScore, 1), " / ", DoubleToString(initialScore, 1), " (", DoubleToString(signalRatio * 100, 0), "%)");
+                        LogPrint("Closed: ", closeVol, " lots | Remaining: ", remaining, " lots");
+                        LogPrint("+-----------------------------------------+");
+                    }
+                }
+            }
+            // Level 2: Signal drops to 50% -> Close 50%
+            else if(managedPositions[posIndex].partialCloseLevel == 1 && signalRatio <= 0.50)
+            {
+                // Re-read volume after potential L1 close
+                if(!PositionSelectByTicket(ticket)) continue;
+                volume = PositionGetDouble(POSITION_VOLUME);
+                
+                double closeVol = NormalizeVolume(volume * PartialClose50Pct);
+                double remaining = volume - closeVol;
+                
+                if(closeVol >= minVol && remaining >= minVol)
+                {
+                    if(PartialClosePosition(ticket, closeVol))
+                    {
+                        managedPositions[posIndex].partialCloseLevel = 2;
+                        LogPrint("+-----------------------------------------+");
+                        LogPrint("[PARTIAL CLOSE L2] Ticket: ", ticket);
+                        LogPrint("Signal: ", DoubleToString(currentScore, 1), " / ", 
+                                 DoubleToString(initialScore, 1), " (", DoubleToString(signalRatio * 100, 0), "%)");
+                        LogPrint("Closed: ", closeVol, " lots | Remaining: ", remaining, " lots");
+                        LogPrint("+-----------------------------------------+");
+                    }
+                }
+            }
+            // Level 3: Signal drops to 25% -> Close remaining
+            else if(managedPositions[posIndex].partialCloseLevel == 2 && signalRatio <= 0.25)
+            {
+                LogPrint("+-----------------------------------------+");
+                LogPrint("[PARTIAL CLOSE L3 - FULL EXIT] Ticket: ", ticket);
+                LogPrint("Signal: ", DoubleToString(currentScore, 1), " / ", 
+                         DoubleToString(initialScore, 1), " (", DoubleToString(signalRatio * 100, 0), "%)");
+                LogPrint("+-----------------------------------------+");
+                
+                managedPositions[posIndex].partialCloseLevel = 3;
+                ClosePosition(ticket);
+                
+                // Virtual SL Re-entry after L3 full close
+                if(EnableVirtualSLReentry)
+                {
+                    TryVirtualSLReentry(posType, initialScore);
+                }
+                continue; // Position is fully closed
+            }
+        }
+        
+        // 3. DYNAMIC SL TIGHTENING (health-based)
+        if(EnableHealthSLTightening && health.healthScore < SLTightenMinHealthPct && currentATR > 0)
+        {
+            // Calculate tightened SL: distance shrinks proportionally with health
+            // healthRatio = health / startThreshold (1.0 at threshold, 0.0 at dead)
+            double healthRatio = health.healthScore / SLTightenMinHealthPct;
+            if(healthRatio < 0.1) healthRatio = 0.1; // Prevent SL at entry (would be break-even)
+            
+            double slDistance = currentATR * SLTightenATRMultiplier * healthRatio;
+            double newTightenedSL = 0;
+            
+            // Re-read position to ensure consistency
+            if(!PositionSelectByTicket(ticket)) continue;
+            currentSL = PositionGetDouble(POSITION_SL);
+            currentTP = PositionGetDouble(POSITION_TP);
+            
+            long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+            double minDist = stopLevel * _Point;
+            
+            if(posType == POSITION_TYPE_BUY)
+            {
+                double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                newTightenedSL = NormalizeDouble(bid - slDistance, _Digits);
+                
+                // Respect break-even lock
+                if(managedPositions[posIndex].breakEvenLocked && newTightenedSL < entryPrice)
+                    newTightenedSL = NormalizeDouble(entryPrice, _Digits);
+                
+                // Only move SL UP (more protective)
+                if(currentSL > 0 && newTightenedSL <= currentSL) continue;
+                
+                // Respect minimum stop distance
+                if(newTightenedSL >= bid - minDist) continue;
+            }
+            else
+            {
+                double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                newTightenedSL = NormalizeDouble(ask + slDistance, _Digits);
+                
+                // Respect break-even lock
+                if(managedPositions[posIndex].breakEvenLocked && newTightenedSL > entryPrice)
+                    newTightenedSL = NormalizeDouble(entryPrice, _Digits);
+                
+                // Only move SL DOWN (more protective)
+                if(currentSL > 0 && newTightenedSL >= currentSL) continue;
+                
+                // Respect minimum stop distance
+                if(newTightenedSL <= ask + minDist) continue;
+            }
+            
+            if(IsSLValid(posType, newTightenedSL))
+            {
+                if(ModifyPosition(ticket, newTightenedSL, currentTP))
+                {
+                    LogPrint("+-----------------------------------------+");
+                    LogPrint("[SL TIGHTENED] Ticket: ", ticket);
+                    LogPrint("Health: ", DoubleToString(health.healthScore, 2),
+                             " (ratio: ", DoubleToString(healthRatio, 2), ")");
+                    LogPrint("SL: ", currentSL, " -> ", newTightenedSL, 
+                             " (ATR dist: ", DoubleToString(slDistance / _Point, 0), " pts)");
+                    LogPrint("+-----------------------------------------+");
+                }
+            }
+        }
+        
+        // 4. FULL CLOSE + VIRTUAL SL RE-ENTRY (at health threshold)
+        if(health.healthScore < MinHealthScore)
         {
             LogPrint("+-----------------------------------------+");
-            LogPrint("POSITION EXIT TRIGGERED (Score Decay)");
-            LogPrint("Ticket: ", ticket, " | Profit: $", PositionGetDouble(POSITION_PROFIT));
-            LogPrint("Reason: Score < Required (Init: ", initialScore, " * Ratio: ", HoldScoreRatio, " = ", DoubleToString(requiredScore, 1), " vs Cur: ", currentScore, ")");
-            LogPrint(currentStrength.reasoning);
+            LogPrint("POSITION EXIT TRIGGERED (Health Decay)");
+            LogPrint("Ticket: ", ticket, " | Profit: $", DoubleToString(PositionGetDouble(POSITION_PROFIT), 2));
+            LogPrint("Health: ", DoubleToString(health.healthScore, 2), " / ", DoubleToString(MinHealthScore, 2));
+            LogPrint("Trend: ", health.trendValid ? "OK" : "FAIL",
+                     " | RSI: ", health.momentumValid ? "OK" : "FAIL",
+                     " | ATR: ", DoubleToString(health.adverseATR, 1), "x",
+                     " | Swing: ", health.swingValid ? "OK" : "FAIL");
+            LogPrint("Reason: ", health.reason);
             LogPrint("+-----------------------------------------+");
             
             ClosePosition(ticket);
+            
+            // Virtual SL + Re-entry: try to re-enter at better price if signal supports it
+            if(EnableVirtualSLReentry)
+            {
+                TryVirtualSLReentry(posType, initialScore);
+            }
         }
     }
 }
+
+// +------------------------------------------------------------------+
+// | Partial Close Position - Close a portion of position volume       |
+// +------------------------------------------------------------------+
+bool PartialClosePosition(ulong ticket, double closeVolume)
+{
+    if(!PositionSelectByTicket(ticket))
+    {
+        LogPrint("PartialClose: Position ", ticket, " not found");
+        return false;
+    }
+    
+    LockOrderSend(true);
+    
+    MqlTradeRequest request = {};
+    MqlTradeResult result = {};
+    
+    ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    
+    request.action = TRADE_ACTION_DEAL;
+    request.position = ticket;
+    request.symbol = PositionGetString(POSITION_SYMBOL);
+    request.volume = NormalizeVolume(closeVolume);
+    request.deviation = 10;
+    request.magic = PositionGetInteger(POSITION_MAGIC);
+    request.type = (type == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+    request.price = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    
+    if(!OrderSend(request, result))
+    {
+        LogPrint("PartialClose failed for ", ticket, " Error: ", GetLastError());
+        LockOrderSend(false);
+        return false;
+    }
+    
+    LogPrint("Partial close ", ticket, " | Vol: ", closeVolume, " | Retcode: ", result.retcode);
+    LockOrderSend(false);
+    return (result.retcode == TRADE_RETCODE_DONE);
+}
+
+// +------------------------------------------------------------------+
+// | Virtual SL Re-entry - Re-evaluate and re-enter after exit        |
+// +------------------------------------------------------------------+
+void TryVirtualSLReentry(ENUM_POSITION_TYPE posType, double initialScore)
+{
+    if(initialScore <= 0) return;
+    
+    // Check if trading is allowed (respects all guards except duplicate signal filter)
+    if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded) return;
+    if(isPaused || isOutsideTradingHours || isLeverageDiffFromInitial) return;
+    if(isNearMarketClose) return;
+    if(isOrderSendLocked) return;
+    if(CountLosingPositions() >= MaxHoldingLossPositions) return;
+    if(CountOpenOrders() >= MaxOpenOrders) return;
+    
+    // Get current signal strength for the same direction
+    ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+    SignalStrength strength = GetSignalStrength(orderType, true);
+    
+    // Check minimum re-entry threshold
+    double minReentryScore = initialScore * ReentryMinSignalPct;
+    
+    if(strength.finalScore >= minReentryScore)
+    {
+        // Check direction-specific order enable
+        if(posType == POSITION_TYPE_BUY && !EnableBuyOrders) return;
+        if(posType == POSITION_TYPE_SELL && !EnableSellOrders) return;
+        
+        LogPrint("+-----------------------------------------+");
+        LogPrint("[VIRTUAL SL RE-ENTRY] Re-entering ", posType == POSITION_TYPE_BUY ? "BUY" : "SELL");
+        LogPrint("New Signal: ", DoubleToString(strength.finalScore, 1), 
+                 " >= Min: ", DoubleToString(minReentryScore, 1),
+                 " (", DoubleToString(ReentryMinSignalPct * 100, 0), "% of ", 
+                 DoubleToString(initialScore, 1), ")");
+        LogPrint("+-----------------------------------------+");
+        
+        // Open new position at current (better) price
+        OpenPosition(orderType, strength.finalScore);
+    }
+    else
+    {
+        LogPrint("[VIRTUAL SL] No re-entry. Signal: ", DoubleToString(strength.finalScore, 1), " < Required: ", DoubleToString(minReentryScore, 1));
+    }
+}
+
 
 int CountLosingPositions()
 {   
@@ -1427,8 +1985,8 @@ void ManageTrailingTPSL(ulong ticket)
 // +------------------------------------------------------------------+
 // | Positions Management                                             |
 // +------------------------------------------------------------------+
-// Register managed position with initial score
-void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signalScore)
+// Register managed position with initial score and entry price
+void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signalScore, double entryPrice = 0)
 {
     // Resize array
     ArrayResize(managedPositions, managedPositionCount + 1);
@@ -1437,6 +1995,9 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     managedPositions[managedPositionCount].ticket = ticket;
     managedPositions[managedPositionCount].type = type;
     managedPositions[managedPositionCount].signalScore = signalScore;
+    managedPositions[managedPositionCount].entryPrice = entryPrice;
+    managedPositions[managedPositionCount].partialCloseLevel = 0;
+    managedPositions[managedPositionCount].breakEvenLocked = false;
     
     managedPositionCount++;
     
@@ -1447,6 +2008,7 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     LogPrint("Registered position. Ticket: ", ticket, 
              " | Type: ", EnumToString(type),
              " | Score: ", signalScore, 
+             " | Entry: ", entryPrice,
              " | Open Buys: ", buyPositionCount, " | Open Sells: ", sellPositionCount);
 }
 
@@ -1633,7 +2195,7 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
             
             // Register position to managed array
             ENUM_POSITION_TYPE posType = (orderType == ORDER_TYPE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
-            RegisterManagedPosition(result.order, posType, signalScore);
+            RegisterManagedPosition(result.order, posType, signalScore, price);
             
             // Update Candle Counters
             datetime currBarTime = iTime(_Symbol, _Period, 0);
@@ -3198,7 +3760,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v32.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v36.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -3298,7 +3860,7 @@ void UpdateDashboard()
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v32.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v36.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic
