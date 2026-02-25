@@ -1632,8 +1632,14 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
     
-    // Pass signal score for dynamic lot sizing
-    double currentLot = CalculateDynamicLotSize(signalScore);
+    // Fetch velocity boost for final lot calculation
+    double velocityBoost = 0;
+    if (orderType == ORDER_TYPE_BUY) velocityBoost = lastBuyNormalizedVelocity;
+    else velocityBoost = lastSellNormalizedVelocity;
+    
+    // Calculate final lot size with both signal score and velocity boost
+    // This must be done BEFORE SL/TP conversion so dollar-based values are accurate
+    double currentLot = CalculateDynamicLotSize(signalScore, velocityBoost);
     
     double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -1679,15 +1685,6 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
             request.sl = NormalizeDouble(price + (slPoints * _Point), _Digits); 
         }
     }
-    
-    // Re-calculate or fetch global velocity
-    double velocityBoost = 0;
-    if (orderType == ORDER_TYPE_BUY) velocityBoost = lastBuyNormalizedVelocity;
-    else velocityBoost = lastSellNormalizedVelocity;
-    
-    // Recalculate lot with velocity
-    currentLot = CalculateDynamicLotSize(signalScore, velocityBoost);
-    request.volume = currentLot;
 
     bool orderResult = OrderSend(request, result);
     
