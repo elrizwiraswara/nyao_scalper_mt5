@@ -90,12 +90,7 @@ input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplie
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
 input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
 input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
-input bool EnablePyramiding = true;                       // Enable Pyramiding Positions
-input int PyramidingLookback = 15;                        // Lookback period for Pyramiding Peak Protection
-input double PyramidingMaxCandleRatio = 0.5;              // Max Candle Body Ratio for Pyramiding (Peak Protection)
-input double MinPyramidingBuySignalScore = 8.0;           // Min Signal Strength Score to Pyramiding Buy (0.0 - 10.0)
-input double MinPyramidingSellSignalScore = 8.0;          // Min Signal Strength Score to Pyramiding Sell (0.0 - 10.0)
-input int MaxPositionsPerCandle = 3;                      // Max Positions Per Candle
+
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
 input double HoldScoreRatio = 0.1;                        // Min Ratio of Initial Score to Hold Position (0.0 - 1.0)
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold
@@ -198,8 +193,7 @@ double lastReportEquity = 0;                              // Equity at last repo
 int totalPauseCount = 0;                                  // Total number of times trading was paused
 double totalPauseDurationMinutes = 0;                     // Total duration of pauses in minutes
 
-// Multi-Entry tracking
-int atrPyramidingHandle = INVALID_HANDLE;                // Handle for Pyramiding ATR calculation
+
 int emaFastHandle = INVALID_HANDLE;                      // Handle for Fast EMA
 int emaSlowHandle = INVALID_HANDLE;                      // Handle for Slow EMA
 int rsiHandle = INVALID_HANDLE;                          // Handle for RSI
@@ -246,7 +240,7 @@ int managedPositionCount = 0;
 int buyPositionCount = 0;
 int sellPositionCount = 0;
 
-// Candle-based Pyramiding Counters
+// Candle-based Position Counters
 datetime currentBarTime = 0;
 int buysOnCurrentBar = 0;
 int sellsOnCurrentBar = 0;
@@ -409,12 +403,7 @@ int InitializeEA()
         return(INIT_FAILED);
     }
 
-    atrPyramidingHandle = iATR(_Symbol, _Period, PyramidingLookback);
-    if(atrPyramidingHandle == INVALID_HANDLE)
-    {
-        Print("Error creating ATR handle for Pyramiding!");
-        return(INIT_FAILED);
-    }
+
 
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -531,7 +520,7 @@ void OnDeinit(const int reason)
     Comment("");
     
     // Release ATR Handle
-    IndicatorRelease(atrPyramidingHandle);
+
     IndicatorRelease(emaFastHandle);
     IndicatorRelease(emaSlowHandle);
     IndicatorRelease(rsiHandle);
@@ -735,29 +724,22 @@ void CheckForTradingSignal()
 double BuySignal()
 {   
     double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    bool isPyramiding = false;
     
     // Check strict conditions (limits & distance) first
-    if(!CheckBuyConditions(currentPrice, isPyramiding)) return 0;
+    if(!CheckBuyConditions(currentPrice)) return 0;
 
-    // Only calculate heavyweight indicators if conditions allow
-    // If Pyramiding, use current candle (0) for aggressive entry. 
-    // If Standard, use closed candle (1) for safety.
-    SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY, isPyramiding);
+    // Calculate signal strength using closed candle (index 1) for safety
+    SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY, false);
 
-    // Dynamic threshold based on context
-    double requiredScore = isPyramiding ? MinPyramidingBuySignalScore : MinBuySignalScore;
-
-    if (strength.finalScore >= requiredScore) 
+    if (strength.finalScore >= MinBuySignalScore) 
     {   
-        LogPrint("BUY SIGNAL RECEIVED (Score: ", strength.finalScore, "/", requiredScore, ")");
+        LogPrint("BUY SIGNAL RECEIVED (Score: ", strength.finalScore, "/", MinBuySignalScore, ")");
         LogPrint("Details: Body=", DoubleToString(strength.bodySignal, _Digits),
                  ", AvgBody=", DoubleToString(strength.avgBody, _Digits),
                  ", Ratio=", DoubleToString(strength.ratio, 2),
                  ", PenBody=", DoubleToString(strength.penaltyBody, 1),
                  ", PenWick=", DoubleToString(strength.penaltyWick, 1));
         LogPrint("Reasoning: ", strength.reasoning);
-        LogPrint("Context: ", isPyramiding ? "Pyramiding" : "Standard");
         LogPrint("Price: ", currentPrice);
 
         return strength.finalScore;
@@ -770,29 +752,22 @@ double BuySignal()
 double SellSignal()
 {
     double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    bool isPyramiding = false;
     
     // Check strict conditions (limits & distance) first
-    if(!CheckSellConditions(currentPrice, isPyramiding)) return 0;
+    if(!CheckSellConditions(currentPrice)) return 0;
 
-    // Only calculate heavyweight indicators if conditions allow
-    // If Pyramiding, use current candle (0) for aggressive entry. 
-    // If Standard, use closed candle (1) for safety.
-    SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL, isPyramiding);
+    // Calculate signal strength using closed candle (index 1) for safety
+    SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL, false);
 
-    // Dynamic threshold based on context
-    double requiredScore = isPyramiding ? MinPyramidingSellSignalScore : MinSellSignalScore;
-
-    if (strength.finalScore >= requiredScore)
+    if (strength.finalScore >= MinSellSignalScore)
     {
-        LogPrint("SELL SIGNAL RECEIVED (Score: ", strength.finalScore, "/", requiredScore, ")");
+        LogPrint("SELL SIGNAL RECEIVED (Score: ", strength.finalScore, "/", MinSellSignalScore, ")");
         LogPrint("Details: Body=", DoubleToString(strength.bodySignal, _Digits),
                  ", AvgBody=", DoubleToString(strength.avgBody, _Digits),
                  ", Ratio=", DoubleToString(strength.ratio, 2),
                  ", PenBody=", DoubleToString(strength.penaltyBody, 1),
                  ", PenWick=", DoubleToString(strength.penaltyWick, 1));
         LogPrint("Reasoning: ", strength.reasoning);
-        LogPrint("Context: ", isPyramiding ? "Pyramiding" : "Standard");
         LogPrint("Price: ", currentPrice);
 
         return strength.finalScore;
@@ -803,19 +778,13 @@ double SellSignal()
 
 // FAST duplicate buy filter - O(1) using globals
 // Returns true if conditions allow a trade.
-// Sets isPyramiding=true if we are adding to a position on the same candle.
-bool CheckBuyConditions(double price, bool &isPyramiding)
+bool CheckBuyConditions(double price)
 {
-    isPyramiding = false;
     datetime currBarTime = iTime(_Symbol, _Period, 0);
 
-    // Determine effective count
+    // Only 1 buy per candle
     int buysOnCandle = (currentBarTime == currBarTime) ? buysOnCurrentBar : 0;
-    
-    // Check Pyramiding Limits per Candle
-    int limit = EnablePyramiding ? MaxPositionsPerCandle : 1;
-    
-    if(buysOnCandle >= limit)
+    if(buysOnCandle >= 1)
     {
         return false;
     }
@@ -826,41 +795,16 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
         return false;
     }
 
+    // Check minimum distance from last buy (duplicate signal filter)
     ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_BUY);
-
-    // Check if we have a previous buy position
-    // Only consider it pyramiding if we actually have an open position (lastTicket > 0)
     if(lastBuyTime > 0 && lastTicket > 0)
     {
-        // Fast bar time calculation
-        datetime lastPosBarTime = (lastBuyTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+        double minDistance = ZonePoints * _Point * BuyDuplicateMultiplier;
+        double distance = MathAbs(price - lastBuyPrice);
         
-        // Only check distance if opened on SAME bar
-        if(lastPosBarTime == currentBarTime)
+        if(distance < minDistance)
         {
-            isPyramiding = true; // Adding within the same bar
-            
-            double minDistance = ZonePoints * _Point * BuyDuplicateMultiplier;
-            double distance = MathAbs(price - lastBuyPrice);
-            
-            if(distance < minDistance)
-            {
-                return false;
-            }
-            
-            // PEAK PROTECTION (Don't buy at top of huge candle)
-            double openCurrent = iOpen(_Symbol, _Period, 0);
-            double currentRun = price - openCurrent; // Points moved up from open
-            
-            // Efficient Average Range (ATR) Check - O(1)
-            double atrBuffer[1];
-            if(CopyBuffer(atrPyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
-            double avgRange = atrBuffer[0];
-            
-            if(avgRange > 0 && currentRun > (avgRange * PyramidingMaxCandleRatio))
-            {
-                return false;
-            }
+            return false;
         }
     }
     
@@ -869,19 +813,13 @@ bool CheckBuyConditions(double price, bool &isPyramiding)
 
 // FAST duplicate sell filter - O(1) using globals
 // Returns true if conditions allow a trade.
-// Sets isPyramiding=true if we are adding to a position on the same candle.
-bool CheckSellConditions(double price, bool &isPyramiding)
+bool CheckSellConditions(double price)
 {
-    isPyramiding = false;
     datetime currBarTime = iTime(_Symbol, _Period, 0);
     
-    // Determine effective count
+    // Only 1 sell per candle
     int sellsOnCandle = (currentBarTime == currBarTime) ? sellsOnCurrentBar : 0;
-    
-    // Check Pyramiding Limits per Candle
-    int limit = EnablePyramiding ? MaxPositionsPerCandle : 1;
-    
-    if(sellsOnCandle >= limit)
+    if(sellsOnCandle >= 1)
     {
         return false;
     }
@@ -892,41 +830,16 @@ bool CheckSellConditions(double price, bool &isPyramiding)
         return false;
     }
 
+    // Check minimum distance from last sell (duplicate signal filter)
     ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_SELL);
-
-    // Check if we have a previous sell position
-    // Only consider it pyramiding if we actually have an open position (lastTicket > 0)
     if(lastSellTime > 0 && lastTicket > 0)
     {
-        // Fast bar time calculation
-        datetime lastPosBarTime = (lastSellTime / PeriodSeconds(_Period)) * PeriodSeconds(_Period);
+        double minDistance = ZonePoints * _Point * SellDuplicateMultiplier;
+        double distance = MathAbs(price - lastSellPrice);
         
-        // Only check distance if opened on SAME bar
-        if(lastPosBarTime == currentBarTime)
+        if(distance < minDistance)
         {
-            isPyramiding = true; // Adding within the same bar
-            
-            double minDistance = ZonePoints * _Point * SellDuplicateMultiplier;
-            double distance = MathAbs(price - lastSellPrice);
-            
-            if(distance < minDistance)
-            {
-                return false;
-            }
-
-            // PEAK PROTECTION (Don't sell at bottom of huge candle)
-            double openCurrent = iOpen(_Symbol, _Period, 0);
-            double currentRun = openCurrent - price; // Points moved down from open
-            
-            // Efficient Average Range (ATR) Check - O(1)
-            double atrBuffer[1];
-            if(CopyBuffer(atrPyramidingHandle, 0, 1, 1, atrBuffer) < 1) return false;
-            double avgRange = atrBuffer[0];
-            
-            if(avgRange > 0 && currentRun > (avgRange * PyramidingMaxCandleRatio))
-            {
-                return false;
-            }
+            return false;
         }
     }
     
@@ -3422,17 +3335,11 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_SigHead", "SIGNAL STRENGTH:", startX, currentY, headersize, colorHeader, true);
     currentY += lineHeight;
 
-    // Draw Minimum Requirements
-    double buyReq = MinBuySignalScore;
-    double sellReq = MinSellSignalScore;
-    double buyPyrReq = MinPyramidingBuySignalScore;
-    double sellPyrReq = MinPyramidingSellSignalScore;
-
-    string reqBuyText = StringFormat("Min Buy: %.2f (Pyr: %.2f)", buyReq, buyPyrReq);
+    string reqBuyText = StringFormat("Min Buy: %.2f", MinBuySignalScore);
     DrawDashboardLabel("NyaoDash_ReqBuy", reqBuyText, startX, currentY, detailsSize, colorText);
     currentY += lineHeight;
 
-    string reqSellText = StringFormat("Min Sell: %.2f (Pyr: %.2f)", sellReq, sellPyrReq);
+    string reqSellText = StringFormat("Min Sell: %.2f", MinSellSignalScore);
     DrawDashboardLabel("NyaoDash_ReqSell", reqSellText, startX, currentY, detailsSize, colorText);
     currentY += lineHeight;
 

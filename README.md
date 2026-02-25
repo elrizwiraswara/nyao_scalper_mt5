@@ -6,7 +6,7 @@
 
 Nyao Scalper is a sophisticated automated trading system designed for scalping on lower timeframes (M1, M5). Unlike simple indicator-crossing bots, it uses a **Composite Signal Strength Engine** that aggregates data from multiple technical factors (Trend, Momentum, Volatility, Price Action) into a single confidence score (0.0 - 10.0).
 
-It features advanced position management, including smart pyramiding, adaptive trailing stops, and dynamic lot sizing based on equity performance and signal quality.
+It features advanced position management, adaptive trailing stops, and dynamic lot sizing based on equity performance and signal quality.
 
 ## Key Features
 
@@ -33,7 +33,7 @@ The EA calculates a "Signal Score" for every tick based on:
 
 ### Dynamic Position Management
 
-- **Smart Pyramiding**: Adds positions to winning trades or recovery trades, restricted by "Max Positions Per Candle" and "Zone Points" to prevent over-stacking.
+- **Duplicate Signal Filter**: Uses "Zone Points" and minimum distance multipliers to prevent over-stacking positions.
 - **Adaptive Trailing**:
   - Standard trailing stop logic.
   - **Signal-Based Adaptation**: Tightens or loosens TP/SL based on real-time changes in the Signal Score.
