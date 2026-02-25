@@ -1,16 +1,16 @@
-# Nyao Scalper v32.0
+# Nyao Scalper v36.0
 
-**Advanced Indicator-Based Signal Strength EA for MetaTrader 5**
+**Indicator-Based Signal Strength EA for MetaTrader 5**
 
 > **Disclaimer:** This Expert Advisor is an experimental project for educational purposes. Trading Forex/CFDs involves significant risk. Past performance is not indicative of future results. Use at your own risk.
 
-Nyao Scalper is a sophisticated automated trading system designed for scalping on lower timeframes (M1, M5). Unlike simple indicator-crossing bots, it uses a **Composite Signal Strength Engine** that aggregates data from multiple technical factors (Trend, Momentum, Volatility, Price Action) into a single confidence score (0.0 - 10.0).
+Nyao Scalper is an automated trading EA designed for scalping on lower timeframes (M1, M5). It uses a **weighted signal scoring system** that aggregates data from multiple technical factors (Trend, Momentum, Volatility, Price Action) into a single confidence score (0.0 - 10.0).
 
-It features advanced position management, adaptive trailing stops, and dynamic lot sizing based on equity performance and signal quality.
+It includes position management, adaptive trailing stops, and lot sizing based on equity performance and signal quality.
 
 ## Key Features
 
-### Composite Signal Engine
+### Signal Scoring
 
 The EA calculates a "Signal Score" for every tick based on:
 
@@ -31,24 +31,28 @@ The EA calculates a "Signal Score" for every tick based on:
 - **Trading Hours**: Configurable start and end times to avoid low-liquidity sessions.
 - **Leverage Guard**: Pauses trading if account leverage changes unexpectedly.
 
-### Dynamic Position Management
+### Position Management
 
 - **Duplicate Signal Filter**: Uses "Zone Points" and minimum distance multipliers to prevent over-stacking positions.
 - **Adaptive Trailing**:
   - Standard trailing stop logic.
   - **Signal-Based Adaptation**: Tightens or loosens TP/SL based on real-time changes in the Signal Score.
-- **Loss Management**: Automatically closes losing positions if the current Signal Score drops significantly below the entry score (Signal Decay).
+- **Loss Management**:
+  - **Scaled Partial Close**: Gradually reduces position volume as signal decays (75% → close 25%, 50% → close 50%, 25% → full exit).
+  - **Dynamic SL Tightening**: Pulls stop-loss closer proportionally as position health weakens below a threshold.
+  - **Break-Even Lock**: Moves SL to entry price once profit exceeds spread cost, protecting gains.
+  - **Virtual SL + Re-entry**: Closes losing positions at the health threshold, then immediately re-enters at the current (better) price if the signal is still valid.
 
-### Dynamic Lot Sizing
+### Lot Sizing
 
-- **Recovery Mode**: Increases lot size incrementally after equity drops to facilitate faster recovery.
+- **Recovery Mode**: Increases lot size incrementally after equity drops for faster recovery.
 - **Confidence Mode**: Increases lot size for high-confidence signals (e.g., Score > 9.0).
 - **Velocity Boost**: Slightly increases position size if signal velocity (momentum) is accelerating.
 
 ### Dashboard & Alerts
 
 - **On-Chart Dashboard**: Real-time display of Signal Scores, Equity, Drawdown, and Statistics.
-- **Discord Integration**: Sends rich alerts to Discord via Webhook for:
+- **Discord Integration**: Sends alerts to Discord via Webhook for:
   - Trade Open/Close
   - Equity Milestones
   - News Events
@@ -56,29 +60,36 @@ The EA calculates a "Signal Score" for every tick based on:
 
 ## Strategy Logic
 
-The core strategy uses an **Additive Weighted Scoring System** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 6.0).
+The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 6.0).
 
 **Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
 
 The score is calculated by summing up weights from specialized components:
 
 1.  **Trend Score (Max 3.0)**:
-    - **Alignment (+1.5)**: Fast EMA > Slow EMA (Buy).
-    - **Slope (+1.5)**: Fast EMA is rising (Buy).
+    - **Alignment (+1.5)**: Fast EMA > Slow EMA (Buy) or Fast EMA < Slow EMA (Sell).
+    - **Slope (+1.5)**: Fast EMA is rising (Buy) or falling (Sell).
 
 2.  **Momentum Score (Max 3.0)**:
     - **RSI Sweet Spot (+1.0)**: RSI between 50-80 (Buy) or 20-50 (Sell).
-    - **RSI Breakout (+0.5)**: RSI crosses key levels (60 for Buy, 40 for Sell).
-    - **Body Momentum (+1.5)**: Current candle body is larger than recent average.
-    - **Impulse Boost**: Momentum score is amplified if multiple consecutive candles move in the same direction.
+    - **RSI Breakout (+0.5)**: RSI crossing key levels (60 for Buy, 40 for Sell).
+    - **Body Momentum (+1.5)**: Current candle body is larger than the recent average.
+    - **Impulse Boost**: Momentum score is multiplied by `(1 + ImpulseStrength)` where impulse combines:
+      - Body acceleration (current vs. average body size)
+      - Range expansion (current vs. average candle range)
+      - Directional continuity (consecutive same-direction candles)
 
 3.  **Volatility & Structure (Max 4.0)**:
-    - **Chop Filter (+2.0)**: High ATR ratio indicates potential trend vs. chop.
-    - **Volatility (+1.0)**: Expanding volatility adds to the score.
-    - **Breakout (+1.0)**: Price breaking above local interactions (recent highs/lows).
+    - **Chop Filter (Max 2.0)**: ATR ratio classifies trend strength vs. chop risk.
+    - **Volatility (Max 1.0)**: Expanding volatility (ATR ratio > 1.2) adds to the score.
+    - **Peak Breakout (+1.0)**: Price breaking above/below local extremes (recent 5-bar high/low).
 
 4.  **Penalties (Deductions)**:
-    - **Wick Rejection**: Long opposing wicks reduce the final score (e.g., long upper wick on a Buy signal).
+    - **Wick Rejection**: Long opposing wicks (e.g., long upper wick on a Buy signal) reduce the final score by the wick-to-body ratio.
+
+5.  **Velocity Tracking**:
+    - Tracks the _change_ in signal score between bars to detect strengthening or weakening moves.
+    - Used for adaptive trailing stop adjustments and dynamic lot sizing.
 
 **Entry Condition**: `Total Score` >= `MinSignalScore`
 
