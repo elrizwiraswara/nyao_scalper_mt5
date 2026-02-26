@@ -56,7 +56,6 @@ input int ATRAvgLookback = 20;                            // ATR Average Lookbac
 input int ImpulseLookback = 4;                            // Impulse Lookback
 input double ImpulseBoostWeight = 1.0;                    // Impulse Boost Weight
 input double VelocityWindow = 2.0;                        // Velocity Window (Score Delta)
-input double VelocitySizeWeight = 1.0;                    // Velocity Weight for Position Sizing
 input int RSIOverbought = 80;                             // RSI Overbought Level (Max Buy)
 input int RSIOversold = 20;                               // RSI Oversold Level (Min Sell)
 input int RSIMomentumBuy = 60;                            // RSI Momentum Buy Trigger
@@ -126,10 +125,10 @@ input double ReentryMinSignalPct = 0.75;                  // Min % of Entry Sign
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
-input double EquityDropPercent = 10.0;                    // Equity Drop % per Lot Step
+input double EquityDropPercent = 5.0;                     // Equity Drop % per Lot Step
+input double MinSignalStrengthForLot = 8.0;               // Min Signal Score for Lot Increase
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
 input double MaxLotSize = 0.05;                           // Max Lot Size
-input double MinSignalStrengthForLot = 10.0;              // Min Signal Score for Lot Increase
 
 input group "🏦 Equity Settings"
 input double MinEquityPercent = 70.0;                     // Min Equity % from Peak - Pause Trading when Reached
@@ -229,10 +228,10 @@ int totalPauseCount = 0;                                  // Total number of tim
 double totalPauseDurationMinutes = 0;                     // Total duration of pauses in minutes
 
 
-int emaFastHandle = INVALID_HANDLE;                      // Handle for Fast EMA
-int emaSlowHandle = INVALID_HANDLE;                      // Handle for Slow EMA
-int rsiHandle = INVALID_HANDLE;                          // Handle for RSI
-int atrSignalHandle = INVALID_HANDLE;                    // Handle for Signal ATR
+int emaFastHandle = INVALID_HANDLE;                       // Handle for Fast EMA
+int emaSlowHandle = INVALID_HANDLE;                       // Handle for Slow EMA
+int rsiHandle = INVALID_HANDLE;                           // Handle for RSI
+int atrSignalHandle = INVALID_HANDLE;                     // Handle for Signal ATR
 
 // Signal Strength Structure - Indicator-Based Scoring System
 // Weights are adjustable via Score Weight Settings inputs
@@ -2376,14 +2375,9 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     MqlTradeRequest request = {};
     MqlTradeResult result = {};
     
-    // Fetch velocity boost for final lot calculation
-    double velocityBoost = 0;
-    if (orderType == ORDER_TYPE_BUY) velocityBoost = lastBuyNormalizedVelocity;
-    else velocityBoost = lastSellNormalizedVelocity;
-    
-    // Calculate final lot size with both signal score and velocity boost
+    // Calculate lot size based on equity drop recovery
     // This must be done BEFORE SL/TP conversion so dollar-based values are accurate
-    double currentLot = CalculateDynamicLotSize(signalScore, velocityBoost);
+    double currentLot = CalculateDynamicLotSize(signalScore);
     
     double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -2777,13 +2771,11 @@ int CountOpenOrdersByType(ENUM_POSITION_TYPE posType)
 // +------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| Calculate Dynamic Lot Size - Equity Drop & Signal Strength Based |
-//| Lot increases based on:                                          |
-//|   1. Equity drop from peak (EquityDropPercent per step)          |
-//|   2. Strong signal strength (MinSignalStrengthForLot threshold)  |
-//|   3. Velocity Boost                                              |
+//| Calculate Dynamic Lot Size - Equity Drop Recovery Based           |
+//| Lot increases based on equity drop from peak to recover losses    |
+//| Only applies when signal score meets MinSignalStrengthForLot      |
 //+------------------------------------------------------------------+
-double CalculateDynamicLotSize(double signalScore = 0, double normalizedVelocity = 0)
+double CalculateDynamicLotSize(double signalScore = 0)
 {
     if(!EnableDynamicLots) return BaseLotSize;
     
@@ -2799,8 +2791,9 @@ double CalculateDynamicLotSize(double signalScore = 0, double normalizedVelocity
     }
     
     // Each EquityDropPercent step adds LotStepSize
+    // Only increase lot if signal score validates the entry
     int equitySteps = 0;
-    if(equityDropPercent > 0 && EquityDropPercent > 0)
+    if(equityDropPercent > 0 && EquityDropPercent > 0 && signalScore >= MinSignalStrengthForLot)
     {
         equitySteps = (int)(equityDropPercent / EquityDropPercent);
     }
@@ -2808,29 +2801,9 @@ double CalculateDynamicLotSize(double signalScore = 0, double normalizedVelocity
     double equityLotIncrease = equitySteps * LotStepSize;
     currentLot += equityLotIncrease;
     
-    // 2. SIGNAL STRENGTH-BASED LOT INCREASE
-    // If signal score is above threshold, add extra lot steps
-    double signalLotIncrease = 0;
-    if(signalScore >= MinSignalStrengthForLot)
-    {
-        // For every 2 points above threshold, add one lot step
-        double signalSteps = (signalScore - MinSignalStrengthForLot) / 2;
-        signalLotIncrease = signalSteps * LotStepSize;
-        currentLot += signalLotIncrease;
-    }
-    
     // APPLY LIMITS
     // Apply user-defined limits
     if(currentLot < BaseLotSize) currentLot = BaseLotSize;
-    if(currentLot > MaxLotSize) currentLot = MaxLotSize;
-
-    // 3. VELOCITY BOOST 
-    // lotSizeMultiplier *= velocityBoost
-    // velocityBoost = 1 + normalizedVelocity * VelocitySizeWeight
-    double velocityBoost = 1.0 + (normalizedVelocity * VelocitySizeWeight);
-    currentLot *= velocityBoost;
-    
-    // Clamp to Max Lot Size
     if(currentLot > MaxLotSize) currentLot = MaxLotSize;
     
     // Round to 2 decimal places (standard lot step)
