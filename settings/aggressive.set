@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Scalper v36.0 - AGGRESSIVE PROFILE
+; Nyao Scalper v37.0 - AGGRESSIVE PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Optimized for XAUUSD M1-M5
@@ -17,7 +17,6 @@ ATRAvgLookback=15
 ImpulseLookback=3
 ImpulseBoostWeight=1.5
 VelocityWindow=2.5
-VelocitySizeWeight=1.5
 RSIOverbought=85
 RSIOversold=15
 RSIMomentumBuy=55
@@ -41,6 +40,7 @@ EnableBuyOrders=true
 EnableSellOrders=true
 BaseLotSize=0.03
 MaxOpenOrders=12
+MaxTradesPerCandle=0
 ZonePoints=400.0
 BuyDuplicateMultiplier=1.0
 SellDuplicateMultiplier=1.0
@@ -49,6 +49,13 @@ ProfitThresholdMultiplier=2.0
 LossThresholdMultiplier=2.5
 MinBuySignalScore=5.0
 MinSellSignalScore=5.0
+; 🛡️ Signal Dampening Settings
+EnableSignalDampening=true
+MaxLosingPositionsSameDir=3
+LosingPosScorePenalty=1.0
+DrawdownThresholdPct=5.0
+DrawdownScoreBoost=1.5
+ConsecutiveLossCooldownBars=20
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
 MaxHoldingLossPositions=5
@@ -76,9 +83,9 @@ ReentryMinSignalPct=0.60
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
 EquityDropPercent=5.0
+MinSignalStrengthForLot=8.0
 LotStepSize=0.02
 MaxLotSize=0.10
-MinSignalStrengthForLot=8.0
 ; 🏦 Equity Settings
 MinEquityPercent=50.0
 MaxDrawdownFromPeak=0.0
