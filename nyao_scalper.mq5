@@ -623,6 +623,7 @@ void OnTick()
         CloseAllPositions();
         DisableAlgoTrading();
         LogPrint("[STOPPED] Trading stopped.");
+        UpdateDashboard();
         return;
     }
 
@@ -662,7 +663,8 @@ void OnTick()
     {   
         // Don't open new positions, but continue managing existing ones
         ManagePositions();
-        LogPrint("[PAUSED] Trading paused.");
+        // LogPrint("[PAUSED] Trading paused."); // Prevent LogPrint spam on every tick
+        UpdateDashboard();
         return;
     }
     
@@ -680,7 +682,8 @@ void OnTick()
         {
             // Don't open new positions, but continue managing existing ones
             ManagePositions();
-            LogPrint("[PAUSED] Paused. Time remaining: ", (pauseDurationSeconds - elapsedSeconds) / 60, " minute(s)");
+            // LogPrint("[PAUSED] Paused. Time remaining: ", (pauseDurationSeconds - elapsedSeconds) / 60, " minute(s)"); // Prevent LogPrint spam on every tick
+            UpdateDashboard();
             return;  // EXIT - prevent all new orders while paused
         }
         else
