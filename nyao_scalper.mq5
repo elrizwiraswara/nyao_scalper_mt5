@@ -91,6 +91,14 @@ input double LossThresholdMultiplier = 2.0;               // Threshold Multiplie
 input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
 input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
+input group "🛡️ Signal Dampening Settings"
+input bool EnableSignalDampening = true;                 // Enable Position-Aware Signal Dampening
+input int MaxLosingPositionsSameDir = 2;                // Max Losing Positions in Same Direction Before Block
+input double LosingPosScorePenalty = 1.5;                  // Score Penalty Per Losing Same-Direction Position
+input double DrawdownThresholdPct = 3.0;                   // Equity Drawdown % to Raise Signal Threshold
+input double DrawdownScoreBoost = 2.0;                     // Extra Score Required During Drawdown
+input int ConsecutiveLossCooldownBars = 3;              // Cooldown Bars After 3+ Consecutive Losses
+
 input group "🩺 Loss Management Settings"
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
 input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold
@@ -287,6 +295,10 @@ int sellPositionCount = 0;
 datetime currentBarTime = 0;
 int buysOnCurrentBar = 0;
 int sellsOnCurrentBar = 0;
+
+// Signal Dampening Globals
+int consecutiveLossCount = 0;                             // Track consecutive closing losses
+datetime cooldownUntilBarTime = 0;                        // Bar time after which cooldown expires
 
 // Last Position Tracking (for O(1) duplicate checks)
 datetime lastBuyTime = 0;
@@ -767,6 +779,64 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 }
 
 // +------------------------------------------------------------------+
+// | Position Loss State - Aggregate loss metrics for a direction      |
+// +------------------------------------------------------------------+
+struct PositionLossState
+{
+    int   losingCount;                                    // Number of losing positions in this direction
+    int   totalCount;                                     // Total positions in this direction
+    double totalUnrealizedLoss;                           // Sum of unrealized losses (negative = loss)
+    double worstLossPct;                                  // Worst single position loss as % of entry
+};
+
+// +------------------------------------------------------------------+
+// | Get Open Position Loss State for a Direction                      |
+// | Scans all open managed positions and returns aggregate loss info  |
+// +------------------------------------------------------------------+
+PositionLossState GetOpenPositionLossState(ENUM_POSITION_TYPE direction)
+{
+    PositionLossState state;
+    state.losingCount = 0;
+    state.totalCount = 0;
+    state.totalUnrealizedLoss = 0;
+    state.worstLossPct = 0;
+    
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+        if(!PositionSelectByTicket(ticket)) continue;
+        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+        
+        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        if(posType != direction) continue;
+        
+        state.totalCount++;
+        double profit = PositionGetDouble(POSITION_PROFIT);
+        
+        if(profit < 0)
+        {
+            state.losingCount++;
+            state.totalUnrealizedLoss += profit; // Accumulate negative value
+            
+            // Calculate loss as % of entry for worst-case tracking
+            double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+            double volume = PositionGetDouble(POSITION_VOLUME);
+            double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+            if(entryPrice > 0 && volume > 0 && contractSize > 0)
+            {
+                double lossPct = MathAbs(profit) / (entryPrice * volume * contractSize) * 100.0;
+                if(lossPct > state.worstLossPct)
+                    state.worstLossPct = lossPct;
+            }
+        }
+    }
+    
+    return state;
+}
+
+// +------------------------------------------------------------------+
 // | Check For Trading Signals                                        |
 // +------------------------------------------------------------------+
 void CheckForTradingSignal()
@@ -799,9 +869,45 @@ double BuySignal()
     // Calculate signal strength using closed candle (index 1) for safety
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY, false);
 
-    if (strength.finalScore >= MinBuySignalScore) 
+    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
+    double adjustedScore = strength.finalScore;
+    double adjustedThreshold = MinBuySignalScore;
+
+    if(EnableSignalDampening)
+    {
+        // A. Score Penalty: reduce score based on losing same-direction positions
+        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_BUY);
+        if(lossState.losingCount > 0)
+        {
+            double penalty = lossState.losingCount * LosingPosScorePenalty;
+            adjustedScore -= penalty;
+            LogPrint("[DAMPENED] Buy score reduced by ", DoubleToString(penalty, 1), 
+                     " (", lossState.losingCount, " losing buys). Raw: ", 
+                     DoubleToString(strength.finalScore, 1), " -> Adjusted: ", 
+                     DoubleToString(adjustedScore, 1));
+        }
+        
+        // B. Drawdown Gate: raise threshold when account in drawdown
+        if(peakEquity > 0)
+        {
+            double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+            double drawdownPct = ((peakEquity - currentEquity) / peakEquity) * 100.0;
+            
+            if(drawdownPct >= DrawdownThresholdPct)
+            {
+                adjustedThreshold += DrawdownScoreBoost;
+                LogPrint("[DRAWDOWN GATE] Equity drawdown ", DoubleToString(drawdownPct, 1), 
+                         "% >= ", DoubleToString(DrawdownThresholdPct, 1), 
+                         "%. Buy threshold raised to ", DoubleToString(adjustedThreshold, 1));
+            }
+        }
+    }
+
+    if (adjustedScore >= adjustedThreshold) 
     {   
-        LogPrint("BUY SIGNAL RECEIVED (Score: ", strength.finalScore, "/", MinBuySignalScore, ")");
+        LogPrint("BUY SIGNAL RECEIVED (Score: ", DoubleToString(strength.finalScore, 1), 
+                 " | Adjusted: ", DoubleToString(adjustedScore, 1), 
+                 " / Threshold: ", DoubleToString(adjustedThreshold, 1), ")");
         LogPrint("Details: Body=", DoubleToString(strength.bodySignal, _Digits),
                  ", AvgBody=", DoubleToString(strength.avgBody, _Digits),
                  ", Ratio=", DoubleToString(strength.ratio, 2),
@@ -810,7 +916,7 @@ double BuySignal()
         LogPrint("Reasoning: ", strength.reasoning);
         LogPrint("Price: ", currentPrice);
 
-        return strength.finalScore;
+        return adjustedScore;
     }
     
     return 0;
@@ -827,9 +933,45 @@ double SellSignal()
     // Calculate signal strength using closed candle (index 1) for safety
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL, false);
 
-    if (strength.finalScore >= MinSellSignalScore)
+    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
+    double adjustedScore = strength.finalScore;
+    double adjustedThreshold = MinSellSignalScore;
+
+    if(EnableSignalDampening)
     {
-        LogPrint("SELL SIGNAL RECEIVED (Score: ", strength.finalScore, "/", MinSellSignalScore, ")");
+        // A. Score Penalty: reduce score based on losing same-direction positions
+        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_SELL);
+        if(lossState.losingCount > 0)
+        {
+            double penalty = lossState.losingCount * LosingPosScorePenalty;
+            adjustedScore -= penalty;
+            LogPrint("[DAMPENED] Sell score reduced by ", DoubleToString(penalty, 1), 
+                     " (", lossState.losingCount, " losing sells). Raw: ", 
+                     DoubleToString(strength.finalScore, 1), " -> Adjusted: ", 
+                     DoubleToString(adjustedScore, 1));
+        }
+        
+        // B. Drawdown Gate: raise threshold when account in drawdown
+        if(peakEquity > 0)
+        {
+            double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+            double drawdownPct = ((peakEquity - currentEquity) / peakEquity) * 100.0;
+            
+            if(drawdownPct >= DrawdownThresholdPct)
+            {
+                adjustedThreshold += DrawdownScoreBoost;
+                LogPrint("[DRAWDOWN GATE] Equity drawdown ", DoubleToString(drawdownPct, 1), 
+                         "% >= ", DoubleToString(DrawdownThresholdPct, 1), 
+                         "%. Sell threshold raised to ", DoubleToString(adjustedThreshold, 1));
+            }
+        }
+    }
+
+    if (adjustedScore >= adjustedThreshold)
+    {
+        LogPrint("SELL SIGNAL RECEIVED (Score: ", DoubleToString(strength.finalScore, 1), 
+                 " | Adjusted: ", DoubleToString(adjustedScore, 1), 
+                 " / Threshold: ", DoubleToString(adjustedThreshold, 1), ")");
         LogPrint("Details: Body=", DoubleToString(strength.bodySignal, _Digits),
                  ", AvgBody=", DoubleToString(strength.avgBody, _Digits),
                  ", Ratio=", DoubleToString(strength.ratio, 2),
@@ -838,7 +980,7 @@ double SellSignal()
         LogPrint("Reasoning: ", strength.reasoning);
         LogPrint("Price: ", currentPrice);
 
-        return strength.finalScore;
+        return adjustedScore;
     }
     
     return 0;
@@ -861,6 +1003,33 @@ bool CheckBuyConditions(double price)
     if(sellsOnCurrentBar > 0)
     {
         return false;
+    }
+
+    // SIGNAL DAMPENING: Hard block when too many losing buys are open
+    if(EnableSignalDampening)
+    {
+        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_BUY);
+        if(lossState.losingCount >= MaxLosingPositionsSameDir)
+        {
+            LogPrint("[DAMPENED] Buy BLOCKED: ", lossState.losingCount, 
+                     " losing buys >= max ", MaxLosingPositionsSameDir);
+            return false;
+        }
+    }
+
+    // SIGNAL DAMPENING: Cooldown after consecutive losses
+    if(EnableSignalDampening && cooldownUntilBarTime > 0)
+    {
+        if(currBarTime < cooldownUntilBarTime)
+        {
+            LogPrint("[COOLDOWN] Buy BLOCKED: cooldown active until ", 
+                     TimeToString(cooldownUntilBarTime));
+            return false;
+        }
+        else
+        {
+            cooldownUntilBarTime = 0; // Cooldown expired
+        }
     }
 
     // Check minimum distance from last buy (duplicate signal filter)
@@ -896,6 +1065,34 @@ bool CheckSellConditions(double price)
     if(buysOnCurrentBar > 0)
     {
         return false;
+    }
+
+    // SIGNAL DAMPENING: Hard block when too many losing sells are open
+    if(EnableSignalDampening)
+    {
+        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_SELL);
+        if(lossState.losingCount >= MaxLosingPositionsSameDir)
+        {
+            LogPrint("[DAMPENED] Sell BLOCKED: ", lossState.losingCount, 
+                     " losing sells >= max ", MaxLosingPositionsSameDir);
+            return false;
+        }
+    }
+
+    // SIGNAL DAMPENING: Cooldown after consecutive losses
+    if(EnableSignalDampening && cooldownUntilBarTime > 0)
+    {
+        datetime currBarTimeSell = iTime(_Symbol, _Period, 0);
+        if(currBarTimeSell < cooldownUntilBarTime)
+        {
+            LogPrint("[COOLDOWN] Sell BLOCKED: cooldown active until ", 
+                     TimeToString(cooldownUntilBarTime));
+            return false;
+        }
+        else
+        {
+            cooldownUntilBarTime = 0; // Cooldown expired
+        }
     }
 
     // Check minimum distance from last sell (duplicate signal filter)
@@ -2049,13 +2246,82 @@ void RemoveManagedPosition(ulong ticket)
 
 // Sync Managed Positions with Broker
 // Removes closed positions from managed array
+// Also tracks consecutive losses for cooldown system
 void SyncManagedPositions()
 {
     for(int i = managedPositionCount - 1; i >= 0; i--)
     {
         if(!PositionSelectByTicket(managedPositions[i].ticket))
         {
-            RemoveManagedPosition(managedPositions[i].ticket);
+            ulong closedTicket = managedPositions[i].ticket;
+            
+            // SIGNAL DAMPENING: Track consecutive losses for cooldown
+            if(EnableSignalDampening)
+            {
+                // Query deal history to find the closing profit of this position
+                double closedProfit = 0;
+                bool foundDeal = false;
+                
+                // Select history for recent period (last 24 hours should be sufficient)
+                datetime fromTime = TimeCurrent() - 86400;
+                datetime toTime = TimeCurrent();
+                
+                if(HistorySelect(fromTime, toTime))
+                {
+                    int totalDeals = HistoryDealsTotal();
+                    for(int d = totalDeals - 1; d >= 0; d--)
+                    {
+                        ulong dealTicket = HistoryDealGetTicket(d);
+                        if(dealTicket == 0) continue;
+                        
+                        // Match deal to our position
+                        ulong dealPosition = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+                        long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+                        long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+                        
+                        if(dealPosition == closedTicket && dealEntry == DEAL_ENTRY_OUT && dealMagic == MagicNumber)
+                        {
+                            closedProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT) 
+                                         + HistoryDealGetDouble(dealTicket, DEAL_SWAP)
+                                         + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+                            foundDeal = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if(foundDeal)
+                {
+                    if(closedProfit < 0)
+                    {
+                        consecutiveLossCount++;
+                        LogPrint("[LOSS TRACKER] Position ", closedTicket, " closed at loss: $", 
+                                 DoubleToString(closedProfit, 2), 
+                                 ". Consecutive losses: ", consecutiveLossCount);
+                        
+                        // Activate cooldown after 3+ consecutive losses
+                        if(consecutiveLossCount >= 3)
+                        {
+                            datetime currBar = iTime(_Symbol, _Period, 0);
+                            cooldownUntilBarTime = currBar + ConsecutiveLossCooldownBars * PeriodSeconds(_Period);
+                            LogPrint("[COOLDOWN ACTIVATED] ", consecutiveLossCount, 
+                                     " consecutive losses. No new entries until bar: ", 
+                                     TimeToString(cooldownUntilBarTime));
+                        }
+                    }
+                    else
+                    {
+                        if(consecutiveLossCount > 0)
+                        {
+                            LogPrint("[LOSS TRACKER] Win streak started. Reset from ", 
+                                     consecutiveLossCount, " consecutive losses.");
+                        }
+                        consecutiveLossCount = 0; // Reset on any win
+                    }
+                }
+            }
+            
+            RemoveManagedPosition(closedTicket);
         }
     }
 }
