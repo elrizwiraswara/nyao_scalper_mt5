@@ -81,6 +81,7 @@ input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
 input int MaxOpenOrders = 8;                              // Max Consecutive Open Orders
+input int MaxTradesPerCandle = 1;                         // Max Trades Per Candle (0 = Unlimited)
 input double ZonePoints = 500;                            // Zone Points to Avoid Duplicate Signals
 input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
@@ -990,11 +991,14 @@ bool CheckBuyConditions(double price)
 {
     datetime currBarTime = iTime(_Symbol, _Period, 0);
 
-    // Only 1 buy per candle
-    int buysOnCandle = (currentBarTime == currBarTime) ? buysOnCurrentBar : 0;
-    if(buysOnCandle >= 1)
+    // Per-candle trade limit
+    if(MaxTradesPerCandle > 0)
     {
-        return false;
+        int buysOnCandle = (currentBarTime == currBarTime) ? buysOnCurrentBar : 0;
+        if(buysOnCandle >= MaxTradesPerCandle)
+        {
+            return false;
+        }
     }
     
     // Prevent opposite direction trades on the same candle
@@ -1051,11 +1055,14 @@ bool CheckSellConditions(double price)
 {
     datetime currBarTime = iTime(_Symbol, _Period, 0);
     
-    // Only 1 sell per candle
-    int sellsOnCandle = (currentBarTime == currBarTime) ? sellsOnCurrentBar : 0;
-    if(sellsOnCandle >= 1)
+    // Per-candle trade limit
+    if(MaxTradesPerCandle > 0)
     {
-        return false;
+        int sellsOnCandle = (currentBarTime == currBarTime) ? sellsOnCurrentBar : 0;
+        if(sellsOnCandle >= MaxTradesPerCandle)
+        {
+            return false;
+        }
     }
 
     // Prevent opposite direction trades on the same candle
