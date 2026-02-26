@@ -212,7 +212,7 @@ bool isOrderSendLocked = false;                           // Flag for locking Or
 bool marketCloseAlertSent = false;                        // Flag for near market close time
 bool algoTradingStatus = false;                           // Flag for algo trading status
 
-// Normalized Health Weights (computed in InitializeEA)
+// Normalized Health Weights
 double normHealthTrendWeight = 0;
 double normHealthRSIWeight = 0;
 double normHealthATRWeight = 0;
@@ -299,7 +299,7 @@ int sellsOnCurrentBar = 0;
 int consecutiveLossCount = 0;                             // Track consecutive closing losses
 datetime cooldownUntilBarTime = 0;                        // Bar time after which cooldown expires
 
-// Last Position Tracking (for O(1) duplicate checks)
+// Last Position Tracking
 datetime lastBuyTime = 0;
 double lastBuyPrice = 0;
 datetime lastSellTime = 0;
@@ -985,8 +985,7 @@ double SellSignal()
     return 0;
 }
 
-// FAST duplicate buy filter - O(1) using globals
-// Returns true if conditions allow a trade.
+// Duplicate Buy Filter
 bool CheckBuyConditions(double price)
 {
     datetime currBarTime = iTime(_Symbol, _Period, 0);
@@ -1047,8 +1046,7 @@ bool CheckBuyConditions(double price)
     return true;
 }
 
-// FAST duplicate sell filter - O(1) using globals
-// Returns true if conditions allow a trade.
+// Duplicate Sell Filter
 bool CheckSellConditions(double price)
 {
     datetime currBarTime = iTime(_Symbol, _Period, 0);
@@ -2782,7 +2780,6 @@ double CalculateDynamicLotSize(double signalScore = 0)
     double currentLot = BaseLotSize;
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     
-    // 1. EQUITY DROP-BASED LOT INCREASE
     // Calculate equity drop from peak as percentage
     double equityDropPercent = 0;
     if(peakEquity > 0)
@@ -2876,7 +2873,7 @@ double CalculateDynamicLotSize(double signalScore = 0)
     
     LogPrint("Dynamic Lot Calculation: Base=", BaseLotSize, 
              " | Equity Drop Steps=", equitySteps, " (+", equityLotIncrease, ")",
-             " | Signal Steps=", (signalScore >= MinSignalStrengthForLot ? (signalScore - MinSignalStrengthForLot) / 2 : 0), " (+", signalLotIncrease, ")",
+             " | Signal Steps=", (signalScore >= MinSignalStrengthForLot ? (signalScore - MinSignalStrengthForLot) / 2 : 0),
              " | Final Lot=", currentLot);
     
     return currentLot;
