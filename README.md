@@ -1,4 +1,4 @@
-# Nyao Scalper v36.0
+# Nyao Scalper v39.0
 
 **Indicator-Based Signal Strength EA for MetaTrader 5**
 
@@ -20,6 +20,7 @@ The EA calculates a "Signal Score" for every tick based on:
 - **Volatility**: ATR-based analysis to detect chopping vs. trending markets.
 - **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
 - **Velocity**: Tracks the _change_ in signal score to detect strengthening or weakening moves.
+- **blended weighted average signal smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
 
 ### Risk & Equity Management
 
@@ -90,6 +91,12 @@ The score is calculated by summing up weights from specialized components:
 5.  **Velocity Tracking**:
     - Tracks the _change_ in signal score between bars to detect strengthening or weakening moves.
     - Used for adaptive trailing stop adjustments and dynamic lot sizing.
+
+6.  **Signal Smoothing (Blended Weighted Average)**:
+    - Combines weighted average of recent closed candles with a dampened current candle contribution.
+    - **SignalSmoothingCandles**: Number of closed candles to average (1-10, default per profile).
+    - **CurrentCandleBlend**: Weight factor for the forming candle (0.0-1.0, where 0.0 = closed candles only, 1.0 = current candle only).
+    - Results in smooth yet responsive signal scoring that adapts to market conditions.
 
 **Entry Condition**: `Total Score` >= `MinSignalScore`
 
