@@ -82,6 +82,8 @@ input bool EnableSellOrders = true;                       // Enable Sell Orders
 input double BaseLotSize = 0.01;                          // Base Lot Size
 input int MaxOpenOrders = 8;                              // Max Consecutive Open Orders
 input int MaxTradesPerCandle = 1;                         // Max Trades Per Candle (0 = Unlimited)
+input double ConsecutiveCandleThresholdBoost = 1.0;       // Signal Threshold Boost Per Consecutive Trading Candle
+input int MaxConsecutiveCandleBoosts = 3;                 // Max Consecutive Candle Boosts (0 = Unlimited)
 input double ZonePoints = 500;                            // Zone Points to Avoid Duplicate Signals
 input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
@@ -92,12 +94,12 @@ input double MinBuySignalScore = 6.0;                     // Min Signal Strength
 input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
 input group "🛡️ Signal Dampening Settings"
-input bool EnableSignalDampening = true;                 // Enable Position-Aware Signal Dampening
-input int MaxLosingPositionsSameDir = 2;                // Max Losing Positions in Same Direction Before Block
-input double LosingPosScorePenalty = 1.5;                  // Score Penalty Per Losing Same-Direction Position
-input double DrawdownThresholdPct = 3.0;                   // Equity Drawdown % to Raise Signal Threshold
-input double DrawdownScoreBoost = 2.0;                     // Extra Score Required During Drawdown
-input int ConsecutiveLossCooldownBars = 3;              // Cooldown Bars After 3+ Consecutive Losses
+input bool EnableSignalDampening = true;                  // Enable Position-Aware Signal Dampening
+input int MaxLosingPositionsSameDir = 2;                  // Max Losing Positions in Same Direction Before Block
+input double LosingPosScorePenalty = 1.5;                 // Score Penalty Per Losing Same-Direction Position
+input double DrawdownThresholdPct = 3.0;                  // Equity Drawdown % to Raise Signal Threshold
+input double DrawdownScoreBoost = 2.0;                    // Extra Score Required During Drawdown
+input int ConsecutiveLossCooldownBars = 3;                // Cooldown Bars After 3+ Consecutive Losses
 
 input group "🩺 Loss Management Settings"
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
@@ -296,6 +298,12 @@ datetime currentBarTime = 0;
 int buysOnCurrentBar = 0;
 int sellsOnCurrentBar = 0;
 
+// Consecutive Trading Candle Tracker (for threshold escalation)
+int consecutiveBuyCandles = 0;                            // How many consecutive candles opened buy positions
+int consecutiveSellCandles = 0;                           // How many consecutive candles opened sell positions
+bool prevBarHadBuys = false;                              // Whether the previous bar opened buy positions
+bool prevBarHadSells = false;                             // Whether the previous bar opened sell positions
+
 // Signal Dampening Globals
 int consecutiveLossCount = 0;                             // Track consecutive closing losses
 datetime cooldownUntilBarTime = 0;                        // Bar time after which cooldown expires
@@ -482,8 +490,6 @@ int InitializeEA()
         return(INIT_FAILED);
     }
 
-
-
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     lastPeakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -665,8 +671,33 @@ void OnTick()
         SignalStrength sellStr = GetSignalStrength(ORDER_TYPE_SELL, false); // Index 1
         lastSellSignalScore = sellStr.finalScore;
         
-        // Update Bar Time (will be updated in OpenPosition too, but good to have here)
-        currentBarTime = currentBarTime;
+        // Track consecutive trading candles for threshold escalation
+        // If the just-closed bar had trades, increment consecutive counter
+        // Otherwise reset it (the streak is broken)
+        if(buysOnCurrentBar > 0)
+        {
+            consecutiveBuyCandles++;
+            prevBarHadBuys = true;
+        }
+        else
+        {
+            consecutiveBuyCandles = 0;
+            prevBarHadBuys = false;
+        }
+        
+        if(sellsOnCurrentBar > 0)
+        {
+            consecutiveSellCandles++;
+            prevBarHadSells = true;
+        }
+        else
+        {
+            consecutiveSellCandles = 0;
+            prevBarHadSells = false;
+        }
+        
+        // Update Bar Time
+        currentBarTime = currBarTime;
         buysOnCurrentBar = 0;
         sellsOnCurrentBar = 0;
     }
@@ -869,10 +900,26 @@ double BuySignal()
     // Calculate signal strength using closed candle (index 1) for safety
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY, false);
 
-    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
     double adjustedScore = strength.finalScore;
     double adjustedThreshold = MinBuySignalScore;
 
+    // CONSECUTIVE CANDLE THRESHOLD ESCALATION
+    // When previous candles opened buy positions, raise the threshold
+    // to prevent chasing moves and opening at the peak
+    if(consecutiveBuyCandles > 0 && ConsecutiveCandleThresholdBoost > 0)
+    {
+        int boostCount = consecutiveBuyCandles;
+        if(MaxConsecutiveCandleBoosts > 0 && boostCount > MaxConsecutiveCandleBoosts)
+            boostCount = MaxConsecutiveCandleBoosts;
+        
+        double candleBoost = boostCount * ConsecutiveCandleThresholdBoost;
+        adjustedThreshold += candleBoost;
+        LogPrint("[CANDLE ESCALATION] Buy threshold boosted by ", DoubleToString(candleBoost, 1),
+                 " (", boostCount, " consecutive trading candles). Threshold: ", 
+                 DoubleToString(adjustedThreshold, 1));
+    }
+
+    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
     if(EnableSignalDampening)
     {
         // A. Score Penalty: reduce score based on losing same-direction positions
@@ -933,10 +980,26 @@ double SellSignal()
     // Calculate signal strength using closed candle (index 1) for safety
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL, false);
 
-    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
     double adjustedScore = strength.finalScore;
     double adjustedThreshold = MinSellSignalScore;
 
+    // CONSECUTIVE CANDLE THRESHOLD ESCALATION
+    // When previous candles opened sell positions, raise the threshold
+    // to prevent chasing moves and opening at the peak
+    if(consecutiveSellCandles > 0 && ConsecutiveCandleThresholdBoost > 0)
+    {
+        int boostCount = consecutiveSellCandles;
+        if(MaxConsecutiveCandleBoosts > 0 && boostCount > MaxConsecutiveCandleBoosts)
+            boostCount = MaxConsecutiveCandleBoosts;
+        
+        double candleBoost = boostCount * ConsecutiveCandleThresholdBoost;
+        adjustedThreshold += candleBoost;
+        LogPrint("[CANDLE ESCALATION] Sell threshold boosted by ", DoubleToString(candleBoost, 1),
+                 " (", boostCount, " consecutive trading candles). Threshold: ", 
+                 DoubleToString(adjustedThreshold, 1));
+    }
+
+    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
     if(EnableSignalDampening)
     {
         // A. Score Penalty: reduce score based on losing same-direction positions
