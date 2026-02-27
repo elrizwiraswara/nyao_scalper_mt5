@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Scalper v38.0 - BALANCED PROFILE
+; Nyao Scalper v39.0 - BALANCED PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Optimized for XAUUSD M1-M5
@@ -16,6 +16,8 @@ ATRPeriod=8
 ATRAvgLookback=20
 ImpulseLookback=4
 ImpulseBoostWeight=1.0
+SignalSmoothingCandles=3
+CurrentCandleBlend=0.25
 VelocityWindow=2.0
 RSIOverbought=78
 RSIOversold=22
