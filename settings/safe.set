@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Scalper v37.0 - SAFE PROFILE
+; Nyao Scalper v38.0 - SAFE PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Optimized for XAUUSD M1-M5
@@ -40,6 +40,8 @@ EnableSellOrders=true
 BaseLotSize=0.01
 MaxOpenOrders=3
 MaxTradesPerCandle=1
+ConsecutiveCandleThresholdBoost=1.5
+MaxConsecutiveCandleBoosts=2
 ZonePoints=600.0
 BuyDuplicateMultiplier=2.0
 SellDuplicateMultiplier=2.0
@@ -79,6 +81,9 @@ EnableBreakEvenOnSpread=true
 BreakEvenSpreadMultiplier=1.2
 EnableVirtualSLReentry=true
 ReentryMinSignalPct=0.85
+EnableProfitOffsetSL=true
+ConsecutiveWinsRequired=5
+MinOffsetProfit=2.0
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=false
 EquityDropPercent=10.0
