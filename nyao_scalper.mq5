@@ -125,6 +125,9 @@ input bool EnableBreakEvenOnSpread = true;                // Lock SL to Entry Af
 input double BreakEvenSpreadMultiplier = 1.5;             // Spread Multiplier for Break-Even Lock Trigger
 input bool EnableVirtualSLReentry = true;                 // Close at Threshold Then Re-evaluate & Re-enter
 input double ReentryMinSignalPct = 0.75;                  // Min % of Entry Signal Required to Re-enter
+input bool EnableProfitOffsetSL = true;                   // Tighten SL of Losing Pos by Consecutive Closed Profits
+input int ConsecutiveWinsRequired = 3;                    // Min Consecutive Wins Before Offset Applies
+input double MinOffsetProfit = 1.0;                       // Min Accumulated Profit ($) to Trigger SL Offset
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -265,11 +268,11 @@ struct SignalStrength
 struct PositionHealth
 {
     double healthScore;                                   // 0.0 (dead) to 1.0 (fully healthy)
-    bool   trendValid;                                    // EMA still aligned with position direction?
-    bool   momentumValid;                                 // RSI still in favorable zone?
+    bool trendValid;                                      // EMA still aligned with position direction?
+    bool momentumValid;                                   // RSI still in favorable zone?
     double adverseATR;                                    // How many ATRs moved against position
-    bool   swingValid;                                    // Price hasn't broken swing level?
-    bool   inGracePeriod;                                 // Position too new for health check?
+    bool swingValid;                                      // Price hasn't broken swing level?
+    bool inGracePeriod;                                   // Position too new for health check?
     string reason;                                        // Human-readable invalidation reason
 };
 
@@ -281,8 +284,11 @@ struct ManagedPosition
     ENUM_POSITION_TYPE type;                              // Buy or Sell
     double signalScore;                                   // Initial signal score
     double entryPrice;                                    // Entry price for adverse excursion calc
-    int    partialCloseLevel;                             // 0=none, 1=75% triggered, 2=50% triggered, 3=fully closed
-    bool   breakEvenLocked;                               // Whether SL has been moved to break-even by loss mgmt
+    int partialCloseLevel;                                // 0=none, 1=75% triggered, 2=50% triggered, 3=fully closed
+    bool breakEvenLocked;                                 // Whether SL has been moved to break-even by loss mgmt
+    int profitOffsetConsecWins;                           // Consecutive winning trades closed since this position opened
+    double profitOffsetAccumulated;                       // Accumulated profit from consecutive wins (USD)
+    double profitOffsetOriginalSL;                        // Original SL price when position was opened
 };
 
 // Managed positions array
@@ -1903,6 +1909,165 @@ void ManageLosingPositions()
             }
         }
         
+        // 5. PROFIT OFFSET SL TIGHTENING (consecutive wins offset)
+        // When consecutive winning trades close while this losing position is open,
+        // reduce the max loss exposure by tightening SL proportionally
+        if(EnableProfitOffsetSL && profit < 0 
+           && managedPositions[posIndex].profitOffsetConsecWins >= ConsecutiveWinsRequired
+           && managedPositions[posIndex].profitOffsetAccumulated >= MinOffsetProfit)
+        {
+            // Calculate original risk from SL
+            double origSL = managedPositions[posIndex].profitOffsetOriginalSL;
+            
+            // Need valid original SL to calculate offset
+            if(origSL > 0 && entryPrice > 0)
+            {
+                // Calculate value per point for this position's lot size
+                double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+                double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+                double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+                
+                if(tickValue > 0 && tickSize > 0 && point > 0 && volume > 0)
+                {
+                    double normalizedTickValue = tickValue * volume;
+                    double pointsPerTick = tickSize / point;
+                    double valuePerPoint = normalizedTickValue / pointsPerTick;
+                    
+                    // Calculate original SL distance in USD
+                    double origSLDistPoints = MathAbs(entryPrice - origSL) / _Point;
+                    double origRiskUSD = origSLDistPoints * valuePerPoint;
+                    
+                    // Calculate new target risk after offset
+                    double accumulatedProfit = managedPositions[posIndex].profitOffsetAccumulated;
+                    double newTargetRiskUSD = origRiskUSD - accumulatedProfit;
+                    
+                    // Only proceed if there's meaningful reduction
+                    if(newTargetRiskUSD < origRiskUSD && newTargetRiskUSD > 0)
+                    {
+                        // Convert new target risk back to points
+                        double newSLDistPoints = newTargetRiskUSD / valuePerPoint;
+                        double newSLDistPrice = newSLDistPoints * _Point;
+                        
+                        double newOffsetSL = 0;
+                        
+                        // Re-read position to ensure consistency
+                        if(!PositionSelectByTicket(ticket)) continue;
+                        currentSL = PositionGetDouble(POSITION_SL);
+                        currentTP = PositionGetDouble(POSITION_TP);
+                        
+                        long offsetStopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+                        double offsetMinDist = offsetStopLevel * _Point;
+                        
+                        if(posType == POSITION_TYPE_BUY)
+                        {
+                            double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                            newOffsetSL = NormalizeDouble(entryPrice - newSLDistPrice, _Digits);
+                            
+                            // Respect break-even lock
+                            if(managedPositions[posIndex].breakEvenLocked && newOffsetSL < entryPrice)
+                                newOffsetSL = NormalizeDouble(entryPrice, _Digits);
+                            
+                            // Only tighten (move SL UP), never widen
+                            if(currentSL > 0 && newOffsetSL <= currentSL) 
+                            {
+                                // SL already tighter, skip
+                            }
+                            else if(newOffsetSL >= bid - offsetMinDist)
+                            {
+                                // Too close to price, skip
+                            }
+                            else if(IsSLValid(posType, newOffsetSL))
+                            {
+                                if(ModifyPosition(ticket, newOffsetSL, currentTP))
+                                {
+                                    LogPrint("+-----------------------------------------+");
+                                    LogPrint("[PROFIT OFFSET SL] Ticket: ", ticket);
+                                    LogPrint("Consecutive Wins: ", managedPositions[posIndex].profitOffsetConsecWins,
+                                             " | Accumulated: $", DoubleToString(accumulatedProfit, 2));
+                                    LogPrint("Original Risk: $", DoubleToString(origRiskUSD, 2),
+                                             " -> New Max Risk: $", DoubleToString(newTargetRiskUSD, 2));
+                                    LogPrint("SL: ", currentSL, " -> ", newOffsetSL);
+                                    LogPrint("+-----------------------------------------+");
+                                }
+                            }
+                        }
+                        else // SELL
+                        {
+                            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                            newOffsetSL = NormalizeDouble(entryPrice + newSLDistPrice, _Digits);
+                            
+                            // Respect break-even lock
+                            if(managedPositions[posIndex].breakEvenLocked && newOffsetSL > entryPrice)
+                                newOffsetSL = NormalizeDouble(entryPrice, _Digits);
+                            
+                            // Only tighten (move SL DOWN), never widen
+                            if(currentSL > 0 && newOffsetSL >= currentSL)
+                            {
+                                // SL already tighter, skip
+                            }
+                            else if(newOffsetSL <= ask + offsetMinDist)
+                            {
+                                // Too close to price, skip
+                            }
+                            else if(IsSLValid(posType, newOffsetSL))
+                            {
+                                if(ModifyPosition(ticket, newOffsetSL, currentTP))
+                                {
+                                    LogPrint("+-----------------------------------------+");
+                                    LogPrint("[PROFIT OFFSET SL] Ticket: ", ticket);
+                                    LogPrint("Consecutive Wins: ", managedPositions[posIndex].profitOffsetConsecWins,
+                                             " | Accumulated: $", DoubleToString(accumulatedProfit, 2));
+                                    LogPrint("Original Risk: $", DoubleToString(origRiskUSD, 2),
+                                             " -> New Max Risk: $", DoubleToString(newTargetRiskUSD, 2));
+                                    LogPrint("SL: ", currentSL, " -> ", newOffsetSL);
+                                    LogPrint("+-----------------------------------------+");
+                                }
+                            }
+                        }
+                    }
+                    // If newTargetRiskUSD <= 0, the accumulated profit exceeds original risk
+                    // In this case, try to move SL to break-even (entry price)
+                    else if(newTargetRiskUSD <= 0)
+                    {
+                        if(!PositionSelectByTicket(ticket)) continue;
+                        currentSL = PositionGetDouble(POSITION_SL);
+                        currentTP = PositionGetDouble(POSITION_TP);
+                        
+                        double beSL = NormalizeDouble(entryPrice, _Digits);
+                        long beStopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+                        double beMinDist = beStopLevel * _Point;
+                        bool canApplyBE = false;
+                        
+                        if(posType == POSITION_TYPE_BUY)
+                        {
+                            double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                            canApplyBE = (beSL < bid - beMinDist) && (currentSL == 0 || beSL > currentSL);
+                        }
+                        else
+                        {
+                            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                            canApplyBE = (beSL > ask + beMinDist) && (currentSL == 0 || beSL < currentSL);
+                        }
+                        
+                        if(canApplyBE && IsSLValid(posType, beSL))
+                        {
+                            if(ModifyPosition(ticket, beSL, currentTP))
+                            {
+                                managedPositions[posIndex].breakEvenLocked = true;
+                                
+                                LogPrint("+-----------------------------------------+");
+                                LogPrint("[PROFIT OFFSET SL -> BE] Ticket: ", ticket);
+                                LogPrint("Accumulated profit ($", DoubleToString(accumulatedProfit, 2), 
+                                         ") >= Original risk ($", DoubleToString(origRiskUSD, 2), ")");
+                                LogPrint("SL moved to break-even: ", beSL);
+                                LogPrint("+-----------------------------------------+");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         // 4. FULL CLOSE + VIRTUAL SL RE-ENTRY (at health threshold)
         if(health.healthScore < MinHealthScore)
         {
@@ -2265,6 +2430,13 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     managedPositions[managedPositionCount].entryPrice = entryPrice;
     managedPositions[managedPositionCount].partialCloseLevel = 0;
     managedPositions[managedPositionCount].breakEvenLocked = false;
+    // Initialize profit offset SL tracking
+    managedPositions[managedPositionCount].profitOffsetConsecWins = 0;
+    managedPositions[managedPositionCount].profitOffsetAccumulated = 0;
+    // Capture original SL from broker if position exists
+    double origSL = 0;
+    if(PositionSelectByTicket(ticket)) origSL = PositionGetDouble(POSITION_SL);
+    managedPositions[managedPositionCount].profitOffsetOriginalSL = origSL;
     
     managedPositionCount++;
     
@@ -2314,6 +2486,7 @@ void RemoveManagedPosition(ulong ticket)
 // Sync Managed Positions with Broker
 // Removes closed positions from managed array
 // Also tracks consecutive losses for cooldown system
+// Also updates profit offset tracking for remaining open positions
 void SyncManagedPositions()
 {
     for(int i = managedPositionCount - 1; i >= 0; i--)
@@ -2322,42 +2495,42 @@ void SyncManagedPositions()
         {
             ulong closedTicket = managedPositions[i].ticket;
             
-            // SIGNAL DAMPENING: Track consecutive losses for cooldown
-            if(EnableSignalDampening)
+            // Query deal history to find the closing profit of this position
+            double closedProfit = 0;
+            bool foundDeal = false;
+            
+            // Select history for recent period (last 24 hours should be sufficient)
+            datetime fromTime = TimeCurrent() - 86400;
+            datetime toTime = TimeCurrent();
+            
+            if(HistorySelect(fromTime, toTime))
             {
-                // Query deal history to find the closing profit of this position
-                double closedProfit = 0;
-                bool foundDeal = false;
-                
-                // Select history for recent period (last 24 hours should be sufficient)
-                datetime fromTime = TimeCurrent() - 86400;
-                datetime toTime = TimeCurrent();
-                
-                if(HistorySelect(fromTime, toTime))
+                int totalDeals = HistoryDealsTotal();
+                for(int d = totalDeals - 1; d >= 0; d--)
                 {
-                    int totalDeals = HistoryDealsTotal();
-                    for(int d = totalDeals - 1; d >= 0; d--)
+                    ulong dealTicket = HistoryDealGetTicket(d);
+                    if(dealTicket == 0) continue;
+                    
+                    // Match deal to our position
+                    ulong dealPosition = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+                    long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+                    long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+                    
+                    if(dealPosition == closedTicket && dealEntry == DEAL_ENTRY_OUT && dealMagic == MagicNumber)
                     {
-                        ulong dealTicket = HistoryDealGetTicket(d);
-                        if(dealTicket == 0) continue;
-                        
-                        // Match deal to our position
-                        ulong dealPosition = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-                        long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-                        long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
-                        
-                        if(dealPosition == closedTicket && dealEntry == DEAL_ENTRY_OUT && dealMagic == MagicNumber)
-                        {
-                            closedProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT) 
-                                         + HistoryDealGetDouble(dealTicket, DEAL_SWAP)
-                                         + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
-                            foundDeal = true;
-                            break;
-                        }
+                        closedProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT) 
+                                     + HistoryDealGetDouble(dealTicket, DEAL_SWAP)
+                                     + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+                        foundDeal = true;
+                        break;
                     }
                 }
-                
-                if(foundDeal)
+            }
+            
+            if(foundDeal)
+            {
+                // SIGNAL DAMPENING: Track consecutive losses for cooldown
+                if(EnableSignalDampening)
                 {
                     if(closedProfit < 0)
                     {
@@ -2384,6 +2557,45 @@ void SyncManagedPositions()
                                      consecutiveLossCount, " consecutive losses.");
                         }
                         consecutiveLossCount = 0; // Reset on any win
+                    }
+                }
+                
+                // PROFIT OFFSET SL: Update tracking on all remaining open positions
+                if(EnableProfitOffsetSL)
+                {
+                    for(int p = 0; p < managedPositionCount; p++)
+                    {
+                        // Skip the position being removed (closedTicket)
+                        if(managedPositions[p].ticket == closedTicket) continue;
+                        
+                        // Only track for positions that are currently in loss
+                        if(!PositionSelectByTicket(managedPositions[p].ticket)) continue;
+                        double posProfit = PositionGetDouble(POSITION_PROFIT);
+                        if(posProfit >= 0) continue; // Only for losing positions
+                        
+                        if(closedProfit > 0)
+                        {
+                            // Winning trade: accumulate
+                            managedPositions[p].profitOffsetConsecWins++;
+                            managedPositions[p].profitOffsetAccumulated += closedProfit;
+                            
+                            LogPrint("[PROFIT OFFSET] Ticket ", managedPositions[p].ticket,
+                                     " | Win #", managedPositions[p].profitOffsetConsecWins,
+                                     " | +$", DoubleToString(closedProfit, 2),
+                                     " | Total: $", DoubleToString(managedPositions[p].profitOffsetAccumulated, 2));
+                        }
+                        else
+                        {
+                            // Losing trade: reset consecutive counter and accumulated profit
+                            if(managedPositions[p].profitOffsetConsecWins > 0)
+                            {
+                                LogPrint("[PROFIT OFFSET] Ticket ", managedPositions[p].ticket,
+                                         " | Consecutive wins reset (closed loss: $", 
+                                         DoubleToString(closedProfit, 2), ")");
+                            }
+                            managedPositions[p].profitOffsetConsecWins = 0;
+                            managedPositions[p].profitOffsetAccumulated = 0;
+                        }
                     }
                 }
             }
