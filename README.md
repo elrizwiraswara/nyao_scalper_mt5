@@ -144,7 +144,7 @@ If you prefer coding in Visual Studio Code, you can compile `.mq5` files directl
 ## Credits
 
 **Author**: Elriz Wiraswara<br/>
-**License**: MIT (Open Source)<br/>
+**License**: BSD-3-Clause (Open Source)<br/>
 **Repository**: [https://github.com/elrizwiraswara/nyao_scalper_mt5](https://github.com/elrizwiraswara/nyao_scalper_mt5)
 
 > **Disclaimer:** I do not sell or commercialize this EA under my name. If you encounter anyone selling it claiming to represent me, please treat it as a scam and report it.
