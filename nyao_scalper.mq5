@@ -4,7 +4,7 @@
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version   "39.0"
+#property version "39.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -350,7 +350,7 @@ struct TradeStats
 };
 
 // +------------------------------------------------------------------+
-// | Create Password Dialog                                            |
+// | Create Password Dialog                                           |
 // +------------------------------------------------------------------+
 bool CreatePasswordDialog()
 {
@@ -409,7 +409,7 @@ int OnInit()
 }
 
 // +------------------------------------------------------------------+
-// | Full EA Initialization                                            |
+// | Full EA Initialization                                           |
 // +------------------------------------------------------------------+
 int InitializeEA()
 {
@@ -780,7 +780,7 @@ void OnTick()
 }
 
 // +------------------------------------------------------------------+
-// | Chart Event Handler - Password Dialog                             |
+// | Chart Event Handler - Password Dialog                            |
 // +------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
@@ -818,7 +818,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 }
 
 // +------------------------------------------------------------------+
-// | Position Loss State - Aggregate loss metrics for a direction      |
+// | Position Loss State - Aggregate loss metrics for a direction     |
 // +------------------------------------------------------------------+
 struct PositionLossState
 {
@@ -829,8 +829,8 @@ struct PositionLossState
 };
 
 // +------------------------------------------------------------------+
-// | Get Open Position Loss State for a Direction                      |
-// | Scans all open managed positions and returns aggregate loss info  |
+// | Get Open Position Loss State for a Direction                     |
+// | Scans all open managed positions and returns aggregate loss info |
 // +------------------------------------------------------------------+
 PositionLossState GetOpenPositionLossState(ENUM_POSITION_TYPE direction)
 {
@@ -1217,7 +1217,7 @@ void ManagePositions()
 // +------------------------------------------------------------------+
 // | Compute Raw Score - Internal Helper                              |
 // | Computes the raw signal score for a given candle index           |
-// | signalIndex: 0 = current forming candle, 1+ = closed candles    |
+// | signalIndex: 0 = current forming candle, 1+ = closed candles     |
 // +------------------------------------------------------------------+
 double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 {
@@ -1391,9 +1391,9 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 }
 
 // +------------------------------------------------------------------+
-// | Signal Strength Analysis - Blended Weighted Average               |
-// | Combines weighted avg of N closed candles + dampened current      |
-// | candle for smooth yet responsive signal scoring                   |
+// | Signal Strength Analysis - Blended Weighted Average              |
+// | Combines weighted avg of N closed candles + dampened current     |
+// | candle for smooth yet responsive signal scoring                  |
 // +------------------------------------------------------------------+
 SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
 {
@@ -2295,7 +2295,7 @@ void ManageLosingPositions()
 }
 
 // +------------------------------------------------------------------+
-// | Partial Close Position - Close a portion of position volume       |
+// | Partial Close Position - Close a portion of position volume      |
 // +------------------------------------------------------------------+
 bool PartialClosePosition(ulong ticket, double closeVolume)
 {
@@ -2318,6 +2318,7 @@ bool PartialClosePosition(ulong ticket, double closeVolume)
     request.volume = NormalizeVolume(closeVolume);
     request.deviation = 10;
     request.magic = PositionGetInteger(POSITION_MAGIC);
+    request.type_filling = GetFillingMode();
     request.type = (type == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
     request.price = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     
@@ -2872,6 +2873,7 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     request.deviation = 10;
     request.magic = MagicNumber;
     request.comment = "Open Position by Nyao Scalper";
+    request.type_filling = GetFillingMode();
 
     // Calculate and set Take Profit
     if(EnableTakeProfit)
@@ -2998,11 +3000,12 @@ bool ClosePosition(ulong ticket)
     request.volume = PositionGetDouble(POSITION_VOLUME);
     request.deviation = 10;
     request.magic = PositionGetInteger(POSITION_MAGIC);
-    
+    request.type_filling = GetFillingMode();
+
     ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
     request.type = (type == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-    request.price = (type == POSITION_TYPE_BUY) ? 
-                    SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
+    request.price = (type == POSITION_TYPE_BUY) ?
+                    SymbolInfoDouble(_Symbol, SYMBOL_BID) :
                     SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     
     if(!OrderSend(request, result))
@@ -3169,6 +3172,15 @@ void LockOrderSend(bool isLocked)
     isOrderSendLocked = isLocked;
 }
 
+// Helper function to get the supported filling mode for the current symbol
+ENUM_ORDER_TYPE_FILLING GetFillingMode()
+{
+    uint filling = (uint)SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+    if((filling & SYMBOL_FILLING_FOK) != 0) return ORDER_FILLING_FOK;
+    if((filling & SYMBOL_FILLING_IOC) != 0) return ORDER_FILLING_IOC;
+    return ORDER_FILLING_RETURN;
+}
+
 // Helper function to validate SL price
 bool IsSLValid(ENUM_POSITION_TYPE posType, double sl)
 {
@@ -3251,11 +3263,11 @@ int CountOpenOrdersByType(ENUM_POSITION_TYPE posType)
 }
 // +------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
+//+-------------------------------------------------------------------+
 //| Calculate Dynamic Lot Size - Equity Drop Recovery Based           |
 //| Lot increases based on equity drop from peak to recover losses    |
 //| Only applies when signal score meets MinSignalStrengthForLot      |
-//+------------------------------------------------------------------+
+//+-------------------------------------------------------------------+
 double CalculateDynamicLotSize(double signalScore = 0)
 {
     if(!EnableDynamicLots) return BaseLotSize;
