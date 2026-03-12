@@ -1,4 +1,4 @@
-# Nyao Scalper v40.0
+# Nyao Scalper v41.0
 
 **Indicator-Based Signal Strength EA for MetaTrader 5**
 
@@ -20,7 +20,8 @@ The EA calculates a "Signal Score" for every tick based on:
 - **Volatility**: ATR-based analysis to detect chopping vs. trending markets.
 - **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
 - **Velocity**: Tracks the _change_ in signal score to detect strengthening or weakening moves.
-- **blended weighted average signal smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
+- **Blended Weighted Average Signal Smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
+- **Per-Tick Caching**: Signal scores are computed once per tick and cached, eliminating redundant calculations across position management, trailing, and dashboard systems.
 
 ### Risk & Equity Management
 
@@ -28,6 +29,7 @@ The EA calculates a "Signal Score" for every tick based on:
   - **Min Equity Stop**: Hard stop if equity falls below a specific dollar amount.
   - **Max Drawdown Stop**: Stops trading if drawdown from peak exceeds a set limit.
   - **Daily Target**: Optional target profit to stop trading for the day.
+- **Signal Dampening**: Position-aware system that penalizes signal scores when holding losing positions and raises entry thresholds during drawdown periods.
 - **News Filter**: Automatically pauses trading before and after high-impact news events.
 - **Trading Hours**: Configurable start and end times to avoid low-liquidity sessions.
 - **Leverage Guard**: Pauses trading if account leverage changes unexpectedly.
@@ -39,15 +41,17 @@ The EA calculates a "Signal Score" for every tick based on:
   - Standard trailing stop logic.
   - **Signal-Based Adaptation**: Tightens or loosens TP/SL based on real-time changes in the Signal Score.
 - **Loss Management**:
+  - **Position Health Revalidation**: Continuously evaluates trade thesis using trend alignment, RSI zone, adverse ATR excursion, and swing structure — weighted health score determines hold/exit decisions.
   - **Scaled Partial Close**: Gradually reduces position volume as signal decays (75% → close 25%, 50% → close 50%, 25% → full exit).
   - **Dynamic SL Tightening**: Pulls stop-loss closer proportionally as position health weakens below a threshold.
   - **Break-Even Lock**: Moves SL to entry price once profit exceeds spread cost, protecting gains.
   - **Virtual SL + Re-entry**: Closes losing positions at the health threshold, then immediately re-enters at the current (better) price if the signal is still valid.
+  - **Profit Offset SL**: Tightens SL of losing positions using accumulated profits from consecutive winning trades.
 
 ### Lot Sizing
 
 - **Recovery Mode**: Increases lot size incrementally after equity drops for faster recovery.
-- **Confidence Mode**: Increases lot size for high-confidence signals (e.g., Score > 9.0).
+- **Confidence Mode**: Increases lot size for high-confidence signals (e.g., Score > 8.0).
 - **Velocity Boost**: Slightly increases position size if signal velocity (momentum) is accelerating.
 
 ### Dashboard & Alerts
@@ -61,7 +65,7 @@ The EA calculates a "Signal Score" for every tick based on:
 
 ## Strategy Logic
 
-The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 6.0).
+The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 5.5).
 
 **Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
 
@@ -99,6 +103,43 @@ The score is calculated by summing up weights from specialized components:
     - Results in smooth yet responsive signal scoring that adapts to market conditions.
 
 **Entry Condition**: `Total Score` >= `MinSignalScore`
+
+## Settings Profiles
+
+Pre-configured settings files are available in the `settings/` folder. Load them via MetaTrader 5: **Charts → Templates** or manually copy values.
+
+| Profile | Signal Threshold | Frequency | Risk | Best For |
+|---------|:---:|:---:|:---:|---|
+| **aggressive** | 4.5 | Very High | High | Maximum profit capture, larger lots, widest stops. High risk — use only with capital you can afford to lose. |
+| **safe-aggressive** | 5.0 | High | Medium-Low | Fast entries with safe lot sizing, strong dampening, fast break-even locks. Best for small accounts ($200+). |
+| **default** | 5.5 | Medium-High | Medium | M1 scalping-optimized baseline. Balanced signal response and risk management. |
+| **balanced** | 6.0 | Medium | Medium | Quality entries with moderate exposure. Suitable for everyday trading. |
+| **safe** | 7.0 | Low | Low | Highest conviction trades only, minimal exposure, tightest risk controls. Highest win rate. |
+
+### Profile Comparison
+
+| Setting | Aggressive | Safe-Aggressive | Default | Balanced | Safe |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Base Lot | 0.03 | 0.01 | 0.01 | 0.01 | 0.01 |
+| Max Lot | 0.10 | 0.03 | 0.05 | 0.05 | 0.01 |
+| Max Open Orders | 12 | 8 | 8 | 6 | 3 |
+| Smoothing Candles | 1 | 2 | 2 | 2 | 3 |
+| Current Candle Blend | 0.60 | 0.45 | 0.40 | 0.35 | 0.25 |
+| Max Holding Loss Pos | 4 | 2 | 2 | 2 | 1 |
+| Dampening Penalty | 1.0 | 1.8 | 1.5 | 1.5 | 2.0 |
+| Break-Even Lock | 2.0x | 1.2x | 1.5x | 1.5x | 1.0x |
+| Virtual SL Re-entry | On (50%) | On (65%) | On (75%) | On (75%) | Off |
+| Dynamic Lots | On | On (capped) | On | On | Off |
+| News Filter | 15/15 min | 25/25 min | 30/30 min | 30/30 min | 45/45 min |
+
+### Recommended Profile by Account Size
+
+| Account Size | Recommended | Notes |
+|---|---|---|
+| $100-200 | **safe-aggressive** | Fast entries but strict risk controls, capped lot sizing |
+| $200-500 | **safe-aggressive** or **default** | Safe-aggressive for growth, default for stability |
+| $500-1000 | **default** or **balanced** | Room for moderate exposure |
+| $1000+ | Any profile | Account can absorb drawdowns from aggressive profiles |
 
 ## Installation
 
