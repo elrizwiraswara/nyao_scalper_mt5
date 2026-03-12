@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v40.0                                               |
+// | Nyao Scalper v41.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version "40.0"
+#property version "41.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -39,7 +39,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v40.0"
+input group " Nyao Scalper v41.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
@@ -47,16 +47,16 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 input group "📊 Indicator Settings"
-input int DirectionalBodyLookback = 20;                   // Lookback for directional body analysis
-input int EMAFastPeriod = 6;                              // EMA Fast Period
-input int EMASlowPeriod = 15;                             // EMA Slow Period
+input int DirectionalBodyLookback = 10;                   // Lookback for directional body analysis
+input int EMAFastPeriod = 5;                              // EMA Fast Period
+input int EMASlowPeriod = 12;                             // EMA Slow Period
 input int RSIPeriod = 8;                                  // RSI Period
 input int ATRPeriod = 8;                                  // ATR Period
-input int ATRAvgLookback = 20;                            // ATR Average Lookback
-input int ImpulseLookback = 4;                            // Impulse Lookback
+input int ATRAvgLookback = 10;                            // ATR Average Lookback
+input int ImpulseLookback = 3;                            // Impulse Lookback
 input double ImpulseBoostWeight = 1.0;                    // Impulse Boost Weight
-input int SignalSmoothingCandles = 3;                     // Closed Candles for Weighted Average (1-10)
-input double CurrentCandleBlend = 0.25;                   // Current Candle Blend Factor (0.0-1.0)
+input int SignalSmoothingCandles = 2;                     // Closed Candles for Weighted Average (1-10)
+input double CurrentCandleBlend = 0.40;                   // Current Candle Blend Factor (0.0-1.0)
 input double VelocityWindow = 2.0;                        // Velocity Window (Score Delta)
 input int RSIOverbought = 80;                             // RSI Overbought Level (Max Buy)
 input int RSIOversold = 20;                               // RSI Oversold Level (Min Sell)
@@ -92,8 +92,8 @@ input double SellDuplicateMultiplier = 1.5;               // Min Distance Multip
 input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($ | 0 = Disabled)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
-input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
-input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
+input double MinBuySignalScore = 5.5;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
+input double MinSellSignalScore = 5.5;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
 input group "🛡️ Signal Dampening Settings"
 input bool EnableSignalDampening = true;                  // Enable Position-Aware Signal Dampening
@@ -105,15 +105,15 @@ input int ConsecutiveLossCooldownBars = 3;                // Cooldown Bars After
 
 input group "🩺 Loss Management Settings"
 input bool EnableLossManagement = true;                   // Enable Adaptive Loss Management
-input int MaxHoldingLossPositions = 3;                    // Max Losing Positions to Hold
+input int MaxHoldingLossPositions = 2;                    // Max Losing Positions to Hold
 input double MinHealthScore = 0.40;                       // Min Health Score to Hold Position (0.0 - 1.0)
 input double MaxAdverseATR = 1.5;                         // Max Adverse Movement in ATR Multiples
 input double HealthTrendWeight = 0.40;                    // Health Weight: Trend Alignment
 input double HealthRSIWeight = 0.25;                      // Health Weight: RSI Zone
 input double HealthATRWeight = 0.25;                      // Health Weight: Adverse Excursion
 input double HealthSwingWeight = 0.10;                    // Health Weight: Swing Level
-input double HealthRSIBuyMin = 45.0;                      // Health RSI Min for Buy Position
-input double HealthRSISellMax = 55.0;                     // Health RSI Max for Sell Position
+input double HealthRSIBuyMin = 40.0;                      // Health RSI Min for Buy Position
+input double HealthRSISellMax = 60.0;                     // Health RSI Max for Sell Position
 input int HealthSwingLookback = 20;                       // Swing Level Lookback Bars
 input int HealthGraceBars = 2;                            // Grace Period (Bars Before Health Check)
 input bool EnablePartialClose = true;                     // Enable Scaled Partial Close on Signal Decay
@@ -121,8 +121,8 @@ input double PartialClose75Pct = 0.25;                    // Close % When Signal
 input double PartialClose50Pct = 0.50;                    // Close % When Signal Drops to 50% of Initial
 input double PartialClose25Pct = 1.00;                    // Close % When Signal Drops to 25% of Initial (Remaining)
 input bool EnableHealthSLTightening = true;               // Tighten SL as Health Weakens
-input double SLTightenATRMultiplier = 1.5;                // ATR Multiplier for Tightened SL
-input double SLTightenMinHealthPct = 0.60;                // Start Tightening Below This Health %
+input double SLTightenATRMultiplier = 2.0;                // ATR Multiplier for Tightened SL
+input double SLTightenMinHealthPct = 0.50;                // Start Tightening Below This Health %
 input bool EnableBreakEvenOnSpread = true;                // Lock SL to Entry After Profit > Spread Cost
 input double BreakEvenSpreadMultiplier = 1.5;             // Spread Multiplier for Break-Even Lock Trigger
 input bool EnableVirtualSLReentry = true;                 // Close at Threshold Then Re-evaluate & Re-enter
@@ -331,7 +331,13 @@ double lastBuyNormalizedVelocity = 0;
 double lastSellSignalScore = 0; 
 double lastSellSignalScorePrev = 0; 
 double lastSellVelocity = 0; 
-double lastSellNormalizedVelocity = 0; 
+double lastSellNormalizedVelocity = 0;
+
+// Per-tick signal cache (invalidated each tick)
+bool _buyStrengthValid = false;
+bool _sellStrengthValid = false;
+SignalStrength _cachedBuyStrength;
+SignalStrength _cachedSellStrength;
 
 // Trade Statistics Structure
 struct TradeStats
@@ -586,7 +592,7 @@ int InitializeEA()
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v40.0 Initialized Successfully");
+    Print("Nyao Scalper v41.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -617,17 +623,21 @@ void OnDeinit(const int reason)
     IndicatorRelease(rsiHandle);
     IndicatorRelease(atrSignalHandle);
     
-    Print("Nyao Scalper v40.0 Deinitialized");
+    Print("Nyao Scalper v41.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
 // | Expert Tick Function                                             |
 // +------------------------------------------------------------------+
 void OnTick()
-{   
+{
     // Block trading until password is verified
     if(!passwordVerified) return;
-    
+
+    // Invalidate per-tick signal cache
+    _buyStrengthValid = false;
+    _sellStrengthValid = false;
+
     // Check Algo Trading status
     CheckAlgoTradingStatus();
 
@@ -1221,24 +1231,29 @@ void ManagePositions()
 // +------------------------------------------------------------------+
 double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 {
+    SignalStrength dummy;
+    return ComputeRawScore(orderType, signalIndex, dummy, false);
+}
+
+double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrength &components, bool fillComponents)
+{
     bool isBuy = (orderType == ORDER_TYPE_BUY);
     bool isSell = (orderType == ORDER_TYPE_SELL);
-    
+
     double bufEMA_Fast[], bufEMA_Slow[], bufRSI[], bufATR[];
     ArraySetAsSeries(bufEMA_Fast, true);
     ArraySetAsSeries(bufEMA_Slow, true);
     ArraySetAsSeries(bufRSI, true);
     ArraySetAsSeries(bufATR, true);
-    
-    // Copy minimal buffers 
+
+    // Copy minimal buffers
     int needed = MathMax(ImpulseLookback, MathMax(DirectionalBodyLookback, ATRAvgLookback)) + 5;
-    if (needed < 30) needed = 30; // Safety buffer
-    
+
     if(CopyBuffer(emaFastHandle, 0, signalIndex, 3, bufEMA_Fast) < 3) return 0;
     if(CopyBuffer(emaSlowHandle, 0, signalIndex, 3, bufEMA_Slow) < 3) return 0;
     if(CopyBuffer(rsiHandle, 0, signalIndex, 3, bufRSI) < 3) return 0;
     if(CopyBuffer(atrSignalHandle, 0, signalIndex, needed, bufATR) < needed) return 0;
-    
+
     // Fetch Price Data
     MqlRates rates[];
     ArraySetAsSeries(rates, true);
@@ -1249,19 +1264,19 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
     double emaSlow = bufEMA_Slow[0];
     double emaFastPrev = bufEMA_Fast[1];
     double trendScore = 0;
-    
+
     bool trendAligned = false;
     if (isBuy) trendAligned = (emaFast > emaSlow);
     else trendAligned = (emaFast < emaSlow);
     if (trendAligned) trendScore += TrendWeight;
-    
+
     bool slopeAligned = false;
     if (isBuy) slopeAligned = (emaFast > emaFastPrev);
     else slopeAligned = (emaFast < emaFastPrev);
     if (slopeAligned) trendScore += SlopeWeight;
     if(trendScore > 3.0) trendScore = 3.0;
 
-    // 2. MOMENTUM SCORE (Max 3) + IMPULSE 
+    // 2. MOMENTUM SCORE (Max 3) + IMPULSE
     double currentBody = MathAbs(rates[0].close - rates[0].open);
     double sumBody = 0;
     int validCandles = 0;
@@ -1271,10 +1286,10 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
         validCandles++;
     }
     double avgRecentBody = (validCandles > 0) ? sumBody / validCandles : currentBody;
-    
+
     double rsi = bufRSI[0];
     double baseMomentum = 0;
-    
+
     if (isBuy)
     {
         if (rsi > 50 && rsi < RSIOverbought) baseMomentum += MomentumBaseWeight;
@@ -1287,14 +1302,14 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
         if (rsi < RSIMomentumSell) baseMomentum += MomentumTriggerWeight;
         if (currentBody > avgRecentBody) baseMomentum += BodyMomentumWeight;
     }
-    
+
     double momentumScore = baseMomentum;
-    
+
     // IMPULSE DETECTION
     double bodyAccel = 0;
     if (avgRecentBody > 0) bodyAccel = currentBody / avgRecentBody;
     if (bodyAccel > 3.0) bodyAccel = 3.0;
-    
+
     double currentRange = rates[0].high - rates[0].low;
     double sumRange = 0;
     for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
@@ -1302,28 +1317,28 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
         sumRange += (rates[i].high - rates[i].low);
     }
     double avgRecentRange = (validCandles > 0) ? sumRange / validCandles : currentRange;
-    
+
     double rangeAccel = 0;
     if (avgRecentRange > 0) rangeAccel = currentRange / avgRecentRange;
     if (rangeAccel > 3.0) rangeAccel = 3.0;
-    
+
     int sameDirCount = 0;
     for(int i=0; i<ImpulseLookback && i<needed; i++)
     {
         bool candleBullish = (rates[i].close > rates[i].open);
         bool candleBearish = (rates[i].close < rates[i].open);
-        
+
         if (isBuy && candleBullish) sameDirCount++;
         else if (isSell && candleBearish) sameDirCount++;
         else break;
     }
     double continuityScore = (double)sameDirCount / ImpulseLookback;
     if(continuityScore > 1.0) continuityScore = 1.0;
-    
+
     double rawImpulse = (0.5 * bodyAccel + 0.3 * rangeAccel + 0.2 * continuityScore) / 2.0;
     if (rawImpulse > 1.0) rawImpulse = 1.0;
     if (rawImpulse < 0.0) rawImpulse = 0.0;
-    
+
     momentumScore = momentumScore * (1.0 + ImpulseBoostWeight * rawImpulse);
     if (momentumScore > 3.0) momentumScore = 3.0;
 
@@ -1340,7 +1355,7 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 
     double volRatio = 0;
     if(avgATR > 0) volRatio = currentATR / avgATR;
-    
+
     double chopScore = 0;
     if (volRatio > 1.0) chopScore = ChopScoreHigh;
     else if (volRatio > 0.8) chopScore = ChopScoreMed;
@@ -1349,7 +1364,7 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 
     // 4. PEAK & VOLATILITY SCORES (Max 1 each)
     double volatilityScore = (volRatio > 1.2) ? VolatilityScoreHigh : VolatilityScoreLow;
-    
+
     bool breakout = false;
     double localExtreme = isBuy ? rates[1].high : rates[1].low;
     for(int i=2; i<=5; i++)
@@ -1357,24 +1372,24 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
          if(isBuy) localExtreme = MathMax(localExtreme, rates[i].high);
          else localExtreme = MathMin(localExtreme, rates[i].low);
     }
-    
+
     double peakScore = 0;
     if(isBuy && rates[0].close > localExtreme) breakout = true;
     if(isSell && rates[0].close < localExtreme) breakout = true;
     if(breakout) peakScore = PeakScoreWeight;
-    
+
     // 5. WICK / REJECTION PENALTY
     double maxOpenClose = MathMax(rates[0].open, rates[0].close);
     double minOpenClose = MathMin(rates[0].open, rates[0].close);
     double upperWick = rates[0].high - maxOpenClose;
     double lowerWick = minOpenClose - rates[0].low;
-    
-    double safeBody = MathMax(currentBody, avgRecentBody * MinBodyRatio); 
+
+    double safeBody = MathMax(currentBody, avgRecentBody * MinBodyRatio);
     double penaltyWick = 0;
-    
+    double rejection = 0;
+
     if (safeBody > 0)
     {
-        double rejection = 0;
         if (isBuy) rejection = upperWick / safeBody;
         else rejection = lowerWick / safeBody;
         penaltyWick = rejection * WickRejectionWeight;
@@ -1383,10 +1398,27 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
     // FINAL SCORE AGGREGATION
     double rawScore = trendScore + momentumScore + chopScore + peakScore + volatilityScore;
     rawScore -= penaltyWick;
-    
+
     if (rawScore < 0) rawScore = 0;
     if (rawScore > 10.0) rawScore = 10.0;
-    
+
+    // Fill component details for dashboard reporting
+    if(fillComponents)
+    {
+        components.trendScore = trendScore;
+        components.momentumScore = momentumScore;
+        components.chopScore = chopScore;
+        components.peakScore = peakScore;
+        components.volatilityScore = volatilityScore;
+        components.impulseStrength = rawImpulse;
+        components.avgBody = avgRecentBody;
+        components.bodySignal = currentBody;
+        components.upperWick = upperWick;
+        components.lowerWick = lowerWick;
+        components.rejection = rejection;
+        components.penaltyWick = penaltyWick;
+    }
+
     return rawScore;
 }
 
@@ -1397,6 +1429,12 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 // +------------------------------------------------------------------+
 SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
 {
+    // Return cached result if already computed this tick
+    if(orderType == ORDER_TYPE_BUY && _buyStrengthValid)
+        return _cachedBuyStrength;
+    if(orderType == ORDER_TYPE_SELL && _sellStrengthValid)
+        return _cachedSellStrength;
+
     SignalStrength strength;
     strength.finalScore = 0;
     strength.trendScore = 0;
@@ -1434,14 +1472,17 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     
     for(int i = 1; i <= N; i++)
     {
-        double score_i = ComputeRawScore(orderType, i);
+        // Fill component details on candle[1] for dashboard reporting
+        double score_i = (i == 1)
+            ? ComputeRawScore(orderType, i, strength, true)
+            : ComputeRawScore(orderType, i);
         double weight = (double)(N - i + 1); // Linear decay
         weightedSum += score_i * weight;
         weightTotal += weight;
     }
-    
+
     double baseScore = (weightTotal > 0) ? weightedSum / weightTotal : 0;
-    
+
     // Step 2: Compute current candle score (dampened contribution)
     double currentScore = ComputeRawScore(orderType, 0);
     
@@ -1453,146 +1494,6 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     if(finalScore > 10.0) finalScore = 10.0;
     
     strength.finalScore = finalScore;
-    
-    // Populate component scores from the most recent closed candle (index 1)
-    // for reporting/dashboard purposes
-    // We compute detailed components only for index 1
-    {
-        double bufEMA_Fast[], bufEMA_Slow[], bufRSI[], bufATR[];
-        ArraySetAsSeries(bufEMA_Fast, true);
-        ArraySetAsSeries(bufEMA_Slow, true);
-        ArraySetAsSeries(bufRSI, true);
-        ArraySetAsSeries(bufATR, true);
-        
-        int needed = MathMax(ImpulseLookback, MathMax(DirectionalBodyLookback, ATRAvgLookback)) + 5;
-        if (needed < 30) needed = 30;
-        
-        if(CopyBuffer(emaFastHandle, 0, 1, 3, bufEMA_Fast) >= 3 &&
-           CopyBuffer(emaSlowHandle, 0, 1, 3, bufEMA_Slow) >= 3 &&
-           CopyBuffer(rsiHandle, 0, 1, 3, bufRSI) >= 3 &&
-           CopyBuffer(atrSignalHandle, 0, 1, needed, bufATR) >= needed)
-        {
-            MqlRates rates[];
-            ArraySetAsSeries(rates, true);
-            if(CopyRates(_Symbol, _Period, 1, needed, rates) >= needed)
-            {
-                double emaFast = bufEMA_Fast[0];
-                double emaSlow = bufEMA_Slow[0];
-                double emaFastPrev = bufEMA_Fast[1];
-                
-                // Trend
-                bool trendAligned = isBuy ? (emaFast > emaSlow) : (emaFast < emaSlow);
-                if(trendAligned) strength.trendScore += TrendWeight;
-                bool slopeAligned = isBuy ? (emaFast > emaFastPrev) : (emaFast < emaFastPrev);
-                if(slopeAligned) strength.trendScore += SlopeWeight;
-                if(strength.trendScore > 3.0) strength.trendScore = 3.0;
-                
-                // Body & Momentum
-                double currentBody = MathAbs(rates[0].close - rates[0].open);
-                double sumBody = 0;
-                int validCandles = 0;
-                for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
-                {
-                    sumBody += MathAbs(rates[i].close - rates[i].open);
-                    validCandles++;
-                }
-                double avgRecentBody = (validCandles > 0) ? sumBody / validCandles : currentBody;
-                
-                double rsi = bufRSI[0];
-                double baseMomentum = 0;
-                if(isBuy)
-                {
-                    if(rsi > 50 && rsi < RSIOverbought) baseMomentum += MomentumBaseWeight;
-                    if(rsi > RSIMomentumBuy) baseMomentum += MomentumTriggerWeight;
-                    if(currentBody > avgRecentBody) baseMomentum += BodyMomentumWeight;
-                }
-                else
-                {
-                    if(rsi < 50 && rsi > RSIOversold) baseMomentum += MomentumBaseWeight;
-                    if(rsi < RSIMomentumSell) baseMomentum += MomentumTriggerWeight;
-                    if(currentBody > avgRecentBody) baseMomentum += BodyMomentumWeight;
-                }
-                strength.momentumScore = baseMomentum;
-                
-                // Impulse
-                double bodyAccel = (avgRecentBody > 0) ? currentBody / avgRecentBody : 0;
-                if(bodyAccel > 3.0) bodyAccel = 3.0;
-                double currentRange = rates[0].high - rates[0].low;
-                double sumRange = 0;
-                for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
-                    sumRange += (rates[i].high - rates[i].low);
-                double avgRecentRange = (validCandles > 0) ? sumRange / validCandles : currentRange;
-                double rangeAccel = (avgRecentRange > 0) ? currentRange / avgRecentRange : 0;
-                if(rangeAccel > 3.0) rangeAccel = 3.0;
-                
-                int sameDirCount = 0;
-                for(int i=0; i<ImpulseLookback && i<needed; i++)
-                {
-                    bool candleBullish = (rates[i].close > rates[i].open);
-                    bool candleBearish = (rates[i].close < rates[i].open);
-                    if(isBuy && candleBullish) sameDirCount++;
-                    else if(!isBuy && candleBearish) sameDirCount++;
-                    else break;
-                }
-                double continuityScore = (double)sameDirCount / ImpulseLookback;
-                if(continuityScore > 1.0) continuityScore = 1.0;
-                
-                strength.impulseStrength = (0.5 * bodyAccel + 0.3 * rangeAccel + 0.2 * continuityScore) / 2.0;
-                if(strength.impulseStrength > 1.0) strength.impulseStrength = 1.0;
-                if(strength.impulseStrength < 0.0) strength.impulseStrength = 0.0;
-                
-                strength.momentumScore = strength.momentumScore * (1.0 + ImpulseBoostWeight * strength.impulseStrength);
-                if(strength.momentumScore > 3.0) strength.momentumScore = 3.0;
-                
-                // Chop & Volatility
-                double currentATR = bufATR[0];
-                double avgATR = 0;
-                if(needed >= ATRAvgLookback) {
-                    double sumATR = 0;
-                    for(int i=0; i<ATRAvgLookback && i<needed; i++) sumATR += bufATR[i];
-                    avgATR = sumATR / ATRAvgLookback;
-                } else {
-                    avgATR = currentATR;
-                }
-                double volRatio = (avgATR > 0) ? currentATR / avgATR : 0;
-                
-                if(volRatio > 1.0) strength.chopScore = ChopScoreHigh;
-                else if(volRatio > 0.8) strength.chopScore = ChopScoreMed;
-                else strength.chopScore = ChopScoreLow;
-                if(strength.chopScore > 2.0) strength.chopScore = 2.0;
-                
-                strength.volatilityScore = (volRatio > 1.2) ? VolatilityScoreHigh : VolatilityScoreLow;
-                
-                // Peak
-                bool breakout = false;
-                double localExtreme = isBuy ? rates[1].high : rates[1].low;
-                for(int i=2; i<=5; i++)
-                {
-                    if(isBuy) localExtreme = MathMax(localExtreme, rates[i].high);
-                    else localExtreme = MathMin(localExtreme, rates[i].low);
-                }
-                if(isBuy && rates[0].close > localExtreme) breakout = true;
-                if(!isBuy && rates[0].close < localExtreme) breakout = true;
-                if(breakout) strength.peakScore = PeakScoreWeight;
-                
-                // Wick
-                double maxOpenClose = MathMax(rates[0].open, rates[0].close);
-                double minOpenClose = MathMin(rates[0].open, rates[0].close);
-                strength.upperWick = rates[0].high - maxOpenClose;
-                strength.lowerWick = minOpenClose - rates[0].low;
-                strength.bodySignal = currentBody;
-                strength.avgBody = avgRecentBody;
-                
-                double safeBody = MathMax(currentBody, avgRecentBody * MinBodyRatio);
-                if(safeBody > 0)
-                {
-                    if(isBuy) strength.rejection = strength.upperWick / safeBody;
-                    else strength.rejection = strength.lowerWick / safeBody;
-                    strength.penaltyWick = strength.rejection * WickRejectionWeight;
-                }
-            }
-        }
-    }
     
     // VELOCITY TRACKING
     // Use smoothed scores for velocity (inherently smoother)
@@ -1624,11 +1525,15 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType)
     }
     
     // Debug Construction
-    strength.reasoning = StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f [Smooth:%d Blend:%.0f%%]", 
+    strength.reasoning = StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f [Smooth:%d Blend:%.0f%%]",
         strength.trendScore, strength.momentumScore, strength.impulseStrength,
         strength.chopScore, strength.peakScore, strength.volatilityScore, strength.normalizedVelocity,
         N, blend * 100);
-        
+
+    // Cache result for this tick
+    if(orderType == ORDER_TYPE_BUY) { _cachedBuyStrength = strength; _buyStrengthValid = true; }
+    else { _cachedSellStrength = strength; _sellStrengthValid = true; }
+
     return strength;
 }
 
@@ -4495,7 +4400,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v40.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v41.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -4595,7 +4500,7 @@ void UpdateDashboard()
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v40.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v41.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic

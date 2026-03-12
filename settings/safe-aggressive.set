@@ -1,102 +1,104 @@
 ; +-----------------------------------------+
-; Nyao Scalper v40.0 - SAFE-AGGRESSIVE PROFILE
+; Nyao Scalper v41.0 - SAFE-AGGRESSIVE PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
-; Optimized for XAUUSD M1-M5
-; Philosophy: Aggressive entries with safe lot sizing
+; Optimized for XAUUSD M1
+; Philosophy: High frequency with controlled risk
+; Aggressive entries with safe lot sizing, strong dampening,
+; and fast break-even locks for stable profit
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
-DirectionalBodyLookback=20
+DirectionalBodyLookback=8
 EMAFastPeriod=5
-EMASlowPeriod=15
-RSIPeriod=6
-ATRPeriod=6
-ATRAvgLookback=20
-ImpulseLookback=4
-ImpulseBoostWeight=1.5
+EMASlowPeriod=11
+RSIPeriod=7
+ATRPeriod=7
+ATRAvgLookback=10
+ImpulseLookback=3
+ImpulseBoostWeight=1.2
 SignalSmoothingCandles=2
-CurrentCandleBlend=0.30
-VelocityWindow=2.5
+CurrentCandleBlend=0.45
+VelocityWindow=2.0
 RSIOverbought=80
 RSIOversold=20
-RSIMomentumBuy=60
-RSIMomentumSell=40
+RSIMomentumBuy=58
+RSIMomentumSell=42
 ; ⚖️ Score Weight Settings
 TrendWeight=1.5
 SlopeWeight=1.5
-MomentumBaseWeight=1.2
-MomentumTriggerWeight=0.8
-BodyMomentumWeight=1.8
+MomentumBaseWeight=1.0
+MomentumTriggerWeight=0.6
+BodyMomentumWeight=1.6
 ChopScoreHigh=2.0
-ChopScoreMed=1.2
-ChopScoreLow=0.3
+ChopScoreMed=1.0
+ChopScoreLow=0.4
 VolatilityScoreHigh=1.0
 VolatilityScoreLow=0.5
 PeakScoreWeight=1.0
-WickRejectionWeight=0.7
-MinBodyRatio=1.2
+WickRejectionWeight=0.8
+MinBodyRatio=1.3
 ; 📝 Order & Position Settings
 EnableBuyOrders=true
 EnableSellOrders=true
 BaseLotSize=0.01
 MaxOpenOrders=8
-MaxTradesPerCandle=3
+MaxTradesPerCandle=1
 ConsecutiveCandleThresholdBoost=0.8
 MaxConsecutiveCandleBoosts=4
-ZonePoints=500.0
-BuyDuplicateMultiplier=1.5
-SellDuplicateMultiplier=1.5
-MinBreakEvenProfit=0.05
-ProfitThresholdMultiplier=1.0
-LossThresholdMultiplier=2.5
+ZonePoints=400.0
+BuyDuplicateMultiplier=1.2
+SellDuplicateMultiplier=1.2
+MinBreakEvenProfit=0.3
+ProfitThresholdMultiplier=1.3
+LossThresholdMultiplier=1.8
 MinBuySignalScore=5.0
 MinSellSignalScore=5.0
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=2
-LosingPosScorePenalty=1.5
-DrawdownThresholdPct=3.0
-DrawdownScoreBoost=2.0
-ConsecutiveLossCooldownBars=1
+LosingPosScorePenalty=1.8
+DrawdownThresholdPct=2.5
+DrawdownScoreBoost=2.5
+ConsecutiveLossCooldownBars=3
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
-MaxHoldingLossPositions=5
-MinHealthScore=0.2
-MaxAdverseATR=2.5
-HealthTrendWeight=0.4
+MaxHoldingLossPositions=2
+MinHealthScore=0.40
+MaxAdverseATR=1.5
+HealthTrendWeight=0.40
 HealthRSIWeight=0.25
 HealthATRWeight=0.25
-HealthSwingWeight=0.1
+HealthSwingWeight=0.10
 HealthRSIBuyMin=40.0
 HealthRSISellMax=60.0
-HealthSwingLookback=15
-HealthGraceBars=3
-EnablePartialClose=false
-PartialClose75Pct=0.2
-PartialClose50Pct=0.4
-PartialClose25Pct=1.0
-EnableHealthSLTightening=false
+HealthSwingLookback=18
+HealthGraceBars=2
+EnablePartialClose=true
+PartialClose75Pct=0.25
+PartialClose50Pct=0.50
+PartialClose25Pct=1.00
+EnableHealthSLTightening=true
 SLTightenATRMultiplier=2.0
-SLTightenMinHealthPct=0.5
-EnableBreakEvenOnSpread=false
-BreakEvenSpreadMultiplier=2.0
-EnableVirtualSLReentry=false
-ReentryMinSignalPct=0.6
+SLTightenMinHealthPct=0.50
+EnableBreakEvenOnSpread=true
+BreakEvenSpreadMultiplier=1.2
+EnableVirtualSLReentry=true
+ReentryMinSignalPct=0.65
 EnableProfitOffsetSL=true
-ConsecutiveWinsRequired=3
-MinOffsetProfit=0.5
+ConsecutiveWinsRequired=2
+MinOffsetProfit=0.8
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
-EquityDropPercent=5.0
+EquityDropPercent=6.0
 MinSignalStrengthForLot=8.0
 LotStepSize=0.01
 MaxLotSize=0.03
 ; 🏦 Equity Settings
-MinEquityPercent=50.0
+MinEquityPercent=65.0
 MaxDrawdownFromPeak=0.0
-PauseMinutes=3
-PauseMinutesMultiplier=1.2
-MaxPauseMinutes=60
+PauseMinutes=5
+PauseMinutesMultiplier=1.5
+MaxPauseMinutes=90
 MaxMinEquityTriggers=0
 ResetOnNewPeak=true
 TargetEquity=0.0
@@ -104,20 +106,20 @@ MinimumEquity=20.0
 ; 📈 Take Profit Settings
 EnableTakeProfit=false
 TPInputType=0
-TPValue=15.0
+TPValue=8.0
 ; 📉 Stop Loss Settings
 EnableStopLoss=true
 SLInputType=1
-SLValue=10.0
+SLValue=8.0
 ; 💸 Trailing TP/SL Settings
 EnableTrailing=true
 TrailingEnableBreakEvenLock=true
 TrailingSLOnProfitableOnly=true
-EnableAdaptiveTP=false
-EnableAdaptiveSL=false
+EnableAdaptiveTP=true
+EnableAdaptiveSL=true
 TSInputType=0
-TrailingDistanceValue=0.05
-TrailingValueMultiplier=0.1
+TrailingDistanceValue=0.25
+TrailingValueMultiplier=0.25
 ; 🤖 Robot Settings
 MagicNumber=6926268
 EnableDiscordAlerts=false
@@ -128,9 +130,9 @@ TradingEndTime=23:59
 EnableReports=true
 SendReportEveryHour=1
 EnableMarketCloseFilter=true
-MinutesBeforeClose=15
+MinutesBeforeClose=20
 EnableNewsFilter=true
-NewsMinutesBefore=20
-NewsMinutesAfter=20
+NewsMinutesBefore=25
+NewsMinutesAfter=25
 EnableLeveragePause=true
 EnableLogging=false
