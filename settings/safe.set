@@ -1,27 +1,28 @@
 ; +-----------------------------------------+
-; Nyao Scalper v40.0 - SAFE PROFILE
+; Nyao Scalper v41.0 - SAFE PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
-; Optimized for XAUUSD M1-M5
-; Philosophy: Capital preservation, stable continuous returns
+; Optimized for XAUUSD M1
+; Philosophy: Capital preservation, highest win rate
 ; Only highest-conviction trades, minimal exposure, tight risk controls
+; Slow frequency but high profit rate per trade
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
-DirectionalBodyLookback=25
-EMAFastPeriod=8
-EMASlowPeriod=20
+DirectionalBodyLookback=15
+EMAFastPeriod=6
+EMASlowPeriod=16
 RSIPeriod=10
 ATRPeriod=10
-ATRAvgLookback=25
-ImpulseLookback=5
+ATRAvgLookback=15
+ImpulseLookback=4
 ImpulseBoostWeight=0.8
-SignalSmoothingCandles=4
-CurrentCandleBlend=0.15
+SignalSmoothingCandles=3
+CurrentCandleBlend=0.25
 VelocityWindow=2.0
 RSIOverbought=75
 RSIOversold=25
-RSIMomentumBuy=60
-RSIMomentumSell=40
+RSIMomentumBuy=62
+RSIMomentumSell=38
 ; ⚖️ Score Weight Settings
 TrendWeight=1.5
 SlopeWeight=1.5
@@ -35,7 +36,7 @@ VolatilityScoreHigh=1.0
 VolatilityScoreLow=0.5
 PeakScoreWeight=1.0
 WickRejectionWeight=1.5
-MinBodyRatio=1.5
+MinBodyRatio=1.8
 ; 📝 Order & Position Settings
 EnableBuyOrders=true
 EnableSellOrders=true
@@ -44,14 +45,14 @@ MaxOpenOrders=3
 MaxTradesPerCandle=1
 ConsecutiveCandleThresholdBoost=1.5
 MaxConsecutiveCandleBoosts=2
-ZonePoints=600.0
+ZonePoints=700.0
 BuyDuplicateMultiplier=2.0
 SellDuplicateMultiplier=2.0
 MinBreakEvenProfit=0.3
 ProfitThresholdMultiplier=1.2
 LossThresholdMultiplier=1.5
-MinBuySignalScore=7.5
-MinSellSignalScore=7.5
+MinBuySignalScore=7.0
+MinSellSignalScore=7.0
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=1
@@ -61,7 +62,7 @@ DrawdownScoreBoost=2.5
 ConsecutiveLossCooldownBars=5
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
-MaxHoldingLossPositions=2
+MaxHoldingLossPositions=1
 MinHealthScore=0.50
 MaxAdverseATR=1.0
 HealthTrendWeight=0.40
@@ -78,14 +79,14 @@ PartialClose50Pct=0.60
 PartialClose25Pct=1.00
 EnableHealthSLTightening=true
 SLTightenATRMultiplier=1.2
-SLTightenMinHealthPct=0.65
+SLTightenMinHealthPct=0.60
 EnableBreakEvenOnSpread=true
-BreakEvenSpreadMultiplier=1.2
-EnableVirtualSLReentry=true
+BreakEvenSpreadMultiplier=1.0
+EnableVirtualSLReentry=false
 ReentryMinSignalPct=0.85
 EnableProfitOffsetSL=true
-ConsecutiveWinsRequired=5
-MinOffsetProfit=2.0
+ConsecutiveWinsRequired=4
+MinOffsetProfit=1.5
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=false
 EquityDropPercent=10.0

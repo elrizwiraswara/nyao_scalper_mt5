@@ -1,18 +1,22 @@
 ; +-----------------------------------------+
-; Nyao Scalper v40.0
+; Nyao Scalper v41.0 - DEFAULT PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
+; Optimized for XAUUSD M1
+; Philosophy: M1 scalping-optimized defaults
+; Fast signal response, balanced risk management
+; +-----------------------------------------+
 ; 📊 Indicator Settings
-DirectionalBodyLookback=20
-EMAFastPeriod=6
-EMASlowPeriod=15
+DirectionalBodyLookback=10
+EMAFastPeriod=5
+EMASlowPeriod=12
 RSIPeriod=8
 ATRPeriod=8
-ATRAvgLookback=20
-ImpulseLookback=4
+ATRAvgLookback=10
+ImpulseLookback=3
 ImpulseBoostWeight=1.0
-SignalSmoothingCandles=3
-CurrentCandleBlend=0.25
+SignalSmoothingCandles=2
+CurrentCandleBlend=0.40
 VelocityWindow=2.0
 RSIOverbought=80
 RSIOversold=20
@@ -46,8 +50,8 @@ SellDuplicateMultiplier=1.5
 MinBreakEvenProfit=0.5
 ProfitThresholdMultiplier=1.5
 LossThresholdMultiplier=2.0
-MinBuySignalScore=6.0
-MinSellSignalScore=6.0
+MinBuySignalScore=5.5
+MinSellSignalScore=5.5
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=2
@@ -57,24 +61,24 @@ DrawdownScoreBoost=2.0
 ConsecutiveLossCooldownBars=3
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
-MaxHoldingLossPositions=3
-MinHealthScore=0.4
+MaxHoldingLossPositions=2
+MinHealthScore=0.40
 MaxAdverseATR=1.5
-HealthTrendWeight=0.4
+HealthTrendWeight=0.40
 HealthRSIWeight=0.25
 HealthATRWeight=0.25
-HealthSwingWeight=0.1
-HealthRSIBuyMin=45.0
-HealthRSISellMax=55.0
+HealthSwingWeight=0.10
+HealthRSIBuyMin=40.0
+HealthRSISellMax=60.0
 HealthSwingLookback=20
 HealthGraceBars=2
 EnablePartialClose=true
 PartialClose75Pct=0.25
-PartialClose50Pct=0.5
-PartialClose25Pct=1.0
+PartialClose50Pct=0.50
+PartialClose25Pct=1.00
 EnableHealthSLTightening=true
-SLTightenATRMultiplier=1.5
-SLTightenMinHealthPct=0.6
+SLTightenATRMultiplier=2.0
+SLTightenMinHealthPct=0.50
 EnableBreakEvenOnSpread=true
 BreakEvenSpreadMultiplier=1.5
 EnableVirtualSLReentry=true
@@ -113,8 +117,8 @@ TrailingSLOnProfitableOnly=true
 EnableAdaptiveTP=true
 EnableAdaptiveSL=true
 TSInputType=0
-TrailingDistanceValue=0.2
-TrailingValueMultiplier=0.2
+TrailingDistanceValue=0.20
+TrailingValueMultiplier=0.20
 ; 🤖 Robot Settings
 MagicNumber=6926268
 EnableDiscordAlerts=false

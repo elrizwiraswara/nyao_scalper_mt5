@@ -1,23 +1,23 @@
 ; +-----------------------------------------+
-; Nyao Scalper v40.0 - BALANCED PROFILE
+; Nyao Scalper v41.0 - BALANCED PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
-; Optimized for XAUUSD M1-M5
-; Philosophy: Balanced risk and profit return
-; Quality entries with moderate exposure and reasonable protection
+; Optimized for XAUUSD M1
+; Philosophy: Medium frequency trading with stable profit
+; Quality entries, moderate exposure, solid risk management
 ; Suitable for everyday trading
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
-DirectionalBodyLookback=20
-EMAFastPeriod=6
-EMASlowPeriod=15
+DirectionalBodyLookback=12
+EMAFastPeriod=5
+EMASlowPeriod=14
 RSIPeriod=8
 ATRPeriod=8
-ATRAvgLookback=20
-ImpulseLookback=4
+ATRAvgLookback=12
+ImpulseLookback=3
 ImpulseBoostWeight=1.0
-SignalSmoothingCandles=3
-CurrentCandleBlend=0.25
+SignalSmoothingCandles=2
+CurrentCandleBlend=0.35
 VelocityWindow=2.0
 RSIOverbought=78
 RSIOversold=22
@@ -40,7 +40,7 @@ MinBodyRatio=1.5
 ; 📝 Order & Position Settings
 EnableBuyOrders=true
 EnableSellOrders=true
-BaseLotSize=0.02
+BaseLotSize=0.01
 MaxOpenOrders=6
 MaxTradesPerCandle=1
 ConsecutiveCandleThresholdBoost=1.0
@@ -51,8 +51,8 @@ SellDuplicateMultiplier=1.5
 MinBreakEvenProfit=0.5
 ProfitThresholdMultiplier=1.5
 LossThresholdMultiplier=2.0
-MinBuySignalScore=6.5
-MinSellSignalScore=6.5
+MinBuySignalScore=6.0
+MinSellSignalScore=6.0
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=2
@@ -62,15 +62,15 @@ DrawdownScoreBoost=2.0
 ConsecutiveLossCooldownBars=3
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
-MaxHoldingLossPositions=3
+MaxHoldingLossPositions=2
 MinHealthScore=0.40
 MaxAdverseATR=1.5
 HealthTrendWeight=0.40
 HealthRSIWeight=0.25
 HealthATRWeight=0.25
 HealthSwingWeight=0.10
-HealthRSIBuyMin=45.0
-HealthRSISellMax=55.0
+HealthRSIBuyMin=42.0
+HealthRSISellMax=58.0
 HealthSwingLookback=20
 HealthGraceBars=2
 EnablePartialClose=true
@@ -78,8 +78,8 @@ PartialClose75Pct=0.25
 PartialClose50Pct=0.50
 PartialClose25Pct=1.00
 EnableHealthSLTightening=true
-SLTightenATRMultiplier=1.5
-SLTightenMinHealthPct=0.60
+SLTightenATRMultiplier=1.8
+SLTightenMinHealthPct=0.55
 EnableBreakEvenOnSpread=true
 BreakEvenSpreadMultiplier=1.5
 EnableVirtualSLReentry=true
@@ -89,10 +89,10 @@ ConsecutiveWinsRequired=3
 MinOffsetProfit=1.0
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
-EquityDropPercent=8.0
-MinSignalStrengthForLot=9.0
+EquityDropPercent=6.0
+MinSignalStrengthForLot=8.5
 LotStepSize=0.01
-MaxLotSize=0.06
+MaxLotSize=0.05
 ; 🏦 Equity Settings
 MinEquityPercent=70.0
 MaxDrawdownFromPeak=0.0
@@ -104,7 +104,7 @@ ResetOnNewPeak=true
 TargetEquity=0.0
 MinimumEquity=20.0
 ; 📈 Take Profit Settings
-EnableTakeProfit=true
+EnableTakeProfit=false
 TPInputType=0
 TPValue=8.0
 ; 📉 Stop Loss Settings
