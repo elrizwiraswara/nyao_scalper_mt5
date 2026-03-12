@@ -89,7 +89,7 @@ input int MaxConsecutiveCandleBoosts = 3;                 // Max Consecutive Can
 input double ZonePoints = 500;                            // Zone Points to Avoid Duplicate Signals
 input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multiplier to Avoid Duplicate Buy Signals
 input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
-input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($)
+input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($ | 0 = Disabled)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
 input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
@@ -2494,7 +2494,7 @@ void ManageTrailingTPSL(ulong ticket)
 
     // Filter by profit threshold if enabled (only trail if profit > threshold)
     double profitThreshold = MinBreakEvenProfit * ProfitThresholdMultiplier;
-    bool canTrail = (!TrailingSLOnProfitableOnly || profit >= profitThreshold);
+    bool canTrail = (MinBreakEvenProfit <= 0 || !TrailingSLOnProfitableOnly || profit >= profitThreshold);
     
     if(canTrail)
     {
@@ -2606,9 +2606,9 @@ void ManageTrailingTPSL(ulong ticket)
         // Prevents losing substantial profit due to inability to trail
         
         // Define substantial as 3x minimum target profit
-        double minSubstantialProfit = MinBreakEvenProfit * 3.0; 
-        
-        if(profit >= minSubstantialProfit)
+        double minSubstantialProfit = MinBreakEvenProfit * 3.0;
+
+        if(MinBreakEvenProfit > 0 && profit >= minSubstantialProfit)
         {
             LogPrint("!! EMERGENCY CLOSE TRIGGERED !!");
             ClosePosition(ticket);
@@ -3412,8 +3412,9 @@ double CalculateBreakEvenPrice(ulong ticket, ENUM_POSITION_TYPE posType, double 
         // Convert cost to price
         costInPrice = (totalCost / volume) * (tickSize / tickValue);
 
-        // Convert MinBreakEvenProfit ($) to price
-        minProfitInPrice = (MinBreakEvenProfit / volume) * (tickSize / tickValue);
+        // Convert MinBreakEvenProfit ($) to price (0 = disabled, no offset)
+        if(MinBreakEvenProfit > 0)
+            minProfitInPrice = (MinBreakEvenProfit / volume) * (tickSize / tickValue);
     }
     
     // Calculate break-even price
