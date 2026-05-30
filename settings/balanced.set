@@ -1,19 +1,21 @@
 ; +-----------------------------------------+
-; Nyao Scalper v41.0 - BALANCED PROFILE
+; Nyao Scalper v42.0 - BALANCED PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Optimized for XAUUSD M1
 ; Philosophy: Medium frequency trading with stable profit
 ; Quality entries, moderate exposure, solid risk management
-; Suitable for everyday trading
+; Per-trade risk ~0.8% equity; basket stop ~6%
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
 DirectionalBodyLookback=12
 EMAFastPeriod=5
 EMASlowPeriod=14
+SlopeLookback=3
 RSIPeriod=8
 ATRPeriod=8
 ATRAvgLookback=12
+MinVolRatioToTrade=0.65
 ImpulseLookback=3
 ImpulseBoostWeight=1.0
 SignalSmoothingCandles=2
@@ -31,15 +33,19 @@ MomentumTriggerWeight=0.5
 BodyMomentumWeight=1.5
 ChopScoreHigh=2.0
 ChopScoreMed=1.0
-ChopScoreLow=0.5
+ChopScoreLow=0.0
 VolatilityScoreHigh=1.0
-VolatilityScoreLow=0.5
+VolatilityScoreLow=0.0
 PeakScoreWeight=1.0
 WickRejectionWeight=1.0
 MinBodyRatio=1.5
 ; 📝 Order & Position Settings
 EnableBuyOrders=true
 EnableSellOrders=true
+EnableNewBarEntryOnly=true
+EnableMaxSpreadFilter=true
+MaxSpreadPoints=0
+MaxSpreadATRRatio=0.22
 BaseLotSize=0.01
 MaxOpenOrders=6
 MaxTradesPerCandle=1
@@ -51,8 +57,8 @@ SellDuplicateMultiplier=1.5
 MinBreakEvenProfit=0.5
 ProfitThresholdMultiplier=1.5
 LossThresholdMultiplier=2.0
-MinBuySignalScore=6.0
-MinSellSignalScore=6.0
+MinBuySignalScore=5.0
+MinSellSignalScore=5.0
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=2
@@ -90,10 +96,13 @@ MinOffsetProfit=1.0
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
 EquityDropPercent=6.0
+MaxEquityDropLotSteps=2
 MinSignalStrengthForLot=8.5
 LotStepSize=0.01
 MaxLotSize=0.05
 ; 🏦 Equity Settings
+EnableBasketStop=true
+MaxBasketLossPct=6.0
 MinEquityPercent=70.0
 MaxDrawdownFromPeak=0.0
 PauseMinutes=5
@@ -110,7 +119,7 @@ TPValue=8.0
 ; 📉 Stop Loss Settings
 EnableStopLoss=true
 SLInputType=1
-SLValue=8.0
+SLValue=0.8
 ; 💸 Trailing TP/SL Settings
 EnableTrailing=true
 TrailingEnableBreakEvenLock=true

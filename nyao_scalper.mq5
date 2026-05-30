@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v41.0                                               |
+// | Nyao Scalper v42.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version "41.0"
+#property version "42.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -39,7 +39,7 @@ enum ENUM_INPUT_TYPE
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v41.0"
+input group " Nyao Scalper v42.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
@@ -50,9 +50,11 @@ input group "📊 Indicator Settings"
 input int DirectionalBodyLookback = 10;                   // Lookback for directional body analysis
 input int EMAFastPeriod = 5;                              // EMA Fast Period
 input int EMASlowPeriod = 12;                             // EMA Slow Period
+input int SlopeLookback = 3;                              // EMA Slope Lookback Bars (noise reduction)
 input int RSIPeriod = 8;                                  // RSI Period
 input int ATRPeriod = 8;                                  // ATR Period
 input int ATRAvgLookback = 10;                            // ATR Average Lookback
+input double MinVolRatioToTrade = 0.6;                    // Min ATR/AvgATR Ratio to Trade (0 = Disabled, blocks dead market)
 input int ImpulseLookback = 3;                            // Impulse Lookback
 input double ImpulseBoostWeight = 1.0;                    // Impulse Boost Weight
 input int SignalSmoothingCandles = 2;                     // Closed Candles for Weighted Average (1-10)
@@ -71,9 +73,9 @@ input double MomentumTriggerWeight = 0.5;                 // Momentum Trigger We
 input double BodyMomentumWeight = 1.5;                    // Body Momentum Weight
 input double ChopScoreHigh = 2.0;                         // Chop Score High (Strong Trend)
 input double ChopScoreMed = 1.0;                          // Chop Score Med (Weak Trend)
-input double ChopScoreLow = 0.5;                          // Chop Score Low (Chop Risk)
+input double ChopScoreLow = 0.0;                          // Chop Score Low (Chop Risk - no free points)
 input double VolatilityScoreHigh = 1.0;                   // Volatility Score High
-input double VolatilityScoreLow = 0.5;                    // Volatility Score Low
+input double VolatilityScoreLow = 0.0;                    // Volatility Score Low (no free points)
 input double PeakScoreWeight = 1.0;                       // Peak Breakout Score Weight
 input double WickRejectionWeight = 1.0;                   // Wick Rejection Penalty Weight
 input double MinBodyRatio = 1.5;                          // Min Body Ratio for Wick Calculation
@@ -81,6 +83,10 @@ input double MinBodyRatio = 1.5;                          // Min Body Ratio for 
 input group "📝 Order & Position Settings"
 input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
+input bool EnableNewBarEntryOnly = true;                  // Evaluate/Open Entries Only on New Bar (stable signals)
+input bool EnableMaxSpreadFilter = true;                  // Block New Entries When Spread Too Wide
+input double MaxSpreadPoints = 0;                         // Max Spread in Points (0 = Auto: ATR-based)
+input double MaxSpreadATRRatio = 0.25;                    // Auto Spread Cap as Fraction of ATR (when MaxSpreadPoints = 0)
 input double BaseLotSize = 0.01;                          // Base Lot Size
 input int MaxOpenOrders = 8;                              // Max Consecutive Open Orders
 input int MaxTradesPerCandle = 1;                         // Max Trades Per Candle (0 = Unlimited)
@@ -92,8 +98,8 @@ input double SellDuplicateMultiplier = 1.5;               // Min Distance Multip
 input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($ | 0 = Disabled)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
-input double MinBuySignalScore = 5.5;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
-input double MinSellSignalScore = 5.5;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
+input double MinBuySignalScore = 4.5;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
+input double MinSellSignalScore = 4.5;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
 input group "🛡️ Signal Dampening Settings"
 input bool EnableSignalDampening = true;                  // Enable Position-Aware Signal Dampening
@@ -134,11 +140,14 @@ input double MinOffsetProfit = 1.0;                       // Min Accumulated Pro
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
 input double EquityDropPercent = 5.0;                     // Equity Drop % per Lot Step
+input int MaxEquityDropLotSteps = 2;                      // Max Drawdown-Based Lot Steps (0 = Unlimited)
 input double MinSignalStrengthForLot = 8.0;               // Min Signal Score for Lot Increase
 input double LotStepSize = 0.01;                          // Lot Increase Step Size
 input double MaxLotSize = 0.05;                           // Max Lot Size
 
 input group "🏦 Equity Settings"
+input bool EnableBasketStop = true;                       // Close All When Total Floating Loss Exceeds Limit
+input double MaxBasketLossPct = 8.0;                      // Max Total Floating Loss as % of Equity (0 = Disabled)
 input double MinEquityPercent = 70.0;                     // Min Equity % from Peak - Pause Trading when Reached
 input double MaxDrawdownFromPeak = 0;                     // Max Equity $ Drawdown - Pause Trading when Reached (0 = Disabled)
 input int PauseMinutes = 5;                               // Pause Duration (Minutes)
@@ -305,6 +314,9 @@ int sellPositionCount = 0;
 datetime currentBarTime = 0;
 int buysOnCurrentBar = 0;
 int sellsOnCurrentBar = 0;
+
+// New-Bar Entry Gate (only evaluate entries once per closed bar when enabled)
+datetime lastEntryBarTime = 0;
 
 // Consecutive Trading Candle Tracker (for threshold escalation)
 int consecutiveBuyCandles = 0;                            // How many consecutive candles opened buy positions
@@ -653,7 +665,10 @@ void OnTick()
     // Check equity drawdawn
     CheckEquityDrawdawn();
 
-    if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded) 
+    // Aggregate (basket) floating-loss protection
+    CheckBasketStop();
+
+    if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded)
     {   
         // Close all positions and completely stop the EA
         CloseAllPositions();
@@ -886,10 +901,92 @@ PositionLossState GetOpenPositionLossState(ENUM_POSITION_TYPE direction)
 }
 
 // +------------------------------------------------------------------+
+// | Get Total Floating P/L for our positions on this symbol          |
+// +------------------------------------------------------------------+
+double GetTotalFloatingPL()
+{
+    double total = 0;
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+        if(!PositionSelectByTicket(ticket)) continue;
+        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+        total += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+    }
+    return total;
+}
+
+// +------------------------------------------------------------------+
+// | Basket Stop - Close all when aggregate floating loss exceeds cap |
+// | Per-position management protects single trades; this is a hard   |
+// | portfolio-level backstop against compounding stacked drawdown.   |
+// +------------------------------------------------------------------+
+void CheckBasketStop()
+{
+    if(!EnableBasketStop || MaxBasketLossPct <= 0) return;
+
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    if(equity <= 0) return;
+
+    double floatingPL = GetTotalFloatingPL();
+    if(floatingPL >= 0) return; // only acts on net floating loss
+
+    double lossPct = (-floatingPL / equity) * 100.0;
+    if(lossPct < MaxBasketLossPct) return;
+
+    LogPrint("+-----------------------------------------+");
+    LogPrint("BASKET STOP TRIGGERED!");
+    LogPrint("Floating Loss: $", DoubleToString(floatingPL, 2),
+             " (", DoubleToString(lossPct, 2), "% of equity >= ", DoubleToString(MaxBasketLossPct, 2), "%)");
+    LogPrint("Closing ALL positions and pausing.");
+    LogPrint("+-----------------------------------------+");
+
+    CloseAllPositions();
+
+    // Reuse the existing pause machinery
+    if(!isPaused)
+    {
+        isPaused = true;
+        pauseStartTime = TimeTradeServer();
+        currentPauseDuration = (MaxPauseMinutes > 0) ? MathMin(PauseMinutes, MaxPauseMinutes) : PauseMinutes;
+        totalPauseCount++;
+        totalPauseDurationMinutes += currentPauseDuration;
+    }
+
+    if(EnableDiscordAlerts)
+    {
+        string alertMsg = "**Instrument:** " + _Symbol + "\n";
+        alertMsg += "**Timeframe:** " + EnumToString(_Period) + "\n";
+        alertMsg += "**Server Time:** " + TimeToString(TimeTradeServer(), TIME_DATE|TIME_SECONDS) + "\n";
+        alertMsg += "**Floating Loss:** $" + DoubleToString(floatingPL, 2) + " (" + DoubleToString(lossPct, 2) + "%)\n";
+        alertMsg += "**Limit:** " + DoubleToString(MaxBasketLossPct, 2) + "% of equity\n";
+        alertMsg += "**Pause Duration:** " + IntegerToString(currentPauseDuration) + " minutes\n";
+        alertMsg += "**Action:** All Positions Closed, Trading Paused";
+
+        SendDiscordAlert("🧺 BASKET STOP TRIGGERED", alertMsg, 15158332); // Red color
+    }
+}
+
+// +------------------------------------------------------------------+
 // | Check For Trading Signals                                        |
 // +------------------------------------------------------------------+
 void CheckForTradingSignal()
-{   
+{
+    // NEW-BAR ENTRY GATE
+    // When enabled, evaluate/open entries only once per newly closed bar.
+    // Position management still runs every tick (ManagePositions in OnTick).
+    // This stabilizes signals (no intrabar repaint) and makes "Open prices"/
+    // "1-minute OHLC" backtests representative of live behavior.
+    if(EnableNewBarEntryOnly)
+    {
+        datetime currBarTime = iTime(_Symbol, _Period, 0);
+        if(lastEntryBarTime == currBarTime) return;
+        lastEntryBarTime = currBarTime;
+    }
+
     // Check Signals
     double buySignal = BuySignal();
     double sellSignal = SellSignal();
@@ -913,7 +1010,7 @@ double BuySignal()
     double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     
     // Check strict conditions (limits & distance) first
-    if(!CheckBuyConditions(currentPrice)) return 0;
+    if(!CheckEntryConditions(POSITION_TYPE_BUY, currentPrice)) return 0;
 
     // Calculate smoothed signal strength (blended weighted average)
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY);
@@ -993,7 +1090,7 @@ double SellSignal()
     double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     
     // Check strict conditions (limits & distance) first
-    if(!CheckSellConditions(currentPrice)) return 0;
+    if(!CheckEntryConditions(POSITION_TYPE_SELL, currentPrice)) return 0;
 
     // Calculate smoothed signal strength (blended weighted average)
     SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL);
@@ -1068,34 +1165,43 @@ double SellSignal()
 }
 
 // Duplicate Buy Filter
-bool CheckBuyConditions(double price)
+// +------------------------------------------------------------------+
+// | Unified Entry Conditions (limits, dampening, cooldown, duplicate)|
+// | Direction-driven: replaces the former CheckBuy/SellConditions    |
+// +------------------------------------------------------------------+
+bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price)
 {
     datetime currBarTime = iTime(_Symbol, _Period, 0);
+    bool isBuy = (dir == POSITION_TYPE_BUY);
+    string dirName = isBuy ? "Buy" : "Sell";
+
+    int sameOnBar = isBuy ? buysOnCurrentBar : sellsOnCurrentBar;
+    int oppOnBar  = isBuy ? sellsOnCurrentBar : buysOnCurrentBar;
 
     // Per-candle trade limit
     if(MaxTradesPerCandle > 0)
     {
-        int buysOnCandle = (currentBarTime == currBarTime) ? buysOnCurrentBar : 0;
-        if(buysOnCandle >= MaxTradesPerCandle)
+        int onCandle = (currentBarTime == currBarTime) ? sameOnBar : 0;
+        if(onCandle >= MaxTradesPerCandle)
         {
             return false;
         }
     }
-    
+
     // Prevent opposite direction trades on the same candle
-    if(sellsOnCurrentBar > 0)
+    if(oppOnBar > 0)
     {
         return false;
     }
 
-    // SIGNAL DAMPENING: Hard block when too many losing buys are open
+    // SIGNAL DAMPENING: Hard block when too many losing same-dir positions are open
     if(EnableSignalDampening)
     {
-        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_BUY);
+        PositionLossState lossState = GetOpenPositionLossState(dir);
         if(lossState.losingCount >= MaxLosingPositionsSameDir)
         {
-            LogPrint("[DAMPENED] Buy BLOCKED: ", lossState.losingCount, 
-                     " losing buys >= max ", MaxLosingPositionsSameDir);
+            LogPrint("[DAMPENED] ", dirName, " BLOCKED: ", lossState.losingCount,
+                     " losing ", dirName, "s >= max ", MaxLosingPositionsSameDir);
             return false;
         }
     }
@@ -1105,7 +1211,7 @@ bool CheckBuyConditions(double price)
     {
         if(currBarTime < cooldownUntilBarTime)
         {
-            LogPrint("[COOLDOWN] Buy BLOCKED: cooldown active until ", 
+            LogPrint("[COOLDOWN] ", dirName, " BLOCKED: cooldown active until ",
                      TimeToString(cooldownUntilBarTime));
             return false;
         }
@@ -1115,84 +1221,23 @@ bool CheckBuyConditions(double price)
         }
     }
 
-    // Check minimum distance from last buy (duplicate signal filter)
-    ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_BUY);
-    if(lastBuyTime > 0 && lastTicket > 0)
+    // Check minimum distance from last same-dir entry (duplicate signal filter)
+    ulong lastTicket  = GetLastPositionTicket(dir);
+    datetime lastTime = isBuy ? lastBuyTime : lastSellTime;
+    double lastPrice  = isBuy ? lastBuyPrice : lastSellPrice;
+    double dupMult    = isBuy ? BuyDuplicateMultiplier : SellDuplicateMultiplier;
+
+    if(lastTime > 0 && lastTicket > 0)
     {
-        double minDistance = ZonePoints * _Point * BuyDuplicateMultiplier;
-        double distance = MathAbs(price - lastBuyPrice);
-        
+        double minDistance = ZonePoints * _Point * dupMult;
+        double distance = MathAbs(price - lastPrice);
+
         if(distance < minDistance)
         {
             return false;
         }
     }
-    
-    return true;
-}
 
-// Duplicate Sell Filter
-bool CheckSellConditions(double price)
-{
-    datetime currBarTime = iTime(_Symbol, _Period, 0);
-    
-    // Per-candle trade limit
-    if(MaxTradesPerCandle > 0)
-    {
-        int sellsOnCandle = (currentBarTime == currBarTime) ? sellsOnCurrentBar : 0;
-        if(sellsOnCandle >= MaxTradesPerCandle)
-        {
-            return false;
-        }
-    }
-
-    // Prevent opposite direction trades on the same candle
-    if(buysOnCurrentBar > 0)
-    {
-        return false;
-    }
-
-    // SIGNAL DAMPENING: Hard block when too many losing sells are open
-    if(EnableSignalDampening)
-    {
-        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_SELL);
-        if(lossState.losingCount >= MaxLosingPositionsSameDir)
-        {
-            LogPrint("[DAMPENED] Sell BLOCKED: ", lossState.losingCount, 
-                     " losing sells >= max ", MaxLosingPositionsSameDir);
-            return false;
-        }
-    }
-
-    // SIGNAL DAMPENING: Cooldown after consecutive losses
-    if(EnableSignalDampening && cooldownUntilBarTime > 0)
-    {
-        datetime currBarTimeSell = iTime(_Symbol, _Period, 0);
-        if(currBarTimeSell < cooldownUntilBarTime)
-        {
-            LogPrint("[COOLDOWN] Sell BLOCKED: cooldown active until ", 
-                     TimeToString(cooldownUntilBarTime));
-            return false;
-        }
-        else
-        {
-            cooldownUntilBarTime = 0; // Cooldown expired
-        }
-    }
-
-    // Check minimum distance from last sell (duplicate signal filter)
-    ulong lastTicket = GetLastPositionTicket(POSITION_TYPE_SELL);
-    if(lastSellTime > 0 && lastTicket > 0)
-    {
-        double minDistance = ZonePoints * _Point * SellDuplicateMultiplier;
-        double distance = MathAbs(price - lastSellPrice);
-        
-        if(distance < minDistance)
-        {
-            return false;
-        }
-    }
-    
     return true;
 }
 // +------------------------------------------------------------------+
@@ -1249,7 +1294,11 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
     // Copy minimal buffers
     int needed = MathMax(ImpulseLookback, MathMax(DirectionalBodyLookback, ATRAvgLookback)) + 5;
 
-    if(CopyBuffer(emaFastHandle, 0, signalIndex, 3, bufEMA_Fast) < 3) return 0;
+    // Fast EMA needs enough history for a multi-bar slope (SlopeLookback bars back)
+    int slopeBars = (SlopeLookback < 1) ? 1 : SlopeLookback;
+    int emaFastCopy = MathMax(3, slopeBars + 1);
+
+    if(CopyBuffer(emaFastHandle, 0, signalIndex, emaFastCopy, bufEMA_Fast) < emaFastCopy) return 0;
     if(CopyBuffer(emaSlowHandle, 0, signalIndex, 3, bufEMA_Slow) < 3) return 0;
     if(CopyBuffer(rsiHandle, 0, signalIndex, 3, bufRSI) < 3) return 0;
     if(CopyBuffer(atrSignalHandle, 0, signalIndex, needed, bufATR) < needed) return 0;
@@ -1262,7 +1311,9 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
     // 1. TREND SCORE (Max 3)
     double emaFast = bufEMA_Fast[0];
     double emaSlow = bufEMA_Slow[0];
-    double emaFastPrev = bufEMA_Fast[1];
+    // Multi-bar slope: compare current Fast EMA against its value SlopeLookback bars ago
+    // (less whipsaw than a single-bar slope on noisy M1 data)
+    double emaFastPrev = bufEMA_Fast[slopeBars];
     double trendScore = 0;
 
     bool trendAligned = false;
@@ -1355,6 +1406,12 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
 
     double volRatio = 0;
     if(avgATR > 0) volRatio = currentATR / avgATR;
+
+    // DEAD-MARKET FILTER: when ATR has collapsed relative to its average the
+    // market is too quiet to scalp profitably (costs dominate). Block the signal.
+    // Guard volRatio > 0 so we don't block when ATR data is unavailable.
+    if(MinVolRatioToTrade > 0 && volRatio > 0 && volRatio < MinVolRatioToTrade)
+        return 0;
 
     double chopScore = 0;
     if (volRatio > 1.0) chopScore = ChopScoreHigh;
@@ -3067,7 +3124,49 @@ bool IsAllowedToOpenPosition()
         return false;
     }
 
+    if (IsSpreadTooWide())
+    {
+        LogPrint("+-----------------------------------------+");
+        LogPrint("OPEN ORDER BLOCKED!");
+        LogPrint("Spread too wide for entry.");
+        LogPrint("+-----------------------------------------+");
+        return false;
+    }
+
     return true;
+}
+
+// +------------------------------------------------------------------+
+// | Spread Filter - Block entries when spread is too wide            |
+// | When MaxSpreadPoints > 0 uses a fixed cap, otherwise derives a   |
+// | cap from current ATR (MaxSpreadATRRatio fraction of ATR points)  |
+// +------------------------------------------------------------------+
+bool IsSpreadTooWide()
+{
+    if(!EnableMaxSpreadFilter) return false;
+
+    double spreadPoints = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+
+    double cap = MaxSpreadPoints;
+    if(cap <= 0)
+    {
+        // Auto mode: cap = fraction of current ATR expressed in points
+        double bufATR[];
+        ArraySetAsSeries(bufATR, true);
+        if(CopyBuffer(atrSignalHandle, 0, 0, 1, bufATR) < 1) return false; // can't judge, don't block
+        double atrPoints = (_Point > 0) ? bufATR[0] / _Point : 0;
+        cap = atrPoints * MaxSpreadATRRatio;
+        if(cap <= 0) return false; // no usable ATR, don't block
+    }
+
+    if(spreadPoints > cap)
+    {
+        LogPrint("[SPREAD] Blocked: spread ", DoubleToString(spreadPoints, 0),
+                 " pts > cap ", DoubleToString(cap, 0), " pts");
+        return true;
+    }
+
+    return false;
 }
 
 
@@ -3189,12 +3288,22 @@ double CalculateDynamicLotSize(double signalScore = 0)
     
     // Each EquityDropPercent step adds LotStepSize
     // Only increase lot if signal score validates the entry
+    // GUARDRAILS: never scale up while already bleeding (cooldown after losses
+    // or an active basket loss), and cap the number of drawdown-based steps.
+    bool inCooldown = (cooldownUntilBarTime > 0 && iTime(_Symbol, _Period, 0) < cooldownUntilBarTime);
+    bool basketBleeding = (EnableBasketStop && GetTotalFloatingPL() < 0);
+
     int equitySteps = 0;
-    if(equityDropPercent > 0 && EquityDropPercent > 0 && signalScore >= MinSignalStrengthForLot)
+    if(equityDropPercent > 0 && EquityDropPercent > 0 && signalScore >= MinSignalStrengthForLot
+       && !inCooldown && !basketBleeding)
     {
         equitySteps = (int)(equityDropPercent / EquityDropPercent);
+
+        // Cap cumulative drawdown lot steps (0 = unlimited)
+        if(MaxEquityDropLotSteps > 0 && equitySteps > MaxEquityDropLotSteps)
+            equitySteps = MaxEquityDropLotSteps;
     }
-    
+
     double equityLotIncrease = equitySteps * LotStepSize;
     currentLot += equityLotIncrease;
     
