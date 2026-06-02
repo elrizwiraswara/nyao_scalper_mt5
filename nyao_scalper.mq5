@@ -172,6 +172,7 @@ input int HedgeMaxCycles = 3;                             // Max Cycles Before C
 input double HedgeMaxChainLossUSD = 0.0;                  // Close Chain if Loss >= this $ (0 = Off)
 input double HedgeMaxChainLossPct = 0.0;                  // Close Chain if Loss >= this % Equity (0 = Off)
 input bool HedgeClearRootSL = true;                       // Clear First Position SL on Chain Start
+input double HedgeTrailATR = 1.0;                         // Graduated Hedge Trail Distance (ATR; 0 = normal trailing)
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -341,6 +342,7 @@ struct ManagedPosition
     double chainAnchorLoss;                              // Cycle start loss ($, positive) carried on every leg of the cycle
     int cycleNum;                                        // Which cycle this leg belongs to (0 = first; +1 on each reseed)
     bool noRehedge;                                      // true = exhausted chain released to loss mgmt; never start a new chain on it
+    bool hedgeGraduated;                                 // true = former chain leg; trail with HedgeTrailATR (lot-independent) not the $ distance
 };
 
 // Managed positions array
@@ -2678,13 +2680,34 @@ void ManageTrailingTPSL(ulong ticket)
     {
         // Calculate effective Trailing Distance
         double effectiveDist = TrailingDistanceValue + slAdjustment; // Adaptive TS
-        
+
         // Ensure distance is safe (not negative)
         if(effectiveDist < (TrailingValueMultiplier * 0.1)) effectiveDist = TrailingValueMultiplier * 0.1;
-        
-        // Calculate trailing distance
-        double finalTrailingPoints = ConvertToPoints(TSInputType, effectiveDist, volume);
-        double trailingDistancePrice = finalTrailingPoints * _Point;
+
+        // Graduated hedge: trail at HedgeTrailATR x ATR (lot-independent). A large hedge
+        // lot turns a small dollar-based distance into a near-zero price gap, so the stop
+        // lands at market and closes instantly; an ATR distance gives it real room to run.
+        double finalTrailingPoints;
+        double trailingDistancePrice;
+        bool useHedgeTrail = (posIndex != -1 && managedPositions[posIndex].hedgeGraduated && HedgeTrailATR > 0);
+        double hedgeAtr = 0;
+        if(useHedgeTrail)
+        {
+            double _bufATR[];
+            ArraySetAsSeries(_bufATR, true);
+            if(CopyBuffer(atrSignalHandle, 0, 0, 2, _bufATR) >= 2) hedgeAtr = _bufATR[1];
+        }
+
+        if(useHedgeTrail && hedgeAtr > 0)
+        {
+            trailingDistancePrice = HedgeTrailATR * hedgeAtr;
+            finalTrailingPoints   = trailingDistancePrice / _Point;
+        }
+        else
+        {
+            finalTrailingPoints   = ConvertToPoints(TSInputType, effectiveDist, volume);
+            trailingDistancePrice = finalTrailingPoints * _Point;
+        }
         
         long stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
         long freezeLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
@@ -2819,6 +2842,7 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     managedPositions[managedPositionCount].chainAnchorLoss = chainAnchorLoss;
     managedPositions[managedPositionCount].cycleNum = cycleNum;
     managedPositions[managedPositionCount].noRehedge = false;
+    managedPositions[managedPositionCount].hedgeGraduated = false;
     // Capture original SL from broker if position exists
     double origSL = 0;
     if(PositionSelectByTicket(ticket)) origSL = PositionGetDouble(POSITION_SL);
@@ -3295,6 +3319,7 @@ void GraduateChainLeg(ulong ticket)
     managedPositions[idx].hedgeLevel      = 0;
     managedPositions[idx].chainAnchorLoss = 0;
     managedPositions[idx].cycleNum        = 0;
+    managedPositions[idx].hedgeGraduated  = true;   // trail this big-lot leg with HedgeTrailATR
 }
 
 // +------------------------------------------------------------------+
@@ -3329,6 +3354,7 @@ void ReleaseChainToLossMgmt(ulong chainId)
         managedPositions[z].chainAnchorLoss = 0;
         managedPositions[z].cycleNum        = 0;
         managedPositions[z].noRehedge       = true;   // exhausted - do not hedge these again
+        managedPositions[z].hedgeGraduated  = true;   // trail these big-lot legs with HedgeTrailATR
         released++;
     }
     LogPrint("[HEDGE CHAIN] Released chain ", chainId, " (", released,
@@ -3655,6 +3681,7 @@ void ManageHedgeChains()
         managedPositions[i].hedgeLevel      = 0;
         managedPositions[i].chainAnchorLoss = anchorLoss;
         managedPositions[i].cycleNum        = 0;
+        managedPositions[i].hedgeGraduated  = false;   // active chain leg again, not a graduated trailer
 
         // Clear the first position's SL so the chain logic alone governs it (optional).
         if(HedgeClearRootSL && curSL != 0) ModifyPosition(ticket, 0, curTP);

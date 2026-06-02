@@ -120,6 +120,7 @@ HedgeMaxCycles=4
 HedgeMaxChainLossUSD=0.0
 HedgeMaxChainLossPct=0.0
 HedgeClearRootSL=true
+HedgeTrailATR=1.0
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
 EquityDropPercent=4.0
