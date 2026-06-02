@@ -8,7 +8,7 @@
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
-#property description "Source: https://github.com/elrizwiraswara/nyao_scalper_mt5 [BSD-3-Clause License]"
+#property description "Source: https://github.com/elrizwiraswara/nyao_scalper_mt5 [BSD-3-Clause]"
 #property description ""
 #property description "No guarantee of profitability. Use at your own risk. Past performance ≠ future results"
 #property description "Built with significant effort, please use and share respectfully"
