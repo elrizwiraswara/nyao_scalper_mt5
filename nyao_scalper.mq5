@@ -343,6 +343,7 @@ struct ManagedPosition
     int cycleNum;                                        // Which cycle this leg belongs to (0 = first; +1 on each reseed)
     bool noRehedge;                                      // true = exhausted chain released to loss mgmt; never start a new chain on it
     bool hedgeGraduated;                                 // true = former chain leg; trail with HedgeTrailATR (lot-independent) not the $ distance
+    double hedgeLockProfit;                              // min profit ($) to keep locked on a graduated hedge (recovery floor); 0 = none
 };
 
 // Managed positions array
@@ -2772,6 +2773,44 @@ void ManageTrailingTPSL(ulong ticket)
         }
     }
 
+    // HEDGE RECOVERY LOCK: a graduated hedge must never give back below the recovery level
+    // (profit = HedgeRecoveryPct% of the older leg's locked loss). Floor the SL at that
+    // profit, independent of the trailing gate; trailing still rides the SL above it.
+    if(posIndex != -1 && managedPositions[posIndex].hedgeLockProfit > 0)
+    {
+        double lockProfit = managedPositions[posIndex].hedgeLockProfit;
+        double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+        double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+        if(tv > 0 && ts > 0 && volume > 0)
+        {
+            double lockDist = (lockProfit / volume) * (ts / tv);   // dollars -> price distance
+            double bidNow = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double askNow = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double baseSL = shouldModifySL ? newSL : currentSL;
+
+            if(posType == POSITION_TYPE_BUY)
+            {
+                double lockPrice = NormalizeDouble(entryPrice + lockDist, _Digits);
+                // Raise the SL up to the lock (but keep an already-better trailed SL)
+                if(lockPrice > baseSL && lockPrice < bidNow)
+                {
+                    newSL = lockPrice;
+                    shouldModifySL = true;
+                }
+            }
+            else
+            {
+                double lockPrice = NormalizeDouble(entryPrice - lockDist, _Digits);
+                // Cap the SL down to the lock (but keep an already-better trailed SL)
+                if((baseSL == 0 || lockPrice < baseSL) && lockPrice > askNow)
+                {
+                    newSL = lockPrice;
+                    shouldModifySL = true;
+                }
+            }
+        }
+    }
+
     // Skip if nothing changed
     if(!shouldModifySL && MathAbs(newTP - currentTP) < _Point) return;
     
@@ -2843,6 +2882,7 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     managedPositions[managedPositionCount].cycleNum = cycleNum;
     managedPositions[managedPositionCount].noRehedge = false;
     managedPositions[managedPositionCount].hedgeGraduated = false;
+    managedPositions[managedPositionCount].hedgeLockProfit = 0;
     // Capture original SL from broker if position exists
     double origSL = 0;
     if(PositionSelectByTicket(ticket)) origSL = PositionGetDouble(POSITION_SL);
@@ -3320,6 +3360,7 @@ void GraduateChainLeg(ulong ticket)
     managedPositions[idx].chainAnchorLoss = 0;
     managedPositions[idx].cycleNum        = 0;
     managedPositions[idx].hedgeGraduated  = true;   // trail this big-lot leg with HedgeTrailATR
+    managedPositions[idx].hedgeLockProfit = 0;      // caller sets a recovery floor if applicable
 }
 
 // +------------------------------------------------------------------+
@@ -3545,10 +3586,14 @@ void ManageHedgeChains()
                 LogPrint("Hedge ", hedgeTicket, " profit $", DoubleToString(hedgePL, 2),
                          " >= ", DoubleToString(HedgeRecoveryPct, 0), "% of older ", olderTicket,
                          " loss $", DoubleToString(olderLoss, 2));
-                LogPrint("Closing older leg; hedge graduates to normal trailing.");
+                LogPrint("Closing older leg; hedge graduates and trails (SL floored at recovery).");
                 LogPrint("+-----------------------------------------+");
                 ClosePosition(olderTicket);
                 GraduateChainLeg(hedgeTicket);
+                // Recovery floor: keep at least coverNeeded profit locked on the hedge so the
+                // pair never gives back below the HedgeRecoveryPct net. Trailing rides above it.
+                int hgi = GetManagedPositionIndex(hedgeTicket);
+                if(hgi != -1) managedPositions[hgi].hedgeLockProfit = coverNeeded;
                 continue;
             }
         }
@@ -3682,6 +3727,7 @@ void ManageHedgeChains()
         managedPositions[i].chainAnchorLoss = anchorLoss;
         managedPositions[i].cycleNum        = 0;
         managedPositions[i].hedgeGraduated  = false;   // active chain leg again, not a graduated trailer
+        managedPositions[i].hedgeLockProfit = 0;
 
         // Clear the first position's SL so the chain logic alone governs it (optional).
         if(HedgeClearRootSL && curSL != 0) ModifyPosition(ticket, 0, curTP);
