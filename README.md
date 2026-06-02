@@ -57,7 +57,7 @@ The EA calculates a "Signal Score" for every tick based on:
 
 > ⚠️ **This is a martingale.** Lot size grows as a losing trade is hedged and re-hedged. It can recover many drawdowns smoothly but carries genuine **ruin risk** in strongly trending or choppy markets — it converts frequent small losses into rarer large ones. It is **opt-in per profile** (`EnableHedgeChain`) and **off in the `safe` profile by design**. Size `HedgeMaxLot` and the loss caps for an account you can afford to draw down.
 
-When a position moves into loss by `HedgeTriggerATR × ATR`, the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time:
+When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-direction signal confirms** (`HedgeRequireSignal`: the opposite-side score ≥ `HedgeMinSignalScore`), the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time. The signal gate is an **anti-spike filter**: a wick that crosses the ATR trigger intrabar but isn't a real reversal won't have a strong opposite-side score, so no hedge is opened — the chain waits for the move to be confirmed (or the position to recover).
 
 - **Recovery Sizing** (`HedgeAutoLot`): each hedge lot is *computed* so its profit covers `HedgeRecoveryPct%` of the leg it hedges within a `HedgeRecoveryATR × ATR` favorable move — instead of a blind fixed multiplier (which often can't catch up before price reverses). Falls back to `HedgeLotMultiplier` when auto-sizing is off, and is always clamped to `HedgeMaxLot`.
 - **Covered**: hedge profit covers the older leg's current loss → close the older leg; the hedge graduates to normal trailing.

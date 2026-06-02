@@ -105,6 +105,8 @@ MinOffsetProfit=1.5
 ; OFF by design: a martingale contradicts this profile's capital-preservation goal.
 EnableHedgeChain=false
 HedgeTriggerATR=1.5
+HedgeRequireSignal=true
+HedgeMinSignalScore=6.0
 HedgeAutoLot=true
 HedgeRecoveryATR=1.0
 HedgeLotMultiplier=2.0

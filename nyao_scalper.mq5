@@ -157,6 +157,8 @@ input double MinOffsetProfit = 1.0;                       // Min Accumulated Pro
 input group "🔀 Hedge Chain (Rolling Martingale Recovery) Settings"
 input bool EnableHedgeChain = true;                       // Enable Hedge Chain (MARTINGALE - high risk)
 input double HedgeTriggerATR = 1.5;                       // Adverse Move (ATR) to Start the Chain
+input bool HedgeRequireSignal = true;                    // Only Hedge if Reverse Signal Confirms (anti-spike)
+input double HedgeMinSignalScore = 4.5;                  // Min Reverse-Direction Score to Open Hedge
 input bool HedgeAutoLot = true;                           // Auto-size Hedge Lot to Recover (else Multiplier)
 input double HedgeRecoveryATR = 1.0;                      // Favorable Move (ATR) to Recover Within
 input double HedgeLotMultiplier = 2.0;                    // Fixed Hedge Lot Multiplier (Auto-size OFF)
@@ -3614,6 +3616,24 @@ void ManageHedgeChains()
         double adverse = (posType == POSITION_TYPE_BUY) ? (entryPrice - bid) : (ask - entryPrice);
         if(adverse <= 0) continue;
         if((adverse / atr) < HedgeTriggerATR) continue;
+
+        // ANTI-SPIKE: only hedge if the REVERSE direction's signal score confirms the move.
+        // A wick/spike that crosses the ATR trigger intrabar but isn't a real reversal will
+        // not have a strong opposite-direction score, so no doubled hedge is opened. If the
+        // reversal is genuine the score builds up and the hedge fires on a later tick; if it
+        // was a spike the position recovers and no hedge is needed.
+        if(HedgeRequireSignal)
+        {
+            ENUM_ORDER_TYPE hedgeDir = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+            double hedgeScore = GetSignalStrength(hedgeDir).finalScore;
+            if(hedgeScore < HedgeMinSignalScore)
+            {
+                LogPrint("[HEDGE CHAIN] Skip start for ", ticket, ": reverse signal ",
+                         DoubleToString(hedgeScore, 2), " < ", DoubleToString(HedgeMinSignalScore, 2),
+                         " (likely spike) - waiting for confirmation.");
+                continue;
+            }
+        }
 
         double anchorLoss = -pl;                           // positive loss magnitude at chain start
 

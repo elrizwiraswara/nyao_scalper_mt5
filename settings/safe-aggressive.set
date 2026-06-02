@@ -105,6 +105,8 @@ MinOffsetProfit=0.8
 ; 🔀 Hedge Chain (Rolling Martingale Recovery) Settings
 EnableHedgeChain=true
 HedgeTriggerATR=1.5
+HedgeRequireSignal=true
+HedgeMinSignalScore=4.0
 HedgeAutoLot=true
 HedgeRecoveryATR=1.0
 HedgeLotMultiplier=2.0
