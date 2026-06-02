@@ -53,6 +53,20 @@ The EA calculates a "Signal Score" for every tick based on:
   - **Virtual SL + Re-entry**: Closes losing positions at the health threshold, then immediately re-enters at the current (better) price if the signal is still valid.
   - **Profit Offset SL**: Tightens SL of losing positions using accumulated profits from consecutive winning trades.
 
+### Hedge Chain Recovery (Optional)
+
+> ⚠️ **This is a martingale.** Lot size grows as a losing trade is hedged and re-hedged. It can recover many drawdowns smoothly but carries genuine **ruin risk** in strongly trending or choppy markets — it converts frequent small losses into rarer large ones. It is **opt-in per profile** (`EnableHedgeChain`) and **off in the `safe` profile by design**. Size `HedgeMaxLot` and the loss caps for an account you can afford to draw down.
+
+When a position moves into loss by `HedgeTriggerATR × ATR`, the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time:
+
+- **Recovery Sizing** (`HedgeAutoLot`): each hedge lot is *computed* so its profit covers `HedgeRecoveryPct%` of the leg it hedges within a `HedgeRecoveryATR × ATR` favorable move — instead of a blind fixed multiplier (which often can't catch up before price reverses). Falls back to `HedgeLotMultiplier` when auto-sizing is off, and is always clamped to `HedgeMaxLot`.
+- **Covered**: hedge profit covers the older leg's current loss → close the older leg; the hedge graduates to normal trailing.
+- **Roll**: hedge is losing but the older leg has recovered to break-even → close the older leg (free) and open a larger reverse hedge against the current one. Repeats up to `HedgeCycleLevels` per cycle.
+- **Reseed**: at the cycle/lot limit, partial-close the deepest hedge by `HedgeCyclePartialPct%` and start a fresh, smaller cycle (up to `HedgeMaxCycles`) — capping lot growth instead of stacking ever-larger legs.
+- **Stop**: if the chain's combined loss exceeds `HedgeMaxChainLossPct%` of equity (or `HedgeMaxChainLossUSD`), the whole chain is closed to bound the loss.
+
+While a chain is active its legs are excluded from the standard trailing/loss-management, and the first position's stop-loss is cleared so the chain logic alone governs the pair.
+
 ### Lot Sizing
 
 - **Recovery Mode**: Increases lot size incrementally after equity drops for faster recovery. _Guardrails (new in v42):_ capped at `MaxEquityDropLotSteps` total steps, and **disabled** while in a post-loss cooldown or while the basket is in floating loss — so size never scales up while actively bleeding.
@@ -112,6 +126,24 @@ The score is calculated by summing up weights from specialized components:
 
 **Entry Condition**: `Total Score` >= `MinSignalScore`
 
+### Entry Execution (Market vs. Limit)
+
+By default, a qualifying signal opens **at market** (current Ask/Bid). Optionally, fresh entries can be placed as a **pending pullback limit** instead:
+
+- **`EnableLimitEntry`** _(default off)_: When on, a fresh signal places a Buy Limit below the Ask (or Sell Limit above the Bid), aiming for a better fill on a small retracement rather than chasing the move at market.
+- **`LimitEntryAnchor`**: Where the limit is placed —
+  - **Fixed ATR** _(default)_: a flat depth of `LimitEntryATRFraction × ATR` below/above price. Simplest; easiest to reason about.
+  - **EMA**: at the fast EMA (a natural M1 retracement target).
+  - **Swing**: at the recent swing low/high (`HealthSwingLookback` bars) — pure structure.
+  - **Smart**: the *nearer-to-price* of the swing level and the fast EMA, so the limit lands at a price that means something.
+  - For EMA/Swing/Smart, `LimitEntryATRFraction` acts as a **cap** — the limit is never placed deeper than that ATR fraction (so you never wait absurdly far), and it always respects the broker stop level. If no valid level sits on the pullback side, it falls back to the fixed depth.
+- **`LimitEntryATRFraction`**: Fixed pullback depth (Fixed-ATR mode) / maximum pullback cap (EMA/Swing/Smart modes), as a fraction of ATR.
+- **`LimitEntryExpiryBars`**: Cancels an unfilled limit after N bars (managed internally, broker-agnostic).
+- **`LimitEntryCancelOnFlip`**: Cancels the pending if the directional signal drops back below its threshold before filling.
+- **Scope**: This affects **fresh entries only**. Virtual-SL re-entries always execute at market — their purpose is to restore exposure immediately, so they must not risk going unfilled.
+
+> **Trade-off:** A pullback limit improves average fill price but **lowers fill rate** — strong momentum/breakout moves (which this EA's scoring favors) often run without retracing, so the best moves may be missed while weaker, stalling signals fill preferentially. Backtest both modes before committing; it is off by default for this reason.
+
 ## Settings Profiles
 
 Pre-configured settings files are available in the `settings/` folder. Load them via MetaTrader 5: **Charts → Templates** or manually copy values.
@@ -147,6 +179,10 @@ Pre-configured settings files are available in the `settings/` folder. Load them
 | Virtual SL Re-entry | On (50%) | On (65%) | On (75%) | On (75%) | Off |
 | Dynamic Lots | On | On (capped) | On | On | Off |
 | News Filter | 15/15 min | 25/25 min | 30/30 min | 30/30 min | 45/45 min |
+| **Hedge Chain** | On | On | On | On | **Off** |
+| Hedge Max Lot | 0.30 | 0.04 | 0.10 | 0.06 | 0.02 |
+| Hedge Cycles × Levels | 4 × 3 | 2 × 2 | 3 × 2 | 3 × 2 | 1 × 2 |
+| Hedge Chain Loss Cap (% eq) | 15% | 6% | 10% | 8% | 3% |
 
 > **Stop Loss units are now consistent** across all profiles — every profile uses `SLInputType = Percent of Equity`, so per-trade risk is comparable and scales with account size. (In v41 the SL unit type varied by profile, which made the magnitudes contradict each profile's stated philosophy.) Per-trade SL × Max Open Orders is kept roughly in line with each profile's Basket Stop.
 
@@ -204,7 +240,7 @@ If you prefer coding in Visual Studio Code, you can compile `.mq5` files directl
 
 Results in the Strategy Tester only mean something if the test mirrors live conditions. For this EA specifically:
 
-1.  **Use "Every tick based on real ticks"** (Strategy Tester → Modeling). Lower-fidelity modes can misrepresent intrabar behavior. With `EnableNewBarEntryOnly = true` (default) entries are decided on bar close, so `1 minute OHLC` is also reasonable for a faster sweep — but validate the final candidate on real ticks.
+1.  **Use "Every tick based on real ticks"** (Strategy Tester → Modeling). Lower-fidelity modes can misrepresent intrabar behavior. With `EnableNewBarEntryOnly = true` (default) entries are decided on bar close, so `1 minute OHLC` is also reasonable for a faster sweep — but validate the final candidate on real ticks. **Note:** Virtual-SL re-entries fire intrabar by default (immediately at the better price); set `ReentryRespectsNewBarGate = true` if you want re-entries to also wait for bar close so an `OHLC`/`Open prices` backtest has no intrabar entries at all.
 2.  **Include realistic costs.** Set your broker's **commission** in the tester and test on a **realistic spread** (ideally the symbol's actual spread, not 0). On M1 XAUUSD, spread + commission is the dominant cost — a backtest without them is meaningless.
 3.  **Know what the tester can't see.** `CalendarValueHistory` (the high-impact **news filter**) generally returns nothing inside the Strategy Tester, so backtests run **without** news protection that live trading has. Treat tester drawdowns around news as optimistic.
 4.  **Validate out-of-sample.** With this many tunable inputs, in-sample optimization overfits easily. Tune on one period, then confirm on a separate untouched period (or use walk-forward) before trusting a profile.
@@ -219,6 +255,7 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 - **New-bar entry evaluation** (stable signals, honest backtests) and **dead-market filter** (skip collapsed-ATR regimes).
 - **Multi-bar EMA slope**; chop/volatility no longer add free points (thresholds recalibrated).
 - **Consistent Stop-Loss units** across all profiles (percent of equity), re-tuned so each profile matches its stated aim.
+- **Hedge Chain recovery (optional, martingale)**: rolling reverse-hedge with computed recovery-lot sizing, cycle reseeding (partial-close instead of unbounded lot growth), and an equity-% chain loss cap. Opt-in per profile; **off in `safe`**. ⚠️ High risk — see the [Hedge Chain Recovery](#hedge-chain-recovery-optional) section.
 - Code cleanup (unified entry-condition logic) and repo hygiene (`.ex5` no longer tracked).
 
 ## Credits
