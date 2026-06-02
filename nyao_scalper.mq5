@@ -157,8 +157,8 @@ input double MinOffsetProfit = 1.0;                       // Min Accumulated Pro
 input group "🔀 Hedge Chain (Rolling Martingale Recovery) Settings"
 input bool EnableHedgeChain = true;                       // Enable Hedge Chain (MARTINGALE - high risk)
 input double HedgeTriggerATR = 1.5;                       // Adverse Move (ATR) to Start the Chain
-input bool HedgeRequireSignal = true;                    // Only Hedge if Reverse Signal Confirms (anti-spike)
-input double HedgeMinSignalScore = 4.5;                  // Min Reverse-Direction Score to Open Hedge
+input bool HedgeRequireSignal = true;                     // Only Hedge if Reverse Signal Confirms (anti-spike)
+input double HedgeMinSignalScore = 4.5;                   // Min Reverse-Direction Score to Open Hedge
 input bool HedgeAutoLot = true;                           // Auto-size Hedge Lot to Recover (else Multiplier)
 input double HedgeRecoveryATR = 1.0;                      // Favorable Move (ATR) to Recover Within
 input double HedgeLotMultiplier = 2.0;                    // Fixed Hedge Lot Multiplier (Auto-size OFF)
@@ -172,7 +172,7 @@ input int HedgeMaxCycles = 3;                             // Max Cycles Before C
 input double HedgeMaxChainLossUSD = 0.0;                  // Close Chain if Loss >= this $ (0 = Off)
 input double HedgeMaxChainLossPct = 0.0;                  // Close Chain if Loss >= this % Equity (0 = Off)
 input bool HedgeClearRootSL = true;                       // Clear First Position SL on Chain Start
-input double HedgeTrailATR = 1.0;                         // Graduated Hedge Trail Distance (ATR; 0 = normal trailing)
+input double HedgeTrailATR = 0.5;                         // Graduated Hedge Trail Distance (ATR; 0 = normal trailing)
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input bool EnableDynamicLots = true;                      // Enable Dynamic Lot Sizing
@@ -3441,15 +3441,18 @@ bool ReseedCycle(ulong id, ulong olderTicket, ulong hedgeTicket, double hedgeLot
     if(closeVol < minL || remaining < minL)
         return false;                                   // can't reduce meaningfully
 
-    // 1) Close the recovered older leg (free / near breakeven)
-    if(olderTicket != 0) ClosePosition(olderTicket);
-
-    // 2) Partial-close the deepest hedge (locks part of its loss, shrinks exposure)
+    // 1) Partial-close the deepest hedge FIRST (shrink exposure). If it fails, leave the
+    //    chain fully INTACT (older not yet closed) and bail so the caller releases both
+    //    legs cleanly to loss management - never a half-dismantled chain.
     if(!PartialClosePosition(hedgeTicket, closeVol))
     {
-        LogPrint("[HEDGE CHAIN RESEED] Partial close failed for ", hedgeTicket);
+        LogPrint("[HEDGE CHAIN RESEED] Partial close failed for ", hedgeTicket,
+                 " - chain left intact, releasing to loss management.");
         return false;
     }
+
+    // 2) Close the recovered older leg (free / near breakeven)
+    if(olderTicket != 0) ClosePosition(olderTicket);
 
     // 3) Re-read the reduced hedge -> becomes the new cycle's level-0 root
     if(!PositionSelectByTicket(hedgeTicket)) return false;
