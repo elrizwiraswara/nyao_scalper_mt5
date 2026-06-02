@@ -161,14 +161,14 @@ input bool HedgeAutoLot = true;                           // Auto-size Hedge Lot
 input double HedgeRecoveryATR = 1.0;                      // Favorable Move (ATR) to Recover Within
 input double HedgeLotMultiplier = 2.0;                    // Fixed Hedge Lot Multiplier (Auto-size OFF)
 input double HedgeMaxLot = 0.10;                          // Hard Lot Ceiling Per Hedge Leg
-input double HedgeRecoveryPct = 100.0;                    // Close Older Leg When Hedge Covers This % Loss
-input double HedgeRollMinProfit = 0.0;                    // Min Older-Leg Profit ($) to Roll
+input double HedgeRecoveryPct = 110.0;                    // Close Older Leg When Hedge Covers This % Loss
+input double HedgeRollMinProfit = 0.5;                    // Min Older-Leg Profit ($) to Roll
 input int HedgeCycleLevels = 2;                           // Max Hedge Levels Per Cycle Before Reseed
-input bool EnableHedgeCycleReset = true;                  // Reseed New Cycle at Limit (else Close Chain)
+input bool EnableHedgeCycleReset = false;                 // Reseed New Cycle at Limit (else Close Chain)
 input double HedgeCyclePartialPct = 50.0;                 // % of Deepest Hedge to Close at Reseed
 input int HedgeMaxCycles = 3;                             // Max Cycles Before Closing Chain (0 = Unlimited)
 input double HedgeMaxChainLossUSD = 0.0;                  // Close Chain if Loss >= this $ (0 = Off)
-input double HedgeMaxChainLossPct = 10.0;                 // Close Chain if Loss >= this % Equity (0 = Off)
+input double HedgeMaxChainLossPct = 0.0;                  // Close Chain if Loss >= this % Equity (0 = Off)
 input bool HedgeClearRootSL = true;                       // Clear First Position SL on Chain Start
 
 input group "🧮 Dynamic Lot Sizing Settings"
@@ -338,6 +338,7 @@ struct ManagedPosition
     int hedgeLevel;                                      // Level within the cycle: 0 = root, 1+ = each successive hedge
     double chainAnchorLoss;                              // Cycle start loss ($, positive) carried on every leg of the cycle
     int cycleNum;                                        // Which cycle this leg belongs to (0 = first; +1 on each reseed)
+    bool noRehedge;                                      // true = exhausted chain released to loss mgmt; never start a new chain on it
 };
 
 // Managed positions array
@@ -1056,6 +1057,35 @@ double GetTotalFloatingPL()
 }
 
 // +------------------------------------------------------------------+
+// | Floating P/L of NON hedge-chain positions only                   |
+// | A hedge chain intentionally carries a transient drawdown while it |
+// | recovers; including its legs here would let the basket stop close |
+// | the chain prematurely. Active chain legs are bounded by their own |
+// | HedgeMaxChainLossPct/USD instead. Falls back to the full total    |
+// | when the hedge feature is disabled.                               |
+// +------------------------------------------------------------------+
+double GetBasketFloatingPL()
+{
+    if(!EnableHedgeChain) return GetTotalFloatingPL();
+
+    double total = 0;
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+        if(!PositionSelectByTicket(ticket)) continue;
+        if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+        int idx = GetManagedPositionIndex(ticket);
+        if(idx != -1 && managedPositions[idx].chainId != 0) continue; // skip active chain legs
+
+        total += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+    }
+    return total;
+}
+
+// +------------------------------------------------------------------+
 // | Basket Stop - Close all when aggregate floating loss exceeds cap |
 // | Per-position management protects single trades; this is a hard   |
 // | portfolio-level backstop against compounding stacked drawdown.   |
@@ -1067,7 +1097,9 @@ void CheckBasketStop()
     double equity = AccountInfoDouble(ACCOUNT_EQUITY);
     if(equity <= 0) return;
 
-    double floatingPL = GetTotalFloatingPL();
+    // Exclude active hedge-chain legs: they are bounded by HedgeMaxChainLossPct/USD,
+    // not by the basket stop (a chain's transient drawdown must not trip the basket).
+    double floatingPL = GetBasketFloatingPL();
     if(floatingPL >= 0) return; // only acts on net floating loss
 
     double lossPct = (-floatingPL / equity) * 100.0;
@@ -1075,12 +1107,12 @@ void CheckBasketStop()
 
     LogPrint("+-----------------------------------------+");
     LogPrint("BASKET STOP TRIGGERED!");
-    LogPrint("Floating Loss: $", DoubleToString(floatingPL, 2),
+    LogPrint("Floating Loss (excl. hedge chains): $", DoubleToString(floatingPL, 2),
              " (", DoubleToString(lossPct, 2), "% of equity >= ", DoubleToString(MaxBasketLossPct, 2), "%)");
-    LogPrint("Closing ALL positions and pausing.");
+    LogPrint("Closing all non-chain positions and pausing.");
     LogPrint("+-----------------------------------------+");
 
-    CloseAllPositions();
+    CloseAllPositions(false, true);  // skip active hedge-chain legs
 
     // Reuse the existing pause machinery
     if(!isPaused)
@@ -2784,6 +2816,7 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     managedPositions[managedPositionCount].hedgeLevel = hedgeLevel;
     managedPositions[managedPositionCount].chainAnchorLoss = chainAnchorLoss;
     managedPositions[managedPositionCount].cycleNum = cycleNum;
+    managedPositions[managedPositionCount].noRehedge = false;
     // Capture original SL from broker if position exists
     double origSL = 0;
     if(PositionSelectByTicket(ticket)) origSL = PositionGetDouble(POSITION_SL);
@@ -3276,6 +3309,31 @@ void CloseChain(ulong chainId)
 }
 
 // +------------------------------------------------------------------+
+// | Release an exhausted chain to adaptive loss management            |
+// | When a chain can no longer expand (max cycles / lot ceiling), it  |
+// | is NOT force-closed: every leg is handed back to normal trailing  |
+// | + loss management and flagged noRehedge so no new chain starts on |
+// | it. The legs then resolve via health close / partial / trailing,  |
+// | and (being chainId 0 again) are re-covered by the basket stop.    |
+// +------------------------------------------------------------------+
+void ReleaseChainToLossMgmt(ulong chainId)
+{
+    int released = 0;
+    for(int z = 0; z < managedPositionCount; z++)
+    {
+        if(managedPositions[z].chainId != chainId) continue;
+        managedPositions[z].chainId         = 0;
+        managedPositions[z].hedgeLevel      = 0;
+        managedPositions[z].chainAnchorLoss = 0;
+        managedPositions[z].cycleNum        = 0;
+        managedPositions[z].noRehedge       = true;   // exhausted - do not hedge these again
+        released++;
+    }
+    LogPrint("[HEDGE CHAIN] Released chain ", chainId, " (", released,
+             " legs) to adaptive loss management - no re-hedge.");
+}
+
+// +------------------------------------------------------------------+
 // | Effective chain-loss stop ($): combines the fixed-$ and          |
 // | %-of-equity caps. Returns the tighter (smaller) of whichever are  |
 // | enabled, or 0 if neither is set.                                  |
@@ -3500,17 +3558,19 @@ void ManageHedgeChains()
                          " reached -> partial-close & reseed new cycle.");
                 if(!ReseedCycle(id, olderTicket, hedgeTicket, hedgeLot, hedgeType, cycleNum, atr))
                 {
-                    LogPrint("[HEDGE CHAIN] Reseed failed (cannot reduce hedge) -> closing chain.");
-                    CloseChain(id);
+                    LogPrint("[HEDGE CHAIN] Reseed failed (cannot reduce hedge) -> release to loss mgmt.");
+                    ReleaseChainToLossMgmt(id);
                 }
                 continue;
             }
             else
             {
-                LogPrint("[HEDGE CHAIN GIVE UP] Chain ", id, " cyc ", cycleNum, ": ", why, ", ",
+                // Chain exhausted (max cycles / lot ceiling with reseed off). Do NOT close:
+                // hand the legs to adaptive loss management and stop hedging them.
+                LogPrint("[HEDGE CHAIN EXHAUSTED] Chain ", id, " cyc ", cycleNum, ": ", why, ", ",
                          (!EnableHedgeCycleReset ? "reseed disabled" : "max cycles reached"),
-                         " -> closing chain.");
-                CloseChain(id);
+                         " -> release to adaptive loss management (no re-hedge).");
+                ReleaseChainToLossMgmt(id);
                 continue;
             }
         }
@@ -3535,6 +3595,7 @@ void ManageHedgeChains()
     for(int i = 0; i < managedPositionCount; i++)
     {
         if(managedPositions[i].chainId != 0) continue;     // already in a chain
+        if(managedPositions[i].noRehedge) continue;        // exhausted chain leg - left to loss mgmt
 
         ulong ticket = managedPositions[i].ticket;
         if(!PositionSelectByTicket(ticket)) continue;
@@ -3882,22 +3943,29 @@ bool ClosePosition(ulong ticket)
 }
 
 // Close all positions regardless of profit/loss
-void CloseAllPositions(bool unProfitableOnly = false)
+void CloseAllPositions(bool unProfitableOnly = false, bool skipChainLegs = false)
 {
     int closedCount = 0;
-    
+
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
-        
+
         if(PositionSelectByTicket(ticket))
         {
-            if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
                PositionGetInteger(POSITION_MAGIC) == MagicNumber)
             {
                 double profit = PositionGetDouble(POSITION_PROFIT);
 
                 if (unProfitableOnly && profit >= 0) continue;
+
+                // Leave active hedge-chain legs alone (basket stop only sweeps normal trades)
+                if(skipChainLegs && EnableHedgeChain)
+                {
+                    int idx = GetManagedPositionIndex(ticket);
+                    if(idx != -1 && managedPositions[idx].chainId != 0) continue;
+                }
 
                 LogPrint("Closing position. Ticket: ", ticket, ", Profit/Loss: $", profit);
 
