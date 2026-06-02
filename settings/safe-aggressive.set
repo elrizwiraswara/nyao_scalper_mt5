@@ -116,7 +116,7 @@ EnableHedgeCycleReset=true
 HedgeCyclePartialPct=50.0
 HedgeMaxCycles=2
 HedgeMaxChainLossUSD=0.0
-HedgeMaxChainLossPct=6.0
+HedgeMaxChainLossPct=0.0
 HedgeClearRootSL=true
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
