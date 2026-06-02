@@ -63,9 +63,10 @@ When a position moves into loss by `HedgeTriggerATR × ATR`, the EA opens a reve
 - **Covered**: hedge profit covers the older leg's current loss → close the older leg; the hedge graduates to normal trailing.
 - **Roll**: hedge is losing but the older leg has recovered to break-even → close the older leg (free) and open a larger reverse hedge against the current one. Repeats up to `HedgeCycleLevels` per cycle.
 - **Reseed**: at the cycle/lot limit, partial-close the deepest hedge by `HedgeCyclePartialPct%` and start a fresh, smaller cycle (up to `HedgeMaxCycles`) — capping lot growth instead of stacking ever-larger legs.
-- **Stop**: if the chain's combined loss exceeds `HedgeMaxChainLossPct%` of equity (or `HedgeMaxChainLossUSD`), the whole chain is closed to bound the loss.
+- **Exhausted → release** (not closed): once the chain can no longer expand (`HedgeMaxCycles` reached, or the `HedgeMaxLot` ceiling hit with reseed off), the legs are **handed back to the adaptive loss management** — trailing, health-revalidation, partial close — and flagged so no new hedge is started on them. The chain is **not** force-closed at this point.
+- **Optional hard stop** (`HedgeMaxChainLossPct` / `HedgeMaxChainLossUSD`, **default 0 = off**): if set, closes the whole chain when its combined loss crosses the cap. Off by default so the chain is bounded by cycles + lot and then released.
 
-While a chain is active its legs are excluded from the standard trailing/loss-management, and the first position's stop-loss is cleared so the chain logic alone governs the pair.
+While a chain is active its legs are excluded from the standard trailing/loss-management **and from the portfolio basket stop** (a chain's transient drawdown must not trip it) — the chain is governed solely by its own cycle/lot limits. Once released (or after the optional hard stop), the legs become normal positions again and the basket stop covers them. The first position's stop-loss is cleared on chain start so the chain logic alone governs the pair.
 
 ### Lot Sizing
 
@@ -182,7 +183,9 @@ Pre-configured settings files are available in the `settings/` folder. Load them
 | **Hedge Chain** | On | On | On | On | **Off** |
 | Hedge Max Lot | 0.30 | 0.04 | 0.10 | 0.06 | 0.02 |
 | Hedge Cycles × Levels | 4 × 3 | 2 × 2 | 3 × 2 | 3 × 2 | 1 × 2 |
-| Hedge Chain Loss Cap (% eq) | 15% | 6% | 10% | 8% | 3% |
+| Hedge Hard Loss Cap | Off | Off | Off | Off | Off |
+
+> The hedge chain is bounded by **cycles × levels** and **max lot**; when exhausted it is **released to the adaptive loss management** rather than force-closed. The optional hard loss cap (`HedgeMaxChainLossPct`/`USD`) ships **off** in every profile — set it if you want a fixed catastrophic-loss close.
 
 > **Stop Loss units are now consistent** across all profiles — every profile uses `SLInputType = Percent of Equity`, so per-trade risk is comparable and scales with account size. (In v41 the SL unit type varied by profile, which made the magnitudes contradict each profile's stated philosophy.) Per-trade SL × Max Open Orders is kept roughly in line with each profile's Basket Stop.
 
@@ -255,7 +258,7 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 - **New-bar entry evaluation** (stable signals, honest backtests) and **dead-market filter** (skip collapsed-ATR regimes).
 - **Multi-bar EMA slope**; chop/volatility no longer add free points (thresholds recalibrated).
 - **Consistent Stop-Loss units** across all profiles (percent of equity), re-tuned so each profile matches its stated aim.
-- **Hedge Chain recovery (optional, martingale)**: rolling reverse-hedge with computed recovery-lot sizing, cycle reseeding (partial-close instead of unbounded lot growth), and an equity-% chain loss cap. Opt-in per profile; **off in `safe`**. ⚠️ High risk — see the [Hedge Chain Recovery](#hedge-chain-recovery-optional) section.
+- **Hedge Chain recovery (optional, martingale)**: rolling reverse-hedge with computed recovery-lot sizing and cycle reseeding (partial-close instead of unbounded lot growth). Bounded by **cycles + max lot**; when exhausted the legs are **released to the adaptive loss management** rather than force-closed, and active chains are **exempt from the basket stop** so their transient drawdown doesn't trip it. Optional hard loss cap ships off. Opt-in per profile; **off in `safe`**. ⚠️ High risk — see the [Hedge Chain Recovery](#hedge-chain-recovery-optional) section.
 - Code cleanup (unified entry-condition logic) and repo hygiene (`.ex5` no longer tracked).
 
 ## Credits
