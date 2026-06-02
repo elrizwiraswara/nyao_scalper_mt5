@@ -59,12 +59,19 @@ ProfitThresholdMultiplier=1.5
 LossThresholdMultiplier=2.0
 MinBuySignalScore=4.5
 MinSellSignalScore=4.5
+; 🎯 Limit Entry Settings
+EnableLimitEntry=false
+LimitEntryAnchor=0
+LimitEntryATRFraction=0.25
+LimitEntryExpiryBars=1
+LimitEntryCancelOnFlip=true
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=2
 LosingPosScorePenalty=1.5
 DrawdownThresholdPct=3.0
 DrawdownScoreBoost=2.0
+ConsecutiveLossesBeforeCooldown=3
 ConsecutiveLossCooldownBars=3
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
@@ -89,10 +96,27 @@ SLTightenMinHealthPct=0.50
 EnableBreakEvenOnSpread=true
 BreakEvenSpreadMultiplier=1.5
 EnableVirtualSLReentry=true
+ReentryRespectsNewBarGate=false
 ReentryMinSignalPct=0.75
 EnableProfitOffsetSL=true
 ConsecutiveWinsRequired=3
 MinOffsetProfit=1.0
+; 🔀 Hedge Chain (Rolling Martingale Recovery) Settings
+EnableHedgeChain=true
+HedgeTriggerATR=1.5
+HedgeAutoLot=true
+HedgeRecoveryATR=1.0
+HedgeLotMultiplier=2.0
+HedgeMaxLot=0.10
+HedgeRecoveryPct=100.0
+HedgeRollMinProfit=0.0
+HedgeCycleLevels=2
+EnableHedgeCycleReset=true
+HedgeCyclePartialPct=50.0
+HedgeMaxCycles=3
+HedgeMaxChainLossUSD=0.0
+HedgeMaxChainLossPct=10.0
+HedgeClearRootSL=true
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
 EquityDropPercent=5.0
