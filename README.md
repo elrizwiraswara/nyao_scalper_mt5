@@ -21,9 +21,9 @@ The EA calculates a "Signal Score" for every tick based on:
 - **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
 - **Velocity**: Tracks the _change_ in signal score to detect strengthening or weakening moves.
 - **Blended Weighted Average Signal Smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
-- **Multi-Bar EMA Slope** _(new in v42)_: Trend slope is measured over `SlopeLookback` bars instead of a single bar, reducing M1 whipsaw.
-- **Dead-Market Filter** _(new in v42)_: When ATR collapses relative to its average (`ATR/AvgATR < MinVolRatioToTrade`), the signal is zeroed — the EA does not scalp a market too quiet to overcome costs.
-- **New-Bar Entry Evaluation** _(new in v42, default on)_: With `EnableNewBarEntryOnly`, entries are evaluated once per closed bar (position management still runs every tick). This removes intrabar signal repaint and makes backtests representative of live behavior.
+- **Multi-Bar EMA Slope**: Trend slope is measured over `SlopeLookback` bars instead of a single bar, reducing M1 whipsaw.
+- **Dead-Market Filter**: When ATR collapses relative to its average (`ATR/AvgATR < MinVolRatioToTrade`), the signal is zeroed — the EA does not scalp a market too quiet to overcome costs.
+- **New-Bar Entry Evaluation** _(default on)_: With `EnableNewBarEntryOnly`, entries are evaluated once per closed bar (position management still runs every tick). This removes intrabar signal repaint and makes backtests representative of live behavior.
 - **Per-Tick Caching**: Signal scores are computed once per tick and cached, eliminating redundant calculations across position management, trailing, and dashboard systems.
 
 ### Risk & Equity Management
@@ -32,8 +32,8 @@ The EA calculates a "Signal Score" for every tick based on:
   - **Min Equity Stop**: Hard stop if equity falls below a specific dollar amount.
   - **Max Drawdown Stop**: Stops trading if drawdown from peak exceeds a set limit.
   - **Daily Target**: Optional target profit to stop trading for the day.
-- **Basket Stop** _(new in v42)_: Portfolio-level backstop. Closes **all** positions and pauses when total floating loss exceeds a % of equity (`MaxBasketLossPct`) — protects against compounding drawdown from stacked positions, independent of per-position stops.
-- **Max-Spread Filter** _(new in v42)_: Blocks new entries when the spread is too wide (fixed `MaxSpreadPoints`, or auto-derived from ATR via `MaxSpreadATRRatio`). Critical for cost control on M1 gold.
+- **Basket Stop**: Portfolio-level backstop. Closes **all** positions and pauses when total floating loss exceeds a % of equity (`MaxBasketLossPct`) — protects against compounding drawdown from stacked positions, independent of per-position stops.
+- **Max-Spread Filter**: Blocks new entries when the spread is too wide (fixed `MaxSpreadPoints`, or auto-derived from ATR via `MaxSpreadATRRatio`). Critical for cost control on M1 gold.
 - **Signal Dampening**: Position-aware system that penalizes signal scores when holding losing positions and raises entry thresholds during drawdown periods.
 - **News Filter**: Automatically pauses trading before and after high-impact news events.
 - **Trading Hours**: Configurable start and end times to avoid low-liquidity sessions.
@@ -72,7 +72,7 @@ While a chain is active its legs are excluded from the standard trailing/loss-ma
 
 ### Lot Sizing
 
-- **Recovery Mode**: Increases lot size incrementally after equity drops for faster recovery. _Guardrails (new in v42):_ capped at `MaxEquityDropLotSteps` total steps, and **disabled** while in a post-loss cooldown or while the basket is in floating loss — so size never scales up while actively bleeding.
+- **Recovery Mode**: Increases lot size incrementally after equity drops for faster recovery. _Guardrails:_ capped at `MaxEquityDropLotSteps` total steps, and **disabled** while in a post-loss cooldown or while the basket is in floating loss — so size never scales up while actively bleeding.
 - **Confidence Mode**: Increases lot size for high-confidence signals (e.g., Score > 8.0).
 - **Velocity Boost**: Slightly increases position size if signal velocity (momentum) is accelerating.
 
