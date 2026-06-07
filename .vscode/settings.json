@@ -1,8 +1,8 @@
 {
   "files.associations": {
+    "*.mq5": "mql5",
     "*.mqh": "mqlh",
-    "*.mq4": "mql4",
-    "*.mq5": "mql5"
+    "*.mq4": "mql4"
   },
   "editor.tokenColorCustomizations": {
     "textMateRules": [
@@ -35,10 +35,33 @@
         "settings": {
           "foreground": "#6796E6"
         }
+      },
+      {
+        "scope": "comment.line.double-slash.mql",
+        "settings": {
+          "foreground": "#51ff00",
+          "fontStyle": "italic"
+        }
+      },
+      {
+        "scope": "comment.block.mql",
+        "settings": {
+          "foreground": "#51ff00",
+          "fontStyle": "italic"
+        }
       }
     ]
   },
   "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/flutter/ephemeral": true,
+    "**/Flutter/ephemeral": true,
+    "**/.symlinks": true,
+    "**/.plugin_symlinks": true,
     "**/*.ex4": true,
     "**/*.ex5": true
   },

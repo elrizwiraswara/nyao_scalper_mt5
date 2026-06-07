@@ -1,0 +1,10 @@
+# Compiled MQL5 binaries — ship as GitHub Release attachments instead of tracking
+*.ex5
+*.ex4
+
+# MetaEditor / compiler artifacts
+*.log
+*.tmp
+
+# Editor / extension local files
+.vscode/buraq-diagnostics.json

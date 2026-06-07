@@ -1,19 +1,21 @@
 ; +-----------------------------------------+
-; Nyao Scalper v41.0 - BALANCED PROFILE
+; Nyao Scalper v42.0 - BALANCED PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Optimized for XAUUSD M1
 ; Philosophy: Medium frequency trading with stable profit
 ; Quality entries, moderate exposure, solid risk management
-; Suitable for everyday trading
+; Per-trade risk ~0.8% equity; basket stop ~6%
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
 DirectionalBodyLookback=12
 EMAFastPeriod=5
 EMASlowPeriod=14
+SlopeLookback=3
 RSIPeriod=8
 ATRPeriod=8
 ATRAvgLookback=12
+MinVolRatioToTrade=0.65
 ImpulseLookback=3
 ImpulseBoostWeight=1.0
 SignalSmoothingCandles=2
@@ -31,15 +33,19 @@ MomentumTriggerWeight=0.5
 BodyMomentumWeight=1.5
 ChopScoreHigh=2.0
 ChopScoreMed=1.0
-ChopScoreLow=0.5
+ChopScoreLow=0.0
 VolatilityScoreHigh=1.0
-VolatilityScoreLow=0.5
+VolatilityScoreLow=0.0
 PeakScoreWeight=1.0
 WickRejectionWeight=1.0
 MinBodyRatio=1.5
 ; 📝 Order & Position Settings
 EnableBuyOrders=true
 EnableSellOrders=true
+EnableNewBarEntryOnly=true
+EnableMaxSpreadFilter=true
+MaxSpreadPoints=0
+MaxSpreadATRRatio=0.22
 BaseLotSize=0.01
 MaxOpenOrders=6
 MaxTradesPerCandle=1
@@ -51,14 +57,21 @@ SellDuplicateMultiplier=1.5
 MinBreakEvenProfit=0.5
 ProfitThresholdMultiplier=1.5
 LossThresholdMultiplier=2.0
-MinBuySignalScore=6.0
-MinSellSignalScore=6.0
+MinBuySignalScore=5.0
+MinSellSignalScore=5.0
+; 🎯 Limit Entry Settings
+EnableLimitEntry=false
+LimitEntryAnchor=0
+LimitEntryATRFraction=0.25
+LimitEntryExpiryBars=1
+LimitEntryCancelOnFlip=true
 ; 🛡️ Signal Dampening Settings
 EnableSignalDampening=true
 MaxLosingPositionsSameDir=2
 LosingPosScorePenalty=1.5
 DrawdownThresholdPct=3.0
 DrawdownScoreBoost=2.0
+ConsecutiveLossesBeforeCooldown=3
 ConsecutiveLossCooldownBars=3
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
@@ -83,17 +96,40 @@ SLTightenMinHealthPct=0.55
 EnableBreakEvenOnSpread=true
 BreakEvenSpreadMultiplier=1.5
 EnableVirtualSLReentry=true
+ReentryRespectsNewBarGate=false
 ReentryMinSignalPct=0.75
 EnableProfitOffsetSL=true
 ConsecutiveWinsRequired=3
 MinOffsetProfit=1.0
+; 🔀 Hedge Chain (Rolling Martingale Recovery) Settings
+EnableHedgeChain=true
+HedgeTriggerATR=1.5
+HedgeRequireSignal=true
+HedgeMinSignalScore=5.0
+HedgeAutoLot=true
+HedgeRecoveryATR=1.0
+HedgeLotMultiplier=2.0
+HedgeMaxLot=0.06
+HedgeRecoveryPct=100.0
+HedgeRollMinProfit=0.0
+HedgeCycleLevels=2
+EnableHedgeCycleReset=true
+HedgeCyclePartialPct=50.0
+HedgeMaxCycles=3
+HedgeMaxChainLossUSD=0.0
+HedgeMaxChainLossPct=0.0
+HedgeClearRootSL=true
+HedgeTrailATR=1.0
 ; 🧮 Dynamic Lot Sizing Settings
 EnableDynamicLots=true
 EquityDropPercent=6.0
+MaxEquityDropLotSteps=2
 MinSignalStrengthForLot=8.5
 LotStepSize=0.01
 MaxLotSize=0.05
 ; 🏦 Equity Settings
+EnableBasketStop=true
+MaxBasketLossPct=6.0
 MinEquityPercent=70.0
 MaxDrawdownFromPeak=0.0
 PauseMinutes=5
@@ -110,7 +146,7 @@ TPValue=8.0
 ; 📉 Stop Loss Settings
 EnableStopLoss=true
 SLInputType=1
-SLValue=8.0
+SLValue=0.8
 ; 💸 Trailing TP/SL Settings
 EnableTrailing=true
 TrailingEnableBreakEvenLock=true
