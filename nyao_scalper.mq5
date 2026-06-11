@@ -38,6 +38,12 @@ enum ENUM_INPUT_TYPE
     INPUT_POINTS                                          // Points
 };
 
+enum ENUM_RR_RISK_MODE
+{
+    RR_RISK_MANUAL,                                      // Manual Distance
+    RR_RISK_ATR                                          // Auto (ATR-Based)
+};
+
 enum ENUM_LIMIT_ANCHOR
 {
     LIMIT_ANCHOR_FIXED_ATR,                              // Fixed ATR Fraction (flat depth)
@@ -204,6 +210,14 @@ input group "📉 Stop Loss Settings"
 input bool EnableStopLoss = true;                         // Enable Stop Loss
 input ENUM_INPUT_TYPE SLInputType = INPUT_PERCENT;        // SL Input Type
 input double SLValue = 10.0;                              // SL Value
+
+input group "⚖️ Risk:Reward Settings"
+input bool EnableRiskReward = false;                      // Enable Independent R:R SL/TP (overrides manual SL & TP)
+input ENUM_RR_RISK_MODE RRRiskMode = RR_RISK_ATR;         // Risk (SL) Sizing: Manual or Auto ATR
+input ENUM_INPUT_TYPE RRRiskInputType = INPUT_POINTS;     // Manual Risk Input Type (when Mode = Manual)
+input double RRRiskValue = 200.0;                         // Manual Risk Distance (SL leg, when Mode = Manual)
+input double RRAtrMultiplier = 1.5;                       // Auto Risk: SL = ATR × this (when Mode = ATR)
+input double RiskRewardRatio = 1.5;                       // Reward : Risk (TP distance = SL distance × this)
 
 input group "💸 Trailing TP/SL Settings"
 input bool EnableTrailing = true;                         // Enable Trailing TP/SL
@@ -2647,9 +2661,11 @@ void ManageTrailingTPSL(ulong ticket)
     }
     
     // TAKE PROFIT MANAGEMENT (Adaptive)
+    // Independent R:R owns the TP target: keep it fixed at the entry-set
+    // R:R level and skip adaptive recomputation so it isn't overwritten.
     double newTP = currentTP;
-    
-    if(EnableTakeProfit)
+
+    if(EnableTakeProfit && !EnableRiskReward)
     {
         double effectiveTP = TPValue + tpAdjustment;
         
@@ -3127,36 +3143,25 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     request.comment = "Open Position by Nyao Scalper";
     request.type_filling = GetFillingMode();
 
-    // Calculate and set Take Profit
-    if(EnableTakeProfit)
+    // Resolve SL (risk) and TP distances. Independent R:R mode overrides
+    // both manual SL and manual TP; otherwise the manual settings apply.
+    double slPoints = GetSLPoints(currentLot);
+    double tpPoints = GetTPPoints(currentLot);
+
+    if(slPoints > 0)
     {
-        double effectiveTPValue = TPValue;
-        double tpPoints = ConvertToPoints(TPInputType, effectiveTPValue, currentLot);
-        
         if(orderType == ORDER_TYPE_BUY)
-        {
-            request.tp = NormalizeDouble(price + (tpPoints * _Point), _Digits); 
-        }
+            request.sl = NormalizeDouble(price - (slPoints * _Point), _Digits);
         else
-        {
-            request.tp = NormalizeDouble(price - (tpPoints * _Point), _Digits); 
-        }
+            request.sl = NormalizeDouble(price + (slPoints * _Point), _Digits);
     }
 
-    // Calculate and set Stop Loss
-    if(EnableStopLoss)
+    if(tpPoints > 0)
     {
-        double effectiveSLValue = SLValue;
-        double slPoints = ConvertToPoints(SLInputType, effectiveSLValue, currentLot);
-        
         if(orderType == ORDER_TYPE_BUY)
-        {
-            request.sl = NormalizeDouble(price - (slPoints * _Point), _Digits); 
-        }
+            request.tp = NormalizeDouble(price + (tpPoints * _Point), _Digits);
         else
-        {
-            request.sl = NormalizeDouble(price + (slPoints * _Point), _Digits); 
-        }
+            request.tp = NormalizeDouble(price - (tpPoints * _Point), _Digits);
     }
 
     bool orderResult = OrderSend(request, result);
@@ -3182,13 +3187,13 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
                      ", Current: $", currentEquity,
                      ", Drop: ", equityDropPercentage, "%)");
             
-            if(EnableStopLoss)
+            if(request.sl > 0)
             {
                 LogPrint(" | SL: ", request.sl);
             }
-            if(EnableTakeProfit)
+            if(request.tp > 0)
             {
-                LogPrint(" | TP: ", request.tp);
+                LogPrint(" | TP: ", request.tp, EnableRiskReward ? StringFormat(" (R:R 1:%.2f)", RiskRewardRatio) : "");
             }
             
             // Register position to managed array
@@ -3872,21 +3877,23 @@ void PlaceLimitEntry(ENUM_ORDER_TYPE dir, double signalScore)
     request.comment = "NyaoLE|" + DoubleToString(signalScore, 2); // stash entry-thesis score
     request.price = entry;
 
+    double slPts = GetSLPoints(currentLot);
+    double tpPts = GetTPPoints(currentLot);
     if(dir == ORDER_TYPE_BUY)
     {
         request.type = ORDER_TYPE_BUY_LIMIT;
-        if(EnableStopLoss)
-            request.sl = NormalizeDouble(entry - ConvertToPoints(SLInputType, SLValue, currentLot) * _Point, _Digits);
-        if(EnableTakeProfit)
-            request.tp = NormalizeDouble(entry + ConvertToPoints(TPInputType, TPValue, currentLot) * _Point, _Digits);
+        if(slPts > 0)
+            request.sl = NormalizeDouble(entry - slPts * _Point, _Digits);
+        if(tpPts > 0)
+            request.tp = NormalizeDouble(entry + tpPts * _Point, _Digits);
     }
     else
     {
         request.type = ORDER_TYPE_SELL_LIMIT;
-        if(EnableStopLoss)
-            request.sl = NormalizeDouble(entry + ConvertToPoints(SLInputType, SLValue, currentLot) * _Point, _Digits);
-        if(EnableTakeProfit)
-            request.tp = NormalizeDouble(entry - ConvertToPoints(TPInputType, TPValue, currentLot) * _Point, _Digits);
+        if(slPts > 0)
+            request.sl = NormalizeDouble(entry + slPts * _Point, _Digits);
+        if(tpPts > 0)
+            request.tp = NormalizeDouble(entry - tpPts * _Point, _Digits);
     }
 
     if(OrderSend(request, result) && result.retcode == TRADE_RETCODE_DONE)
@@ -4625,6 +4632,72 @@ double ConvertToPoints(ENUM_INPUT_TYPE inputType, double value, double lotSize)
     }
     
     return points;
+}
+
+// +------------------------------------------------------------------+
+// | Current ATR value in price terms (last closed bar, 0 on failure). |
+// +------------------------------------------------------------------+
+double GetCurrentATR()
+{
+    double buf[];
+    ArraySetAsSeries(buf, true);
+    if(CopyBuffer(atrSignalHandle, 0, 1, 1, buf) < 1) return 0;
+    return buf[0];
+}
+
+// +------------------------------------------------------------------+
+// | Risk:Reward risk (SL) leg in points - independent of manual SL.   |
+// | Manual mode: own input (points/dollar/percent).                   |
+// | ATR mode: SL = ATR × multiplier, auto-calculated on entry.        |
+// +------------------------------------------------------------------+
+double GetRRRiskPoints(double lotSize)
+{
+    if(RRRiskMode == RR_RISK_ATR)
+    {
+        double atr = GetCurrentATR();
+        if(atr <= 0 || _Point <= 0) return 0;
+        double atrPoints = atr / _Point;
+        return atrPoints * RRAtrMultiplier;
+    }
+
+    // Manual distance
+    return ConvertToPoints(RRRiskInputType, RRRiskValue, lotSize);
+}
+
+// +------------------------------------------------------------------+
+// | Resolve SL distance in points for a given lot (0 = no SL).        |
+// | Independent R:R mode overrides the manual Stop Loss entirely.     |
+// +------------------------------------------------------------------+
+double GetSLPoints(double lotSize)
+{
+    if(EnableRiskReward)
+        return GetRRRiskPoints(lotSize);
+
+    if(EnableStopLoss)
+        return ConvertToPoints(SLInputType, SLValue, lotSize);
+
+    return 0;
+}
+
+// +------------------------------------------------------------------+
+// | Resolve TP distance in points for a given lot (0 = no TP).        |
+// | Independent R:R mode sets TP = risk distance × ratio, overriding  |
+// | the manual Take Profit entirely.                                  |
+// +------------------------------------------------------------------+
+double GetTPPoints(double lotSize)
+{
+    if(EnableRiskReward)
+    {
+        double slPts = GetRRRiskPoints(lotSize);
+        if(slPts > 0 && RiskRewardRatio > 0)
+            return slPts * RiskRewardRatio;
+        return 0;
+    }
+
+    if(EnableTakeProfit)
+        return ConvertToPoints(TPInputType, TPValue, lotSize);
+
+    return 0;
 }
 
 // +------------------------------------------------------------------+
