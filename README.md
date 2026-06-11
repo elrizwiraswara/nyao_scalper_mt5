@@ -1,4 +1,4 @@
-# Nyao Scalper v42.0
+# Nyao Scalper v43.0
 
 **Indicator-Based Signal Strength EA for MetaTrader 5**
 
@@ -89,7 +89,7 @@ While a chain is active its legs are excluded from the standard trailing/loss-ma
 
 The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 4.5).
 
-> **v42 calibration note:** The Chop and Volatility components no longer add "free" points in a dead/quiet market (their low tiers default to `0.0`), so the score now discriminates regime instead of always rewarding it. Thresholds were lowered accordingly (~1.0) across all profiles. Additionally, when `ATR/AvgATR` falls below `MinVolRatioToTrade` the score is forced to `0` (no trade).
+> **Calibration note:** The Chop and Volatility components no longer add "free" points in a dead/quiet market (their low tiers default to `0.0`), so the score now discriminates regime instead of always rewarding it. Thresholds were lowered accordingly (~1.0) across all profiles. Additionally, when `ATR/AvgATR` falls below `MinVolRatioToTrade` the score is forced to `0` (no trade).
 
 **Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
 
@@ -147,6 +147,23 @@ By default, a qualifying signal opens **at market** (current Ask/Bid). Optionall
 
 > **Trade-off:** A pullback limit improves average fill price but **lowers fill rate** — strong momentum/breakout moves (which this EA's scoring favors) often run without retracing, so the best moves may be missed while weaker, stalling signals fill preferentially. Backtest both modes before committing; it is off by default for this reason.
 
+### Risk:Reward TP/SL (Optional)
+
+By default the EA places SL and TP from the manual **Trailing TP/SL** inputs (`SLValue` / `TPValue`). Enabling **Independent Risk:Reward** instead derives *both* stops from a single risk leg and a target ratio — so every trade carries the same R:R geometry regardless of the manual TP/SL tuning.
+
+- **`EnableRiskReward`** _(default off)_: When on, the R:R engine **overrides** the manual Stop Loss *and* Take Profit entirely — `EnableStopLoss` / `SLValue` and `EnableTakeProfit` / `TPValue` are ignored for fresh entries.
+- **`RRRiskMode`**: How the **risk (SL) leg** is sized —
+  - **Auto (ATR-Based)** _(default)_: `SL distance = ATR × RRAtrMultiplier`, computed per entry from the last closed bar's ATR — the stop scales with current volatility.
+  - **Manual Distance**: a fixed SL distance from `RRRiskValue`, in the units set by `RRRiskInputType`.
+- **`RRRiskInputType`**: Units for the manual risk distance (Dollar Amount / Percent of Equity / Points) — used only when `RRRiskMode = Manual`.
+- **`RRRiskValue`** _(default 200)_: Manual SL distance for the risk leg (used only when `RRRiskMode = Manual`).
+- **`RRAtrMultiplier`** _(default 1.5)_: ATR multiple for the SL leg (used only when `RRRiskMode = ATR`).
+- **`RiskRewardRatio`** _(default 1.5)_: Reward-to-risk ratio — `TP distance = SL distance × RiskRewardRatio`. The default targets 1.5× the risked distance in profit (a 1:1.5 R:R).
+
+Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailing system will *not* recompute or overwrite it, so the intended reward target is preserved for the life of the trade. Trailing and break-even still manage the **SL** as normal. Applies to both market and pullback-limit entries.
+
+> **Scope:** This is a per-entry geometry override, independent of the per-trade and basket equity stops, which still apply. Leave it off to keep the manual/adaptive TP/SL behavior.
+
 ## Settings Profiles
 
 Pre-configured settings files are available in the `settings/` folder. Load them via MetaTrader 5: **Charts → Templates** or manually copy values.
@@ -159,7 +176,7 @@ Pre-configured settings files are available in the `settings/` folder. Load them
 | **balanced** | 5.0 | Medium | Medium | Quality entries with moderate exposure. Suitable for everyday trading. |
 | **safe** | 6.0 | Low | Low | Highest conviction trades only, minimal exposure, tightest risk controls. Highest win rate. |
 
-> Thresholds were lowered by ~1.0 vs. v41 because the scoring no longer adds "free" chop/volatility points (see the v42 calibration note above) — relative selectivity between profiles is unchanged.
+> Thresholds were lowered by ~1.0 vs. v41 because the scoring no longer adds "free" chop/volatility points (see the calibration note above) — relative selectivity between profiles is unchanged.
 
 ### Profile Comparison
 
@@ -249,19 +266,9 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 2.  **Include realistic costs.** Set your broker's **commission** in the tester and test on a **realistic spread** (ideally the symbol's actual spread, not 0). On M1 XAUUSD, spread + commission is the dominant cost — a backtest without them is meaningless.
 3.  **Know what the tester can't see.** `CalendarValueHistory` (the high-impact **news filter**) generally returns nothing inside the Strategy Tester, so backtests run **without** news protection that live trading has. Treat tester drawdowns around news as optimistic.
 4.  **Validate out-of-sample.** With this many tunable inputs, in-sample optimization overfits easily. Tune on one period, then confirm on a separate untouched period (or use walk-forward) before trusting a profile.
-5.  **Sanity-check the new v42 guards** via the journal: confirm entries fire only on bar close, that trades are skipped when spread is wide or ATR has collapsed, and that the **Basket Stop** closes everything once floating loss crosses `MaxBasketLossPct`.
+5.  **Sanity-check guards** via the journal: confirm entries fire only on bar close, that trades are skipped when spread is wide or ATR has collapsed, and that the **Basket Stop** closes everything once floating loss crosses `MaxBasketLossPct`.
 
 > No equity curve is bundled with this repo. Capture your own tester report (real ticks + commission, out-of-sample) before running any profile on a funded account.
-
-## What's New in v42
-
-- **Max-spread entry filter** and **portfolio basket stop** (close-all on aggregate floating loss).
-- **Drawdown lot-scaling guardrails**: capped steps; never scales up during cooldown or while the basket is in loss.
-- **New-bar entry evaluation** (stable signals, honest backtests) and **dead-market filter** (skip collapsed-ATR regimes).
-- **Multi-bar EMA slope**; chop/volatility no longer add free points (thresholds recalibrated).
-- **Consistent Stop-Loss units** across all profiles (percent of equity), re-tuned so each profile matches its stated aim.
-- **Hedge Chain recovery (optional, martingale)**: rolling reverse-hedge with computed recovery-lot sizing and cycle reseeding (partial-close instead of unbounded lot growth). Bounded by **cycles + max lot**; when exhausted the legs are **released to the adaptive loss management** rather than force-closed, and active chains are **exempt from the basket stop** so their transient drawdown doesn't trip it. Optional hard loss cap ships off. Opt-in per profile; **off in `safe`**. ⚠️ High risk — see the [Hedge Chain Recovery](#hedge-chain-recovery-optional) section.
-- Code cleanup (unified entry-condition logic) and repo hygiene (`.ex5` no longer tracked).
 
 ## Credits
 

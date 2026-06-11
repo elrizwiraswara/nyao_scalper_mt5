@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v42.0                                               |
+// | Nyao Scalper v43.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version "42.0"
+#property version "43.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -53,7 +53,7 @@ enum ENUM_LIMIT_ANCHOR
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v42.0"
+input group " Nyao Scalper v43.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
@@ -658,7 +658,7 @@ int InitializeEA()
     }
     
     Print("+-----------------------------------------+");
-    Print("Nyao Scalper v42.0 Initialized Successfully");
+    Print("Nyao Scalper v43.0 Initialized Successfully");
     Print("+-----------------------------------------+");
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -689,7 +689,7 @@ void OnDeinit(const int reason)
     IndicatorRelease(rsiHandle);
     IndicatorRelease(atrSignalHandle);
     
-    Print("Nyao Scalper v42.0 Deinitialized");
+    Print("Nyao Scalper v43.0 Deinitialized");
 }
 
 // +------------------------------------------------------------------+
@@ -5645,7 +5645,7 @@ bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
     json += "\"title\":\"" + title + "\",";
     json += "\"description\":\"" + message + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"Nyao Scalper v42.0\"}";
+    json += "\"footer\":{\"text\":\"Nyao Scalper v43.0\"}";
     json += "}]}";
     
     // Prepare HTTP request
@@ -5745,7 +5745,7 @@ void UpdateDashboard()
     int currentY = startY;
 
     // Header
-    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v42.0", startX, currentY, 11, colorHeader, true);
+    DrawDashboardLabel("NyaoDash_Title", "Nyao Scalper v43.0", startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
     // Status logic
