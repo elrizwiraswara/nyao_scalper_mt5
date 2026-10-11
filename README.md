@@ -231,10 +231,15 @@ Pre-configured settings files are available in the `settings/` folder. Load them
     - Check "Allow WebRequest for listed URL".
     - Add your Discord Webhook URL (if using alerts).
 
-4.  **Compile**:
+4.  **Allow DLL Imports**:
+    - Go to `Tools` -> `Options` -> `Expert Advisors`.
+    - Check "Allow DLL imports".
+    - The EA uses the Windows API to turn off Algo Trading for the whole terminal when an equity stop fires (Min Equity, Target Equity or Max Times Trigger). Without this permission the EA won't load.
+
+5.  **Compile**:
     Open the file in MetaEditor and press `F7` or click "Compile".
 
-5.  **Run**:
+6.  **Run**:
     Drag the EA onto a chart (Recommended: XAUUSD, EURUSD on M1/M5).
 
 ## Alternative Compilation (VS Code)
@@ -259,6 +264,8 @@ If you prefer coding in Visual Studio Code, you can compile `.mq5` files directl
     - Check the Output terminal for success or errors.
 
 ## Backtesting Honestly
+
+**Before you start:** the Strategy Tester also needs DLL imports allowed (`Tools` -> `Options` -> `Expert Advisors` -> "Allow DLL imports"), otherwise it refuses to load the EA. Run tests on local agents: EAs that use DLLs can't run on MQL5 Cloud Network agents.
 
 Results in the Strategy Tester only mean something if the test mirrors live conditions. For this EA specifically:
 
