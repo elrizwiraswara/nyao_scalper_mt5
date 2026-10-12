@@ -1,0 +1,121 @@
+{
+  "name": "default-2026-real-ticks",
+  "title": "Default profile - XAUUSDm M1 vs M5, real ticks Jan-Sep 2026",
+  "ea": "nyao_scalper.mq5",
+  "set": "settings/default.set",
+  "version": "d0b484e",
+  "symbol": "XAUUSDm",
+  "periods": [
+    "M1",
+    "M5"
+  ],
+  "windows": [
+    "2026-01",
+    "2026-02",
+    "2026-03",
+    "2026-04",
+    "2026-05",
+    "2026-06",
+    "2026-07",
+    "2026-08",
+    "2026-09"
+  ],
+  "split": "monthly",
+  "model": "real",
+  "deposit": 2000,
+  "currency": "USD",
+  "leverage": 500,
+  "generated": "2026-10-13 01:05",
+  "runs": [
+    {
+      "period": "M1",
+      "window": "2026-01",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-01"
+    },
+    {
+      "period": "M1",
+      "window": "2026-02",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-02"
+    },
+    {
+      "period": "M1",
+      "window": "2026-03",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-03"
+    },
+    {
+      "period": "M1",
+      "window": "2026-04",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-04"
+    },
+    {
+      "period": "M1",
+      "window": "2026-05",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-05"
+    },
+    {
+      "period": "M1",
+      "window": "2026-06",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-06"
+    },
+    {
+      "period": "M1",
+      "window": "2026-07",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-07"
+    },
+    {
+      "period": "M1",
+      "window": "2026-08",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-08"
+    },
+    {
+      "period": "M1",
+      "window": "2026-09",
+      "report": "nyao_bt_default-2026-real-ticks_M1_2026-09"
+    },
+    {
+      "period": "M5",
+      "window": "2026-01",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-01"
+    },
+    {
+      "period": "M5",
+      "window": "2026-02",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-02"
+    },
+    {
+      "period": "M5",
+      "window": "2026-03",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-03"
+    },
+    {
+      "period": "M5",
+      "window": "2026-04",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-04"
+    },
+    {
+      "period": "M5",
+      "window": "2026-05",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-05"
+    },
+    {
+      "period": "M5",
+      "window": "2026-06",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-06"
+    },
+    {
+      "period": "M5",
+      "window": "2026-07",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-07"
+    },
+    {
+      "period": "M5",
+      "window": "2026-08",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-08"
+    },
+    {
+      "period": "M5",
+      "window": "2026-09",
+      "report": "nyao_bt_default-2026-real-ticks_M5_2026-09"
+    }
+  ]
+}

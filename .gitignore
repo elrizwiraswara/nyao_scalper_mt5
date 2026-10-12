@@ -8,3 +8,6 @@
 
 # Editor / extension local files
 .vscode/buraq-diagnostics.json
+
+# Backtest tool: optional raw MT5 reports (large)
+reports/*/raw/

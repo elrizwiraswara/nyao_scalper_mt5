@@ -25,7 +25,7 @@ A safety and correctness release. If you run v43 live, read this before upgradin
   - the loss-streak pause
   - hedge chain, trailing TP/SL and loss management off
 
-  It is made for XAUUSDm M1 (3-digit quotes) and accounts of about $2,000 or more; see [Settings Profiles](#settings-profiles). The previous default is kept as `classic.set`.
+  It is made for XAUUSDm (3-digit quotes) and accounts of about $2,000 or more, and runs best on **M5**; see [Settings Profiles](#settings-profiles) and the [real-tick report](reports/default-2026-real-ticks/summary.md). The previous default is kept as `classic.set`.
 - **Scaled partial close works at 0.01 lots.** Levels too small to split are skipped instead of blocking the final exit.
 - **Re-entries obey the entry checks** (cooldown, per-candle limit, dampening, HTF filter) and are skipped when the health check would immediately close them again.
 - **Pending limits can't fill unmanaged:** they are cancelled whenever entries are blocked, when the EA stops or is removed, and carry a broker-side expiry backstop.
@@ -218,6 +218,18 @@ With `EnableCheckpointExit` the take-profit is **not sent to the broker** — it
 >
 > Checkpoints let trend winners run. The trailing stop then keeps about 70% of a big move instead of about 50%. The total is lower only because the trailing stop exits the rare monster trend earlier; Jan 2026 alone made most of the no-trailing profit. Tight trails ($5–10) did worse, because M1 noise knocks them out. The loss-side skip behaved like simply using a wider fixed stop. These settings were chosen on this same data, so this is not a blind test. Forward-test on demo first.
 
+> **Use it on M5.** The same profile was later re-tested on real ticks for Jan–Sep 2026 ([full report with every month's balance graph](reports/default-2026-real-ticks/summary.md)). Jul–Sep 2026 came after the data the profile was designed on, so those three months are a genuine out-of-sample check.
+>
+> | Real ticks, $2,000 per month | M1 | **M5** |
+> |---|:---:|:---:|
+> | Jan–Jun 2026 (design period) | +29.5% | **+54.6%** |
+> | Jul–Sep 2026 (out-of-sample) | −42.0% | **−10.6%** |
+> | Total Jan–Sep 2026 | −12.6% | **+44.1%** |
+> | Worst month / max drawdown | −28.5% / 39% | **−9.5% / 19%** |
+> | Profit factor | 0.98 | **1.12** |
+>
+> On M5 the score is calculated and checked once per 5-minute candle, while the $20 stop and checkpoints stay the same. That gives fewer, cleaner entries: 928 trades vs 1,725. M5 was ahead in both periods. Over the 18 months Jan 2025–Jun 2026, M5 also made more with a smaller drawdown: +124%, max drawdown 19%, worst month −7%. **But both timeframes lost money in Jul–Sep 2026.** M5 only limited the damage, so treat the earlier numbers as optimistic and forward-test on demo before trusting the profile.
+
 ### Risk:Reward TP/SL (Optional)
 
 By default the EA places SL and TP from the manual **Trailing TP/SL** inputs (`SLValue` / `TPValue`). Enabling **Independent Risk:Reward** instead derives *both* stops from a single risk leg and a target ratio — so every trade carries the same R:R geometry regardless of the manual TP/SL tuning.
@@ -246,7 +258,7 @@ Pre-configured settings files are available in the `settings/` folder. To load o
 | **classic** | 4.5 | Medium-High | Medium | The previous default: fast M1 scalper with hedge chain. Lost heavily in 2026 real-tick backtests on XAUUSDm, where spread costs outweighed its small wins. |
 | **balanced** | 5.0 | Medium | Medium | Quality entries with moderate exposure. Suitable for everyday trading. |
 | **safe** | 6.0 | Low | Low | Highest conviction trades only, minimal exposure, tightest risk controls. Highest win rate. |
-| **default** | 6.0 + D1 trend | Low-Medium | $20 per trade | **XAUUSDm M1, ~$2,000+ accounts.** A different strategy from the profiles above: daily-trend entries, fixed $20 stop, checkpoint exit with a $20 trailing stop from +$10, loss-streak pause, no hedge. Same as the EA's built-in input defaults. See the backtest under [Checkpoint Exit](#checkpoint-exit-on-in-the-default-profile). |
+| **default** | 6.0 + D1 trend | Low-Medium | $20 per trade | **XAUUSDm M5, ~$2,000+ accounts.** A different strategy from the profiles above: daily-trend entries, fixed $20 stop, checkpoint exit with a $20 trailing stop from +$10, loss-streak pause, no hedge. Same as the EA's built-in input defaults. See the backtest under [Checkpoint Exit](#checkpoint-exit-on-in-the-default-profile). |
 | experimental-d1-checkpoint | 6.0 + D1 trend | Low-Medium | $20 per trade | `default` without the trailing stop and loss-streak pause. Higher total in backtests, but fewer profitable months and deeper drawdowns. |
 | experimental-d1-trend | 6.0 + D1 trend | Low-Medium | $20 per trade | The simplest version: a fixed $20/$20 SL/TP bracket. |
 
@@ -294,7 +306,7 @@ Pre-configured settings files are available in the `settings/` folder. To load o
 | $100-200 | **safe-aggressive** | Fast entries but strict risk controls, capped lot sizing |
 | $200-500 | **safe-aggressive** or **classic** | Safe-aggressive for growth, classic for stability |
 | $500-2,000 | **classic** or **balanced** | Room for moderate exposure |
-| $2,000+ | **default** (XAUUSDm M1) or any profile | `default` risks a fixed $20 per 0.01-lot trade (about 1% at $2,000) |
+| $2,000+ | **default** (XAUUSDm M5) or any profile | `default` risks a fixed $20 per 0.01-lot trade (about 1% at $2,000) |
 
 ## Installation
 
@@ -315,7 +327,7 @@ Pre-configured settings files are available in the `settings/` folder. To load o
 
 5.  **Run**:
     Drag the EA onto a chart and, if needed, load a profile from `settings/`.
-    - The built-in defaults (= `default.set`) are made for **XAUUSDm on M1** with 3-digit quotes and an account of about $2,000+.
+    - The built-in defaults (= `default.set`) are made for **XAUUSDm on M5** with 3-digit quotes and an account of about $2,000+.
     - For other symbols, quote formats or smaller accounts, load another profile or scale the point distances.
     - Requires a **hedging** account (the EA refuses to start on netting accounts).
     - When an equity stop fires (Min Equity, Target Equity or Max Times Trigger), the EA closes all its positions and pending orders and then **removes itself from the chart**. Other EAs in the terminal keep running.
@@ -356,7 +368,54 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 5.  **Sanity-check guards** via the journal (`EnableLogging = true`): confirm entries fire only on bar close, that trades are skipped when spread is wide or ATR has collapsed, that no entries or hedge starts happen in the `MinutesBeforeClose` window, and that the **Basket Stop** / **Total Loss Hard Stop** close positions once floating loss crosses their limits.
 6.  **Judge expectancy, not win rate.** Tight trailing locks in small wins while the hard stop is much wider, so a high win rate is built into the design and says little on its own. Look at average win vs. average loss, expectancy per trade and profit factor (shown on the dashboard and in reports), plus the worst drawdown.
 
-> No equity curve is bundled with this repo. Capture your own tester report (real ticks + commission, out-of-sample) before running any profile on a funded account.
+> Reports bundled with this repo live in [`reports/`](reports/), generated with the tool below. Capture your own report (real ticks + your broker's costs, out-of-sample) before running any profile on a funded account.
+
+### Automated Backtests (`tools/backtest`)
+
+[`tools/backtest/nyao_backtest.py`](tools/backtest/nyao_backtest.py) runs Strategy Tester passes from the command line and writes a report to `reports/<name>/`.
+
+**Requirements:**
+- Windows
+- MetaTrader 5, logged in to your broker at least once; the tester uses that account and its tick history
+- Python 3.8+ (standard library only)
+
+```bash
+# Default profile on M1 and M5, one real-tick run per month (each month starts from a fresh $2,000)
+python tools/backtest/nyao_backtest.py run --name default-2026-real-ticks --periods M1,M5 --from 2026-01 --to 2026-09
+
+# Another profile, one timeframe, quick 1-minute-OHLC sweep
+python tools/backtest/nyao_backtest.py run --name balanced-m5 --set settings/balanced.set --periods M5 --from 2026-03 --to 2026-06 --model ohlc
+
+# Rebuild reports/<name>/ from the tester reports already in the terminal folder
+python tools/backtest/nyao_backtest.py report --name default-2026-real-ticks
+```
+
+**What `run` does:**
+1. Compiles `nyao_scalper.mq5` from this repo into `MQL5\Experts\NyaoBacktest\`. Your own compiled EA is not touched.
+2. Installs the `.set` file as a tester profile.
+3. **Closes MetaTrader 5**, the way clicking X does. It never force-closes, so save your work first. The tester can't start while the terminal is open.
+4. Runs one test per timeframe × month at below-normal priority on half the CPU cores. The tester window opens on its **Graph** tab.
+5. Reopens MetaTrader 5.
+6. Writes the report:
+   - `summary.md`: tables and the balance graph of every run (renders on GitHub)
+   - `index.html`: the same, for the browser
+   - `results.csv`, `graphs/` and `plan.json`
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--name` | (required) | Report folder `reports/<name>/` |
+| `--set` / `--ea` | `settings/default.set` / `nyao_scalper.mq5` | Settings file and EA source in this repo |
+| `--periods` | `M1` | Comma-separated timeframes, e.g. `M1,M5` |
+| `--from` / `--to` | (required) | First and last month, `YYYY-MM` |
+| `--split` | `monthly` | `monthly` (fresh deposit each month) or `whole` (one run over the range) |
+| `--model` | `real` | `real` (real ticks), `every` (generated ticks), `ohlc` (1-minute OHLC), `open` |
+| `--symbol` / `--deposit` / `--leverage` | `XAUUSDm` / `2000` / `500` | Test account |
+| `--terminal` / `--data-dir` | auto-detected | Path to `terminal64.exe` and its data folder |
+| `--cpu-mask` | every other CPU | Affinity for the tester, e.g. `0x555`; `0` = all CPUs |
+| `--keep-raw` | off | Also copy the raw MT5 reports to `reports/<name>/raw/` (git-ignored, large) |
+| `--no-reopen` / `--timeout-min` | off / `30` | Leave the terminal closed afterwards; abort a single run after N minutes |
+
+The **Tick data** column in the summary shows whether each run really used real ticks ("100% real ticks"). Brokers only keep real ticks for a limited period; before that, the tester generates ticks from M1 bars.
 
 ## Credits
 

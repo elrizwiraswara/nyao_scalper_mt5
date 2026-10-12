@@ -4,7 +4,7 @@
 ; +-----------------------------------------+
 ; D1-trend entries + checkpoint exit + trailing stop (= the EA's built-in input defaults).
 ; EXPERIMENTAL - backtested only; demo forward-test before using real money.
-; Built for XAUUSDm (3-digit quotes) on M1, hedge OFF.
+; Built for XAUUSDm (3-digit quotes), hedge OFF. Attach it to an M5 chart (see below).
 ;   Entry : signal score >= 6, only in the D1 trend direction (close vs rising/falling EMA50).
 ;   Stop  : fixed $20 (20000 points at 0.01 lot).
 ;   Exit  : +$20 is a checkpoint - score still agrees -> keep the trade, lock 50% of the move,
@@ -18,6 +18,11 @@
 ;   Same setup without the trailing stop: +141% but only 10/18 months up, worst -23%,
 ;   drawdown up to 40% (one outlier trend month, Jan 2026, made most of that profit).
 ;   Note: designed using data that included this period - not a blind test.
+; Timeframe: real-tick re-test Jan-Sep 2026 (reports/default-2026-real-ticks/summary.md):
+;   M5: +44.1% total (Jan-Jun +54.6%, Jul-Sep -10.6%), worst month -9.5%, max DD 19%, PF 1.12
+;   M1: -12.6% total (Jan-Jun +29.5%, Jul-Sep -42.0%), worst month -28.5%, max DD 39%, PF 0.98
+;   Jul-Sep 2026 is out-of-sample: both timeframes lost there - M5 only limited the damage.
+;   Jan 2025 - Jun 2026 on M5: +124%, worst month -7%, max DD 19% (M1 numbers above).
 ; Requirements / warnings:
 ;   - Points assume a 3-digit gold quote (0.001): on a 2-digit symbol divide SLValue, TPValue,
 ;     ZonePoints and MaxSpreadPoints by 10 (the trailing stop is a % of the checkpoint distance).
