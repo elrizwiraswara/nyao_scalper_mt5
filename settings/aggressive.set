@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Scalper v42.0 - AGGRESSIVE PROFILE
+; Nyao Scalper v44.0 - AGGRESSIVE PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Optimized for XAUUSD M1
@@ -26,12 +26,22 @@ RSIOverbought=85
 RSIOversold=15
 RSIMomentumBuy=55
 RSIMomentumSell=45
+EnableHTFTrendFilter=false
+HTFTimeframe=15
+HTFEMAPeriod=50
+HTFMinDistancePct=0.0
+HTFMinSlopePct=0.0
+HTFSlopeBars=5
 ; ⚖️ Score Weight Settings
 TrendWeight=1.5
 SlopeWeight=1.5
 MomentumBaseWeight=1.2
 MomentumTriggerWeight=0.8
 BodyMomentumWeight=1.8
+RegimeScoreMode=0
+ERPeriod=10
+ERHighThreshold=0.50
+ERMedThreshold=0.30
 ChopScoreHigh=2.0
 ChopScoreMed=1.2
 ChopScoreLow=0.0
@@ -44,6 +54,8 @@ MinBodyRatio=1.2
 EnableBuyOrders=true
 EnableSellOrders=true
 EnableNewBarEntryOnly=true
+MinEfficiencyToTrade=0.0
+RangeFilterPeriod=20
 EnableMaxSpreadFilter=true
 MaxSpreadPoints=0
 MaxSpreadATRRatio=0.35
@@ -74,6 +86,7 @@ DrawdownThresholdPct=5.0
 DrawdownScoreBoost=1.5
 ConsecutiveLossesBeforeCooldown=3
 ConsecutiveLossCooldownBars=1
+LossStreakPauseCount=0
 ; 🩺 Loss Management Settings
 EnableLossManagement=true
 MaxHoldingLossPositions=4
@@ -96,6 +109,7 @@ SLTightenATRMultiplier=2.5
 SLTightenMinHealthPct=0.40
 EnableBreakEvenOnSpread=true
 BreakEvenSpreadMultiplier=2.0
+BreakEvenTriggerATR=0.0
 EnableVirtualSLReentry=true
 ReentryRespectsNewBarGate=false
 ReentryMinSignalPct=0.50
@@ -111,6 +125,8 @@ HedgeAutoLot=true
 HedgeRecoveryATR=1.0
 HedgeLotMultiplier=2.0
 HedgeMaxLot=0.30
+HedgeMaxTotalLots=0.60
+HedgeMaxActiveChains=2
 HedgeRecoveryPct=100.0
 HedgeRollMinProfit=0.0
 HedgeCycleLevels=3
@@ -118,10 +134,11 @@ EnableHedgeCycleReset=true
 HedgeCyclePartialPct=50.0
 HedgeMaxCycles=4
 HedgeMaxChainLossUSD=0.0
-HedgeMaxChainLossPct=0.0
+HedgeMaxChainLossPct=8.0
 HedgeClearRootSL=true
 HedgeTrailATR=1.0
 ; 🧮 Dynamic Lot Sizing Settings
+RiskPerTradePct=0.0
 EnableDynamicLots=true
 EquityDropPercent=4.0
 MaxEquityDropLotSteps=3
@@ -131,6 +148,7 @@ MaxLotSize=0.10
 ; 🏦 Equity Settings
 EnableBasketStop=true
 MaxBasketLossPct=12.0
+MaxTotalLossPct=18.0
 MinEquityPercent=50.0
 MaxDrawdownFromPeak=0.0
 PauseMinutes=3
@@ -148,6 +166,20 @@ TPValue=15.0
 EnableStopLoss=true
 SLInputType=1
 SLValue=1.5
+; ⚖️ Risk:Reward Settings
+EnableRiskReward=false
+RRRiskMode=1
+RRRiskInputType=2
+RRRiskValue=200.0
+RRAtrMultiplier=1.5
+RiskRewardRatio=1.5
+; 🏁 Checkpoint Exit Settings
+EnableCheckpointExit=false
+CheckpointHoldMode=0
+CheckpointLockPct=50.0
+CheckpointMaxSkips=0
+CheckpointTrailPct=0
+CheckpointTrailStartPct=0
 ; 💸 Trailing TP/SL Settings
 EnableTrailing=true
 TrailingEnableBreakEvenLock=true
@@ -157,6 +189,7 @@ EnableAdaptiveSL=true
 TSInputType=0
 TrailingDistanceValue=0.50
 TrailingValueMultiplier=0.30
+TrailStartATR=0.0
 ; 🤖 Robot Settings
 MagicNumber=6926268
 EnableDiscordAlerts=false
@@ -172,4 +205,7 @@ EnableNewsFilter=true
 NewsMinutesBefore=15
 NewsMinutesAfter=15
 EnableLeveragePause=true
+CloseAllOnLeverageChange=true
+EnablePersistState=true
+ResetSavedState=false
 EnableLogging=false
