@@ -8,36 +8,6 @@ Nyao Scalper is an automated trading EA designed for scalping on lower timeframe
 
 It includes position management, adaptive trailing stops, and lot sizing based on equity performance and signal quality.
 
-## What's New in v44.0
-
-A safety and correctness release. If you run v43 live, read this before upgrading.
-
-- **Market-close filter actually works now.** It previously never fired (session times are time-of-day values and were compared against the full date), so the EA kept opening trades into the session/weekend close.
-- **Hedge chain is gated and capped.** Starting, rolling or reseeding a chain (anything that adds exposure) now obeys the same blocks as a fresh entry: news, pauses, trading hours, market close, leverage change, spread. New caps: `HedgeMaxActiveChains` and `HedgeMaxTotalLots`. The chain loss stop (`HedgeMaxChainLossPct`) is now **on** in every profile and is checked before any roll. A root position's SL is only removed after its hedge is confirmed open.
-- **New total hard stop** `MaxTotalLossPct`: closes everything, **including hedge chains**, when total floating loss crosses the limit. (The basket stop still excludes chains.)
-- **State survives restarts.** Chain links, partial-close levels, break-even locks, entry scores, peak equity, the loss streak/cooldown and pause timers are saved to `MQL5\Files\NyaoScalper\` and restored on restart, input change or timeframe switch. Previously a restart turned live chain legs into "new" positions that could start fresh chains.
-- **Pauses no longer cancel each other.** News, basket-stop and drawdown pauses each run on their own timer; a new equity peak lifts only the drawdown pause (it used to cancel the news pause mid-event).
-- **No DLL needed.** On an equity stop the EA closes everything and removes itself with `ExpertRemove()` instead of toggling the terminal-wide Algo Trading button. Other EAs keep running, and MQL5 Cloud Network optimization works again.
-- **New default profile: D1 trend + checkpoint exit + trailing stop.** The built-in input defaults and `default.set` are now the same, backtested setup:
-  - entries only on score ≥ 6 in the daily-trend direction
-  - a fixed $20 stop
-  - checkpoint exits with a $20 trailing stop from +$10
-  - the loss-streak pause
-  - hedge chain, trailing TP/SL and loss management off
-
-  It is made for XAUUSDm (3-digit quotes) and accounts of about $2,000 or more, and runs best on **M5**; see [Settings Profiles](#settings-profiles) and the [real-tick report](reports/default-2026-real-ticks/summary.md). The previous default is kept as `classic.set`.
-- **Scaled partial close works at 0.01 lots.** Levels too small to split are skipped instead of blocking the final exit.
-- **Re-entries obey the entry checks** (cooldown, per-candle limit, dampening, HTF filter) and are skipped when the health check would immediately close them again.
-- **Pending limits can't fill unmanaged:** they are cancelled whenever entries are blocked, when the EA stops or is removed, and carry a broker-side expiry backstop.
-- **Hedging account required:** the EA refuses to start on netting accounts.
-- **Honest statistics:** one trade = one closed position (partial closes summed, entry commission included). The dashboard and reports show average win/loss, expectancy and profit factor.
-- **New strategy options:**
-  - a higher-timeframe trend filter (on in the default profile: D1 EMA50)
-  - a directional Efficiency Ratio regime score (off)
-  - checkpoint exits with an optional trailing stop
-  - a loss-streak pause
-- **Performance:** the dashboard redraws at most once per second, skips non-visual backtests, and statistics are cached.
-
 ## Key Features
 
 ### Signal Scoring
@@ -45,20 +15,20 @@ A safety and correctness release. If you run v43 live, read this before upgradin
 The EA calculates a "Signal Score" for every tick based on:
 
 - **Trend**: Fast/Slow EMA crossover and slope alignment.
-- **Momentum**: RSI "sweet spots" (trending ranges), breakouts, and candle body momentum.
+- **Momentum**: RSI "sweet spots" (trending ranges), breakouts, and candle body momentum. With `DirectionalBodyMomentum` (default on), a large candle only adds body and impulse points to the side it moved toward: a big bearish candle no longer raises the buy score.
 - **Impulse**: Detects price acceleration and directional continuity (consecutive candles).
 - **Volatility**: ATR-based analysis to detect chopping vs. trending markets.
 - **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
 - **Velocity** _(informational)_: Tracks the _change_ in signal score between bars and shows it on the dashboard. It is not used for any trading decision.
 - **Blended Weighted Average Signal Smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
 - **Multi-Bar EMA Slope**: Trend slope is measured over `SlopeLookback` bars instead of a single bar, reducing M1 whipsaw.
-- **Dead-Market Filter** _(scalper profiles; `MinVolRatioToTrade = 0` turns it off, as in the default profile)_: When the last closed candle's ATR collapses relative to its average (`ATR/AvgATR < MinVolRatioToTrade`), new entries, re-entries and pending limits are blocked — the EA does not scalp a market too quiet to overcome costs. (Open positions are still managed normally.)
+- **Dead-Market Filter** _(off in the default profile: `MinVolRatioToTrade = 0`)_: When the last closed candle's ATR collapses relative to its average (`ATR/AvgATR < MinVolRatioToTrade`), new entries, re-entries and pending limits are blocked — the EA does not scalp a market too quiet to overcome costs. (Open positions are still managed normally.)
 - **New-Bar Entry Evaluation** _(default on)_: With `EnableNewBarEntryOnly`, entries are evaluated once per closed bar on **closed candles only** (the forming candle is ignored for the entry decision, because on the first tick of a bar it is still empty). Position management still runs every tick. This removes intrabar signal repaint and makes backtests representative of live behavior.
 - **Per-Tick Caching**: Signal scores are computed once per tick and cached, eliminating redundant calculations across position management, trailing, and dashboard systems.
 - **Range Filter** _(off by default)_: `MinEfficiencyToTrade` blocks entries unless the last `RangeFilterPeriod` closed bars moved efficiently **in the signal's direction** (directional efficiency ratio = net move ÷ path travelled). In a sideways market the momentum score peaks right at the range edges — buying the top, selling the bottom — and this filter refuses those entries. Try `0.30` with a 20-bar lookback.
 - **ATR-Based Stops** _(opt-in)_: every distance input type (`SLInputType`, `TPInputType`, `TSInputType`) accepts **ATR Multiple**, so stops and trailing scale with current volatility instead of fixed dollars that become too tight as price and volatility rise. `BreakEvenTriggerATR` and `TrailStartATR` delay the break-even lock and trailing until the trade has moved that many ATRs in its favor (0 = legacy dollar/spread triggers).
 - **Regime & Trend Filters**:
-  - **`EnableHTFTrendFilter`** _(on in the default profile, D1 EMA50)_: only allows buys above a rising higher-timeframe EMA, and sells below a falling one. On M1 gold, trading with the daily trend was what separated the profitable backtests from the losing ones.
+  - **`EnableHTFTrendFilter`** _(on in the default profile, D1 EMA50)_: only allows buys above a rising higher-timeframe EMA, and sells below a falling one.
   - **`RegimeScoreMode = Efficiency Ratio`** _(off, uncalibrated)_: replaces the ATR-expansion "chop" score with a directional Kaufman Efficiency Ratio (net move in the signal direction ÷ path travelled). This separates a clean trend from a volatile whipsaw.
 
 ### Risk & Equity Management
@@ -71,20 +41,23 @@ The EA calculates a "Signal Score" for every tick based on:
 - **Total Loss Hard Stop**: `MaxTotalLossPct` closes **everything, including hedge chains**, and pauses when the total floating loss crosses the limit. This is the one cap that bounds every position the EA holds.
 - **Max-Spread Filter**: Blocks new entries when the spread is too wide (fixed `MaxSpreadPoints`, or auto-derived from ATR via `MaxSpreadATRRatio`). Critical for cost control on M1 gold.
 - **Signal Dampening**: Position-aware system that penalizes signal scores when holding losing positions and raises entry thresholds during drawdown periods.
-- **Loss-Streak Pause** _(`LossStreakPauseCount`, default 4, 0 = off)_: losing trades cluster — after a loss the next trade wins noticeably less often, i.e. the market is temporarily not suited to the signal. After N losses in a row the EA stops opening real trades and **paper-trades** every signal instead (same entry price, stop and first checkpoint/TP). Real trading resumes on the first paper win, or when a still-open real position closes in profit. In backtests of the experimental checkpoint profile (2025 + Jan–Jun 2026) a setting of 3–5 improved results in both years and every setting tested; 4 is a reasonable starting point.
+- **Loss-Streak Pause** _(`LossStreakPauseCount`, default 4, 0 = off)_: losing trades cluster — after a loss the next trade wins noticeably less often, i.e. the market is temporarily not suited to the signal. After N losses in a row the EA stops opening real trades and **paper-trades** every signal instead (same entry price, stop and first checkpoint/TP). Real trading resumes on the first paper win, or when a still-open real position closes in profit.
 - **News Filter**: Automatically pauses new entries before and after high-impact news events. News, basket-stop and drawdown pauses each run on their own timer, so one can't cancel or shorten another.
 - **Market-Close Filter**: Stops opening positions `MinutesBeforeClose` minutes before the symbol's quote session ends (daily break or weekend). Back-to-back sessions (e.g. 24:00 → 00:00) count as one continuous session.
 - **Trading Hours**: Configurable start and end times to avoid low-liquidity sessions.
 - **Leverage Guard**: Pauses new entries if account leverage changes and resumes when it's restored. `CloseAllOnLeverageChange` (default on) also closes all positions — set it off on brokers with dynamic leverage.
 - **Restart-Safe State**: With `EnablePersistState` (default on) the EA saves its per-position and account-level state to `MQL5\Files\NyaoScalper\` and restores it after a terminal/VPS restart, recompile, input change or timeframe switch. Set `ResetSavedState = true` once to start fresh (then set it back to false). Not used in the Strategy Tester.
+  - Open positions the saved state doesn't cover (no file, reset, or a crash before the save) are still protected. Each gets a stop if it has none, and its checkpoint exit is re-armed.
+  - At terminal start the EA waits for the trade-server connection before reading the account.
+  - Deposits and withdrawals shift the peak-equity baseline, so a withdrawal is never treated as a drawdown.
 
 ### Position Management
 
 - **Duplicate Signal Filter**: Uses "Zone Points" and minimum distance multipliers to prevent over-stacking positions.
-- **Adaptive Trailing** _(scalper profiles; off in the default profile, which uses the checkpoint trailing stop instead)_:
+- **Adaptive Trailing** _(off in the default profile, which uses the checkpoint trailing stop instead)_:
   - Standard trailing stop logic.
   - **Signal-Based Adaptation**: Tightens or loosens TP/SL based on real-time changes in the Signal Score.
-- **Loss Management** _(scalper profiles; off in the default profile)_:
+- **Loss Management** _(off in the default profile)_:
   - **Position Health Revalidation**: Continuously evaluates trade thesis using trend alignment, RSI zone, adverse ATR excursion, and swing structure — weighted health score determines hold/exit decisions.
   - **Scaled Partial Close**: Gradually reduces position volume as signal decays (75% → close 25%, 50% → close 50%, 25% → full exit). Each level is evaluated on its own; a level whose partial volume is below the broker minimum (e.g. 25% of 0.01 lot) is skipped, so the 25% full exit still fires on minimum-lot positions.
   - **Dynamic SL Tightening**: Pulls stop-loss closer proportionally as position health weakens below a threshold.
@@ -105,7 +78,7 @@ When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-di
 - **Roll**: hedge is losing but the older leg has recovered to break-even → close the older leg (free) and open a larger reverse hedge against the current one. Repeats up to `HedgeCycleLevels` per cycle.
 - **Reseed**: at the cycle/lot limit, partial-close the deepest hedge by `HedgeCyclePartialPct%` and start a fresh, smaller cycle (up to `HedgeMaxCycles`) — capping lot growth instead of stacking ever-larger legs.
 - **Exhausted → release** (not closed): once the chain can no longer expand (`HedgeMaxCycles` reached, or the `HedgeMaxLot` / `HedgeMaxTotalLots` ceiling hit with reseed off), the legs are **handed back to the adaptive loss management** — trailing, health-revalidation, partial close — and flagged so no new hedge is started on them. The chain is **not** force-closed at this point.
-- **Chain loss stop** (`HedgeMaxChainLossPct` / `HedgeMaxChainLossUSD`; the tighter wins): closes the whole chain when its combined loss crosses the cap. It is checked **before** any roll, and is **on in every profile** (default 5% of equity).
+- **Chain loss stop** (`HedgeMaxChainLossPct` / `HedgeMaxChainLossUSD`; the tighter wins): closes the whole chain when its combined loss crosses the cap. It is checked **before** any roll (default 5% of equity).
 - **Entry gates**: anything that adds exposure — starting a chain, rolling to a bigger leg, reseeding a cycle — obeys the same blocks as a fresh entry: news window, pauses, trading hours, market close, leverage change and the spread filter. While blocked, an existing pair is simply held (still bounded by the chain loss stop and the total hard stop). Closing actions (covered, stop, release) always run.
 - **Concurrency caps**: `HedgeMaxActiveChains` (default 1) limits how many chains can run at once, so a sharp reversal can't open a hedge for every stacked position on the same tick. `HedgeMaxTotalLots` caps the combined volume of all active chain legs; a roll that would exceed it reseeds or releases instead.
 
@@ -129,9 +102,9 @@ Chain state is saved to disk (see **Restart-Safe State**), so a restart doesn't 
 
 ## Strategy Logic
 
-The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 6.0; the scalper profiles use 3.5–6.0).
+The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 6.0).
 
-> **Calibration note:** The Chop and Volatility components no longer add "free" points in a dead/quiet market (their low tiers default to `0.0`), so the score now discriminates regime instead of always rewarding it. Thresholds were lowered accordingly (~1.0) across all profiles. Additionally, when `ATR/AvgATR` falls below `MinVolRatioToTrade` the score is forced to `0` (no trade).
+> **Calibration note:** The Chop and Volatility components add nothing in a dead or quiet market (their low tiers default to `0.0`), so the score separates market regimes rather than rewarding every market. When `ATR/AvgATR` falls below `MinVolRatioToTrade`, the score is forced to `0` (no trade).
 
 **Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
 
@@ -207,29 +180,6 @@ With `EnableCheckpointExit` the take-profit is **not sent to the broker** — it
   - loss-side skips: `CheckpointMaxSkips`
 - **Loss side** (`CheckpointMaxSkips`, default 0 = off): when the SL is touched while the signal score still agrees, the stop may be pushed one SL-distance further, at most this many times. The broker always holds a **hard stop at the maximum distance** (`(1 + skips) × SL`), so the worst case is fixed even if the EA or terminal is offline; the inner stops are managed by the EA. Risk sizing uses the full worst-case distance.
 
-> **Backtest of the default profile.** XAUUSDm M1, $2,000 per month, Jan 2025–Jun 2026; 2025 uses ticks generated from real M1 bars.
->
-> | | Default (with trailing) | Without trailing |
-> |---|:---:|:---:|
-> | Total over 18 months | +110% | +141% |
-> | Profitable months | 14/18 | 10/18 |
-> | Worst month | −17% | −23% |
-> | Max drawdown within a month | 30% | 40% |
->
-> Checkpoints let trend winners run. The trailing stop then keeps about 70% of a big move instead of about 50%. The total is lower only because the trailing stop exits the rare monster trend earlier; Jan 2026 alone made most of the no-trailing profit. Tight trails ($5–10) did worse, because M1 noise knocks them out. The loss-side skip behaved like simply using a wider fixed stop. These settings were chosen on this same data, so this is not a blind test. Forward-test on demo first.
-
-> **Use it on M5.** The same profile was later re-tested on real ticks for Jan–Sep 2026 ([full report with every month's balance graph](reports/default-2026-real-ticks/summary.md)). Jul–Sep 2026 came after the data the profile was designed on, so those three months are a genuine out-of-sample check.
->
-> | Real ticks, $2,000 per month | M1 | **M5** |
-> |---|:---:|:---:|
-> | Jan–Jun 2026 (design period) | +29.5% | **+54.6%** |
-> | Jul–Sep 2026 (out-of-sample) | −42.0% | **−10.6%** |
-> | Total Jan–Sep 2026 | −12.6% | **+44.1%** |
-> | Worst month / max drawdown | −28.5% / 39% | **−9.5% / 19%** |
-> | Profit factor | 0.98 | **1.12** |
->
-> On M5 the score is calculated and checked once per 5-minute candle, while the $20 stop and checkpoints stay the same. That gives fewer, cleaner entries: 928 trades vs 1,725. M5 was ahead in both periods. Over the 18 months Jan 2025–Jun 2026, M5 also made more with a smaller drawdown: +124%, max drawdown 19%, worst month −7%. **But both timeframes lost money in Jul–Sep 2026.** M5 only limited the damage, so treat the earlier numbers as optimistic and forward-test on demo before trusting the profile.
-
 ### Risk:Reward TP/SL (Optional)
 
 By default the EA places SL and TP from the manual **Trailing TP/SL** inputs (`SLValue` / `TPValue`). Enabling **Independent Risk:Reward** instead derives *both* stops from a single risk leg and a target ratio — so every trade carries the same R:R geometry regardless of the manual TP/SL tuning.
@@ -247,66 +197,21 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 
 > **Scope:** This is a per-entry geometry override, independent of the per-trade and basket equity stops, which still apply. Leave it off to keep the manual/adaptive TP/SL behavior.
 
-## Settings Profiles
+## Settings Profile
 
-Pre-configured settings files are available in the `settings/` folder. To load one, attach the EA to a chart, open the **Inputs** tab and click **Load**, then pick the `.set` file (in the Strategy Tester: right-click the inputs list → **Load**). Every profile lists every input, so loading a profile fully defines the EA's behavior.
+`settings/default.set` is the only bundled profile. It holds the same values as the EA's built-in input defaults, so attaching the EA without loading anything gives the same setup. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
 
-| Profile | Signal Threshold | Frequency | Risk | Best For |
-|---------|:---:|:---:|:---:|---|
-| **aggressive** | 3.5 | Very High | High | Maximum profit capture, larger lots, widest stops. High risk — use only with capital you can afford to lose. |
-| **safe-aggressive** | 4.0 | High | Medium-Low | Fast entries with safe lot sizing, strong dampening, fast break-even locks. Best for small accounts ($200+). |
-| **classic** | 4.5 | Medium-High | Medium | The previous default: fast M1 scalper with hedge chain. Lost heavily in 2026 real-tick backtests on XAUUSDm, where spread costs outweighed its small wins. |
-| **balanced** | 5.0 | Medium | Medium | Quality entries with moderate exposure. Suitable for everyday trading. |
-| **safe** | 6.0 | Low | Low | Highest conviction trades only, minimal exposure, tightest risk controls. Highest win rate. |
-| **default** | 6.0 + D1 trend | Low-Medium | $20 per trade | **XAUUSDm M5, ~$2,000+ accounts.** A different strategy from the profiles above: daily-trend entries, fixed $20 stop, checkpoint exit with a $20 trailing stop from +$10, loss-streak pause, no hedge. Same as the EA's built-in input defaults. See the backtest under [Checkpoint Exit](#checkpoint-exit-on-in-the-default-profile). |
-| experimental-d1-checkpoint | 6.0 + D1 trend | Low-Medium | $20 per trade | `default` without the trailing stop and loss-streak pause. Higher total in backtests, but fewer profitable months and deeper drawdowns. |
-| experimental-d1-trend | 6.0 + D1 trend | Low-Medium | $20 per trade | The simplest version: a fixed $20/$20 SL/TP bracket. |
+| default | |
+|---|---|
+| Symbol / timeframe | XAUUSDm (3-digit quotes) on **M5** |
+| Entries | Signal score ≥ 6, only in the D1 trend direction (close vs rising / falling EMA50) |
+| Stop | Fixed $20 (20000 points at 0.01 lot) |
+| Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10 |
+| Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
+| Hedge chain | Off |
+| Account | About $2,000 or more: each 0.01-lot trade risks a fixed $20 (about 1%) |
 
-> Thresholds were lowered by ~1.0 vs. v41 because the scoring no longer adds "free" chop/volatility points (see the calibration note above) — relative selectivity between profiles is unchanged.
->
-> **Point values in `default` and the experimental profiles assume a 3-digit gold quote** (0.001). On a 2-digit symbol, divide `SLValue`, `TPValue`, `ZonePoints` and `MaxSpreadPoints` by 10. The checkpoint trailing stop is a % of the checkpoint distance, so it needs no change. The comparison table below covers the scalper profiles only.
-
-### Profile Comparison
-
-| Setting | Aggressive | Safe-Aggressive | Classic | Balanced | Safe |
-|---------|:---:|:---:|:---:|:---:|:---:|
-| Base Lot | 0.03 | 0.01 | 0.01 | 0.01 | 0.01 |
-| Max Lot | 0.10 | 0.03 | 0.05 | 0.05 | 0.01 |
-| Max Open Orders | 12 | 8 | 8 | 6 | 3 |
-| **Per-Trade SL (% equity)** | 1.5% | 0.8% | 1.0% | 0.8% | 0.5% |
-| **Basket Stop (% equity)** | 12% | 7% | 8% | 6% | 3% |
-| **Max Spread (ATR ratio)** | 0.35 | 0.28 | 0.25 | 0.22 | 0.20 |
-| **Min Vol Ratio to Trade** | 0.50 | 0.55 | 0.60 | 0.65 | 0.70 |
-| **Max DD Lot Steps** | 3 | 2 | 2 | 2 | 0 |
-| Slope Lookback | 2 | 2 | 3 | 3 | 4 |
-| Smoothing Candles | 1 | 2 | 2 | 2 | 3 |
-| Current Candle Blend | 0.60 | 0.45 | 0.40 | 0.35 | 0.25 |
-| Max Holding Loss Pos | 4 | 2 | 2 | 2 | 1 |
-| Dampening Penalty | 1.0 | 1.8 | 1.5 | 1.5 | 2.0 |
-| Break-Even Lock | 2.0x | 1.2x | 1.5x | 1.5x | 1.0x |
-| Virtual SL Re-entry | On (50%) | On (65%) | On (75%) | On (75%) | Off |
-| Dynamic Lots | On | On (capped) | On | On | Off |
-| News Filter | 15/15 min | 25/25 min | 30/30 min | 30/30 min | 45/45 min |
-| **Total Loss Hard Stop (% equity, incl. chains)** | 18% | 10% | 12% | 9% | 4.5% |
-| **Hedge Chain** | On | On | On | On | **Off** |
-| Hedge Max Lot (per leg) | 0.30 | 0.04 | 0.10 | 0.06 | 0.02 |
-| Hedge Max Total Lots (all chains) | 0.60 | 0.08 | 0.20 | 0.12 | 0.04 |
-| Hedge Max Active Chains | 2 | 1 | 1 | 1 | 1 |
-| Hedge Cycles × Levels | 4 × 3 | 2 × 2 | 3 × 2 | 3 × 2 | 1 × 2 |
-| **Hedge Chain Loss Stop (% equity)** | 8% | 4% | 5% | 4% | 2% |
-
-> The hedge chain is bounded by **cycles × levels**, **max lot per leg** and **max total lots**; when exhausted it is **released to the adaptive loss management** rather than force-closed. Each chain is closed outright when its loss crosses the **chain loss stop**, and the **total loss hard stop** closes everything (chains included) — so every position the EA holds has a hard cap.
-
-> **Stop Loss units are now consistent** across all profiles — every profile uses `SLInputType = Percent of Equity`, so per-trade risk is comparable and scales with account size. (In v41 the SL unit type varied by profile, which made the magnitudes contradict each profile's stated philosophy.) Per-trade SL × Max Open Orders is kept roughly in line with each profile's Basket Stop.
-
-### Recommended Profile by Account Size
-
-| Account Size | Recommended | Notes |
-|---|---|---|
-| $100-200 | **safe-aggressive** | Fast entries but strict risk controls, capped lot sizing |
-| $200-500 | **safe-aggressive** or **classic** | Safe-aggressive for growth, classic for stability |
-| $500-2,000 | **classic** or **balanced** | Room for moderate exposure |
-| $2,000+ | **default** (XAUUSDm M5) or any profile | `default` risks a fixed $20 per 0.01-lot trade (about 1% at $2,000) |
+> **Point values assume a 3-digit gold quote** (0.001). On a 2-digit symbol, divide `SLValue`, `TPValue`, `ZonePoints` and `MaxSpreadPoints` by 10. The checkpoint trailing stop is a % of the checkpoint distance, so it needs no change.
 
 ## Installation
 
@@ -326,13 +231,11 @@ Pre-configured settings files are available in the `settings/` folder. To load o
     Open the file in MetaEditor and press `F7` or click "Compile".
 
 5.  **Run**:
-    Drag the EA onto a chart and, if needed, load a profile from `settings/`.
+    Drag the EA onto an **M5** chart. Its built-in defaults are the `default.set` profile.
     - The built-in defaults (= `default.set`) are made for **XAUUSDm on M5** with 3-digit quotes and an account of about $2,000+.
-    - For other symbols, quote formats or smaller accounts, load another profile or scale the point distances.
+    - For other symbols or 2-digit quotes, scale the point distances (see [Settings Profile](#settings-profile)).
     - Requires a **hedging** account (the EA refuses to start on netting accounts).
     - When an equity stop fires (Min Equity, Target Equity or Max Times Trigger), the EA closes all its positions and pending orders and then **removes itself from the chart**. Other EAs in the terminal keep running.
-
-> **Upgrading from v43 with open positions?** v43 kept chain state only in memory, so v44 has no saved state for them on first start. Existing `Hedge L…` legs are flagged so they never seed a new chain, and the new hard stops apply immediately. Simplest is to upgrade while flat.
 
 ## Alternative Compilation (VS Code)
 
@@ -368,7 +271,7 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 5.  **Sanity-check guards** via the journal (`EnableLogging = true`): confirm entries fire only on bar close, that trades are skipped when spread is wide or ATR has collapsed, that no entries or hedge starts happen in the `MinutesBeforeClose` window, and that the **Basket Stop** / **Total Loss Hard Stop** close positions once floating loss crosses their limits.
 6.  **Judge expectancy, not win rate.** Tight trailing locks in small wins while the hard stop is much wider, so a high win rate is built into the design and says little on its own. Look at average win vs. average loss, expectancy per trade and profit factor (shown on the dashboard and in reports), plus the worst drawdown.
 
-> Reports bundled with this repo live in [`reports/`](reports/), generated with the tool below. Capture your own report (real ticks + your broker's costs, out-of-sample) before running any profile on a funded account.
+> Capture your own report with the tool below (real ticks + your broker's costs, out-of-sample) before running the EA on a funded account.
 
 ### Automated Backtests (`tools/backtest`)
 
@@ -383,8 +286,8 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 # Default profile on M1 and M5, one real-tick run per month (each month starts from a fresh $2,000)
 python tools/backtest/nyao_backtest.py run --name default-2026-real-ticks --periods M1,M5 --from 2026-01 --to 2026-09
 
-# Another profile, one timeframe, quick 1-minute-OHLC sweep
-python tools/backtest/nyao_backtest.py run --name balanced-m5 --set settings/balanced.set --periods M5 --from 2026-03 --to 2026-06 --model ohlc
+# Your own settings file, one timeframe, quick 1-minute-OHLC sweep
+python tools/backtest/nyao_backtest.py run --name my-settings-m5 --set settings/my-settings.set --periods M5 --from 2026-03 --to 2026-06 --model ohlc
 
 # Rebuild reports/<name>/ from the tester reports already in the terminal folder
 python tools/backtest/nyao_backtest.py report --name default-2026-real-ticks
