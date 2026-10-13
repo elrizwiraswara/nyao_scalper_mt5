@@ -28,7 +28,6 @@
 ;     ZonePoints and MaxSpreadPoints by 10 (the trailing stop is a % of the checkpoint distance).
 ;   - $20 stop at the 0.01 minimum lot: use ~$2,000+ for ~1% risk per trade.
 ;   - Needs a hedging account (up to 2 positions open).
-;   - The previous default (fast M1 scalper with hedge chain) is kept as classic.set.
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
 DirectionalBodyLookback=10
@@ -60,6 +59,7 @@ SlopeWeight=1.5
 MomentumBaseWeight=1.0
 MomentumTriggerWeight=0.5
 BodyMomentumWeight=1.5
+DirectionalBodyMomentum=true
 RegimeScoreMode=0
 ERPeriod=10
 ERHighThreshold=0.50
