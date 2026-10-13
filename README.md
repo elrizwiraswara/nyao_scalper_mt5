@@ -1,5 +1,7 @@
 # Nyao Scalper v45.0
 
+![Nyao Scalper MT5: a trade from a 7.3 signal score with stop loss, break-even, partial close, trailing stop and exit](assets/cover.png)
+
 **Indicator-Based Signal Strength EA for MetaTrader 5**
 
 > **Disclaimer:** This Expert Advisor is an experimental project for educational purposes. Trading Forex/CFDs involves significant risk. Past performance is not indicative of future results. Use at your own risk.
