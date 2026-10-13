@@ -20,7 +20,7 @@
 #define EA_TITLE "Nyao Scalper v44.0"
 
 // Per-position persistent state file format (bump when ManagedPosition changes)
-#define STATE_FILE_VERSION 3
+#define STATE_FILE_VERSION 4
 
 #include <Generic\HashMap.mqh>
 
@@ -107,6 +107,7 @@ input double SlopeWeight = 1.5;                           // Trend Slope Confirm
 input double MomentumBaseWeight = 1.0;                    // Momentum Base Weight (RSI Sweet Spot)
 input double MomentumTriggerWeight = 0.5;                 // Momentum Trigger Weight (RSI Breakout)
 input double BodyMomentumWeight = 1.5;                    // Body Momentum Weight
+input bool DirectionalBodyMomentum = true;                // Body / Impulse Momentum Only Counts Candles Moving the Trade's Way
 input ENUM_REGIME_MODE RegimeScoreMode = REGIME_ATR_EXPANSION; // Regime (Chop) Score Mode
 input int ERPeriod = 10;                                  // Efficiency Ratio Period (Regime Mode = ER)
 input double ERHighThreshold = 0.50;                      // ER >= this -> Chop Score High (Regime Mode = ER)
@@ -325,6 +326,13 @@ ulong lastProcessedNewsEventID = 0;                       // Last processed news
 string symbolBaseCurrency = "";                           // Base currency of the symbol
 string symbolQuoteCurrency = "";                          // Quote currency of the symbol
 long initialLeverage = 0;                                 // Initial Account Leverage
+long stateLogin = 0;                                      // Account the state file belongs to (captured at init)
+bool initDeferred = false;                                // InitializeEA waits for the terminal to connect
+ulong restoredTickets[];                                  // Positions whose saved state was restored at init
+ulong lastBalanceDeal = 0;                                // Newest deposit / withdrawal already applied to the baselines
+double lastSeenBalance = 0;                               // Balance on the previous tick
+datetime balanceChangedAt = 0;                            // When the balance last changed (peaks wait a moment)
+ulong adoptPending[];                                     // Unrestored positions still waiting for a stop / checkpoint
 bool isOrderSendLocked = false;                           // Flag for locking OrderSend execution
 bool marketCloseAlertSent = false;                        // Flag for near market close time
 bool algoTradingStatus = false;                           // Flag for algo trading status
@@ -425,6 +433,8 @@ struct ManagedPosition
     double virtStep;                                     // Checkpoint exit: distance each skip pushes the inner stop (= initial SL distance)
     int cpSkipsLeft;                                     // Checkpoint exit: loss-side skips remaining
     int cpCount;                                         // Checkpoint exit: checkpoints passed so far
+    double chainBooked;                                  // Hedge chain: loss already booked by reseed partial closes ($, <= 0), on every leg
+    double cpLock;                                       // Checkpoint exit: SL price owed by the last checkpoint passed (0 = none)
 };
 
 // Managed positions array
@@ -438,6 +448,9 @@ int sellsOnCurrentBar = 0;
 
 // New-Bar Entry Gate (only evaluate entries once per closed bar when enabled)
 datetime lastEntryBarTime = 0;
+bool lastOrderRetryable = false;                          // The last entry order was rejected for a price move
+int entryRetries = 0;                                     // Entry retries used on entryRetryBar
+datetime entryRetryBar = 0;
 
 // Consecutive Trading Candle Tracker (for threshold escalation)
 int consecutiveBuyCandles = 0;                            // How many consecutive candles opened buy positions
@@ -546,8 +559,43 @@ int OnInit()
         passwordDialogActive = false;
     }
     
+    // At terminal / VPS start the account may not be synced yet (login, leverage, margin mode and
+    // positions read as 0): wait for the connection instead of initialising on empty data
+    if(!MQLInfoInteger(MQL_TESTER) && !AccountReady())
+    {
+        initDeferred = true;
+        EventSetTimer(1);
+        Print(EA_TITLE, ": waiting for the trade server connection before initialising...");
+        return(INIT_SUCCEEDED);
+    }
+
     // Continue with normal initialization
     return(InitializeEA());
+}
+
+// Account data is synced with the trade server (safe to read margin mode, leverage, positions)
+bool AccountReady()
+{
+    return TerminalInfoInteger(TERMINAL_CONNECTED) && AccountInfoInteger(ACCOUNT_LOGIN) > 0
+        && AccountInfoInteger(ACCOUNT_LEVERAGE) > 0 && SymbolInfoDouble(_Symbol, SYMBOL_BID) > 0;
+}
+
+// Finish an initialisation that OnInit deferred until the terminal was connected
+void TryDeferredInit()
+{
+    if(!initDeferred || !AccountReady()) return;
+    initDeferred = false;
+    EventKillTimer();
+    if(InitializeEA() != INIT_SUCCEEDED)
+    {
+        Alert(EA_TITLE, ": initialization failed - removing the EA");
+        ExpertRemove();
+    }
+}
+
+void OnTimer()
+{
+    TryDeferredInit();
 }
 
 // +------------------------------------------------------------------+
@@ -577,9 +625,35 @@ int InitializeEA()
         return(INIT_PARAMETERS_INCORRECT);
     }
 
+    if(FloorToVolumeStep(BaseLotSize) < SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN))
+    {
+        Alert("ERROR: BaseLotSize ", BaseLotSize, " is below the broker minimum ",
+              SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), " for ", _Symbol);
+        return(INIT_PARAMETERS_INCORRECT);
+    }
+
     if(!EnableBuyOrders && !EnableSellOrders)
     {
         Alert("ERROR: Both Buy and Sell orders are disabled! EA will not trade!");
+        return(INIT_PARAMETERS_INCORRECT);
+    }
+
+    // Inputs used as divisors or loop lengths
+    if(EMAFastPeriod < 1 || EMASlowPeriod < 1 || RSIPeriod < 1 || ATRPeriod < 1 || ATRAvgLookback < 1 ||
+       SlopeLookback < 1 || DirectionalBodyLookback < 1 || ImpulseLookback < 1 || SignalSmoothingCandles < 1 ||
+       VelocityWindow <= 0)
+    {
+        Alert("ERROR: indicator periods / lookbacks must be >= 1 and VelocityWindow > 0");
+        return(INIT_PARAMETERS_INCORRECT);
+    }
+    if(EnableLossManagement && MaxAdverseATR <= 0)
+    {
+        Alert("ERROR: MaxAdverseATR must be > 0 when EnableLossManagement is on");
+        return(INIT_PARAMETERS_INCORRECT);
+    }
+    if(EnableCheckpointExit && (CheckpointLockPct < 0 || CheckpointLockPct >= 100))
+    {
+        Alert("ERROR: CheckpointLockPct must be between 0 and 99 (100% would put the SL on the price itself)");
         return(INIT_PARAMETERS_INCORRECT);
     }
 
@@ -695,6 +769,14 @@ int InitializeEA()
     symbolBaseCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
     symbolQuoteCurrency = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
     initialLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+    stateLogin = AccountInfoInteger(ACCOUNT_LOGIN);
+    lastBalanceDeal = LatestBalanceDeal();                 // older deposits are already in the baselines
+    lastSeenBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+    balanceChangedAt = 0;
+    // Block flags survive a re-init; each check sets them again on its next pass
+    isOutsideTradingHours = false;
+    isLeverageDiffFromInitial = false;
+    isNearMarketClose = false;
     isOrderSendLocked = false;
     algoTradingStatus = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
@@ -793,6 +875,8 @@ int InitializeEA()
     // Restore per-position (chain, partial-close, break-even...) and account-level state
     // saved before the last restart / re-init
     RestoreState();
+    AdoptUnrestoredPositions();
+    if(!EnableHedgeChain) ReleaseOrphanChainLegs();
     eaInitialized = true;
     SaveState(true);
 
@@ -828,7 +912,16 @@ void OnDeinit(const int reason)
         // Persist the latest state so a restart / re-init picks up exactly where we left off
         SaveState(true);
     }
+
+    // Send what is still queued (e.g. the equity-stop alert before ExpertRemove)
+    for(int a = 0; a < 3 && ArraySize(alertTitles) > 0; a++)
+    {
+        alertRetryAfter = 0;
+        FlushDiscordAlerts();
+    }
     eaInitialized = false;
+    if(initDeferred) EventKillTimer();
+    initDeferred = false;
 
     // Cleanup Dashboard Objects
     ObjectsDeleteAll(0, "NyaoDash_");
@@ -850,6 +943,8 @@ void OnDeinit(const int reason)
 // +------------------------------------------------------------------+
 void OnTick()
 {
+    if(initDeferred) TryDeferredInit();
+
     // Block trading until password is verified (and initialization actually succeeded)
     if(!passwordVerified || !eaInitialized) return;
 
@@ -857,6 +952,9 @@ void OnTick()
 
     // Persist state whenever it changed this tick (no-op otherwise)
     SaveState();
+
+    // Alerts go out last, one per tick, so a slow webhook never delays trading
+    FlushDiscordAlerts();
 }
 
 // +------------------------------------------------------------------+
@@ -866,6 +964,19 @@ void ProcessTick()
 {
     // Invalidate per-tick signal cache
     for(int c = 0; c < 4; c++) _strengthValid[c] = false;
+
+    // A balance change may be a deposit / withdrawal: apply it before peaks and drawdown look at
+    // equity (the transaction event can arrive after this tick)
+    double balanceNow = AccountInfoDouble(ACCOUNT_BALANCE);
+    if(balanceNow != lastSeenBalance)
+    {
+        lastSeenBalance = balanceNow;
+        balanceChangedAt = TimeCurrent();
+        CatchUpBalanceOperations(TimeCurrent() - 7 * 86400);
+    }
+
+    // Unrestored positions whose stop / checkpoint could not be set at init (e.g. ATR not ready)
+    if(ArraySize(adoptPending) > 0) RetryAdoption();
 
     // Check Algo Trading status
     CheckAlgoTradingStatus();
@@ -971,8 +1082,21 @@ void ProcessTick()
 
     if (isOutsideTradingHours || isLeverageDiffFromInitial || isNearMarketClose)
     {
+        // A failed close-all after a leverage change is retried until flat
+        if(isLeverageDiffFromInitial && CloseAllOnLeverageChange && CountOpenOrders() > 0)
+        {
+            static datetime lastLeverageCloseTry = 0;
+            if(TimeCurrent() - lastLeverageCloseTry >= 5)
+            {
+                lastLeverageCloseTry = TimeCurrent();
+                CloseAllPositions();
+            }
+        }
+
         // Don't open new positions, but continue managing existing ones
         ManagePositions();
+        MarkEntryBarSeen();
+        CheckTradeReport();
         UpdateDashboard();
         return;
     }
@@ -985,6 +1109,8 @@ void ProcessTick()
 
         // Don't open new positions, but continue managing existing ones
         ManagePositions();
+        MarkEntryBarSeen();
+        CheckTradeReport();
         UpdateDashboard();
         return;  // EXIT - prevent all new orders while paused
     }
@@ -1030,6 +1156,13 @@ void ProcessTick()
     UpdateDashboard();
 }
 
+// While entries are blocked, still use up each new bar: when the block lifts mid-bar, the next
+// entry decision waits for a fresh bar open instead of firing on a half-formed one
+void MarkEntryBarSeen()
+{
+    if(EnableNewBarEntryOnly) lastEntryBarTime = iTime(_Symbol, _Period, 0);
+}
+
 // +------------------------------------------------------------------+
 // | Chart Event Handler - Password Dialog                            |
 // +------------------------------------------------------------------+
@@ -1053,8 +1186,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
                 
                 Print("Password verified! EA is now active.");
                 
-                // Complete initialization
-                if(InitializeEA() != INIT_SUCCEEDED)
+                // Complete initialization (after the trade server connection, like OnInit)
+                if(!MQLInfoInteger(MQL_TESTER) && !AccountReady())
+                {
+                    initDeferred = true;
+                    EventSetTimer(1);
+                }
+                else if(InitializeEA() != INIT_SUCCEEDED)
                 {
                     Alert("EA initialization failed!");
                 }
@@ -1088,16 +1226,27 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
     if(dealTicket == 0) return;
     if(!HistoryDealSelect(dealTicket)) return;
 
-    // Only our symbol + magic
-    if(HistoryDealGetString(dealTicket, DEAL_SYMBOL) != _Symbol) return;
-    if(HistoryDealGetInteger(dealTicket, DEAL_MAGIC) != MagicNumber) return;
+    // Deposits / withdrawals move the equity baselines (not a drawdown, not a new peak)
+    long dealType = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+    if(dealType == DEAL_TYPE_BALANCE || dealType == DEAL_TYPE_CREDIT)
+    {
+        ApplyBalanceOperation(dealTicket, HistoryDealGetDouble(dealTicket, DEAL_PROFIT));
+        return;
+    }
 
-    // Statistics are cached; recompute on the next dashboard / report pass
-    tradeStatsDirty = true;
+    // Only our symbol, and deals of our magic - or any deal that closes a position we manage
+    // (a manual or close-by close carries no magic but still ends our trade)
+    if(HistoryDealGetString(dealTicket, DEAL_SYMBOL) != _Symbol) return;
 
     long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
     ulong posID = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
     if(posID == 0) return;
+    bool closingDeal = (dealEntry == DEAL_ENTRY_OUT || dealEntry == DEAL_ENTRY_OUT_BY || dealEntry == DEAL_ENTRY_INOUT);
+    if(HistoryDealGetInteger(dealTicket, DEAL_MAGIC) != MagicNumber && !(closingDeal && GetManagedPositionIndex(posID) != -1))
+        return;
+
+    // Statistics are cached; recompute on the next dashboard / report pass
+    tradeStatsDirty = true;
 
     // NEW POSITION OPENED
     // Registers fills here so pending-limit entries get tracked. Market entries are
@@ -1130,8 +1279,17 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
         RegisterManagedPosition(posID, ptype, score, entryPrice);
 
+        // A hedge leg whose order reported failure but filled later: a big naked lot outside any
+        // chain - flag it so ProtectGraduatedHedges gives it a stop, and never chain it again
+        bool lateHedgeLeg = (StringFind(posComment, "Hedge L") == 0);
+        if(lateHedgeLeg)
+        {
+            int hi = GetManagedPositionIndex(posID);
+            if(hi != -1) { managedPositions[hi].noRehedge = true; managedPositions[hi].hedgeGraduated = true; }
+        }
+
         // Arm checkpoint mode for the filled limit (same distances it was placed with)
-        if(EnableCheckpointExit)
+        if(EnableCheckpointExit && !lateHedgeLeg)
         {
             double fillVol = PositionSelectByTicket(posID) ? PositionGetDouble(POSITION_VOLUME)
                                                            : HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
@@ -1168,7 +1326,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
     }
 
     // POSITION CLOSED (full close accounting)
-    if(dealEntry != DEAL_ENTRY_OUT && dealEntry != DEAL_ENTRY_INOUT) return;
+    if(!closingDeal) return;
 
     // Partial close — the position is still open (reduced volume); no full-close accounting
     if(PositionSelectByTicket(posID)) return;
@@ -1386,19 +1544,25 @@ void CheckForTradingSignal()
     {
         datetime currBarTime = iTime(_Symbol, _Period, 0);
         if(lastEntryBarTime == currBarTime) return;
+        if(IsSpreadTooWide()) return;                     // wait for a normal spread within this bar
         lastEntryBarTime = currBarTime;
+        if(entryRetryBar != currBarTime) { entryRetryBar = currBarTime; entryRetries = 0; }
     }
+    lastOrderRetryable = false;
 
-    // Check Signals
-    double buySignal = BuySignal();
-    double sellSignal = SellSignal();
+    // Check Signals (a disabled direction scores 0, so it can't hide a valid signal the other way)
+    double buySignal  = EnableBuyOrders  ? BuySignal()  : 0;
+    double sellSignal = EnableSellOrders ? SellSignal() : 0;
 
     // Loss-streak pause: the signal is still evaluated exactly as for a real entry, but it opens
-    // a paper trade instead (one at a time) - its result decides when real trading resumes
+    // a paper trade instead (one at a time) - its result decides when real trading resumes.
+    // The paper trade stands for that real entry, so it must pass the same position / spread limits.
     if (streakPaused)
     {
-        if (buySignal > sellSignal && EnableBuyOrders) OpenPaperTrade(1);
-        else if (sellSignal > buySignal && EnableSellOrders) OpenPaperTrade(-1);
+        if (buySignal <= 0 && sellSignal <= 0) return;
+        if (!IsAllowedToOpenPosition(true)) return;
+        if (buySignal > sellSignal) OpenPaperTrade(1, buySignal);
+        else if (sellSignal > buySignal) OpenPaperTrade(-1, sellSignal);
         return;
     }
 
@@ -1408,19 +1572,24 @@ void CheckForTradingSignal()
     // exposure immediately and must not risk going unfilled. See TryVirtualSLReentry.)
     if (buySignal > sellSignal)
     {
-        if (!EnableBuyOrders) return;
-        if (EnableLimitEntry) 
+        if (EnableLimitEntry)
             PlaceLimitEntry(ORDER_TYPE_BUY, buySignal);
-        else 
+        else
             OpenPosition(ORDER_TYPE_BUY, buySignal);
     }
     else if (buySignal < sellSignal)
     {
-        if (!EnableSellOrders) return;
-        if (EnableLimitEntry) 
+        if (EnableLimitEntry)
             PlaceLimitEntry(ORDER_TYPE_SELL, sellSignal);
-        else 
+        else
             OpenPosition(ORDER_TYPE_SELL, sellSignal);
+    }
+
+    // Requote / price change: nothing was opened - re-evaluate on the next ticks of this bar
+    if (lastOrderRetryable && EnableNewBarEntryOnly && entryRetries < 3)
+    {
+        entryRetries++;
+        lastEntryBarTime = 0;
     }
 }
 
@@ -1669,24 +1838,12 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
         return false;
     }
 
-    // Check minimum distance from last same-dir entry (duplicate signal filter)
+    // Minimum distance from every open same-direction position (duplicate signal filter)
     if(checkDuplicate)
     {
-        ulong lastTicket  = GetLastPositionTicket(dir);
-        datetime lastTime = isBuy ? lastBuyTime : lastSellTime;
-        double lastPrice  = isBuy ? lastBuyPrice : lastSellPrice;
-        double dupMult    = isBuy ? BuyDuplicateMultiplier : SellDuplicateMultiplier;
-
-        if(lastTime > 0 && lastTicket > 0)
-        {
-            double minDistance = ZonePoints * _Point * dupMult;
-            double distance = MathAbs(price - lastPrice);
-
-            if(distance < minDistance)
-            {
-                return false;
-            }
-        }
+        double dupMult = isBuy ? BuyDuplicateMultiplier : SellDuplicateMultiplier;
+        double minDistance = ZonePoints * _Point * dupMult;
+        if(minDistance > 0 && NearestOpenEntryDistance(dir, price) < minDistance) return false;
     }
 
     return true;
@@ -1864,17 +2021,22 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
     double rsi = bufRSI[0];
     double baseMomentum = 0;
 
+    // A big candle is momentum for the side it moved: with DirectionalBodyMomentum a large bearish
+    // candle no longer adds body / impulse points to the BUY score (and vice versa)
+    bool candleWithTrade = isBuy ? (rates[0].close > rates[0].open) : (rates[0].close < rates[0].open);
+    bool bodyCounts = (!DirectionalBodyMomentum || candleWithTrade);
+
     if (isBuy)
     {
         if (rsi > 50 && rsi < RSIOverbought) baseMomentum += MomentumBaseWeight;
         if (rsi > RSIMomentumBuy) baseMomentum += MomentumTriggerWeight;
-        if (currentBody > avgRecentBody) baseMomentum += BodyMomentumWeight;
+        if (currentBody > avgRecentBody && bodyCounts) baseMomentum += BodyMomentumWeight;
     }
     else
     {
         if (rsi < 50 && rsi > RSIOversold) baseMomentum += MomentumBaseWeight;
         if (rsi < RSIMomentumSell) baseMomentum += MomentumTriggerWeight;
-        if (currentBody > avgRecentBody) baseMomentum += BodyMomentumWeight;
+        if (currentBody > avgRecentBody && bodyCounts) baseMomentum += BodyMomentumWeight;
     }
 
     double momentumScore = baseMomentum;
@@ -1895,6 +2057,7 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
     double rangeAccel = 0;
     if (avgRecentRange > 0) rangeAccel = currentRange / avgRecentRange;
     if (rangeAccel > 3.0) rangeAccel = 3.0;
+    if (!bodyCounts) { bodyAccel = 0; rangeAccel = 0; }    // a counter-move candle is no impulse for this side
 
     int sameDirCount = 0;
     for(int i=0; i<ImpulseLookback && i<needed; i++)
@@ -2035,9 +2198,9 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
 // | range or breakout yet). Blending it in would only drag the score |
 // | down, so entry mode scores CLOSED candles only (blend = 0).      |
 // +------------------------------------------------------------------+
-SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = false)
+SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = false, bool forceClosedOnly = false)
 {
-    bool closedOnly = (entryMode && EnableNewBarEntryOnly);
+    bool closedOnly = (entryMode && EnableNewBarEntryOnly) || forceClosedOnly;
     int slot = ((orderType == ORDER_TYPE_BUY) ? 0 : 1) + (closedOnly ? 2 : 0);
 
     // Return cached result if already computed this tick
@@ -2600,6 +2763,7 @@ void ManageLosingPositions()
             
             double slDistance = currentATR * SLTightenATRMultiplier * healthRatio;
             double newTightenedSL = 0;
+            bool tighten = true;                          // false = no SL change; the exit checks below still run
             
             // Re-read position to ensure consistency
             if(!PositionSelectByTicket(ticket)) continue;
@@ -2619,10 +2783,10 @@ void ManageLosingPositions()
                     newTightenedSL = NormalizeDouble(entryPrice, _Digits);
                 
                 // Only move SL UP (more protective)
-                if(currentSL > 0 && newTightenedSL <= currentSL) continue;
-                
+                if(currentSL > 0 && newTightenedSL <= currentSL) tighten = false;
+
                 // Respect minimum stop distance
-                if(newTightenedSL >= bid - minDist) continue;
+                if(newTightenedSL >= bid - minDist) tighten = false;
             }
             else
             {
@@ -2634,13 +2798,13 @@ void ManageLosingPositions()
                     newTightenedSL = NormalizeDouble(entryPrice, _Digits);
                 
                 // Only move SL DOWN (more protective)
-                if(currentSL > 0 && newTightenedSL >= currentSL) continue;
-                
+                if(currentSL > 0 && newTightenedSL >= currentSL) tighten = false;
+
                 // Respect minimum stop distance
-                if(newTightenedSL <= ask + minDist) continue;
+                if(newTightenedSL <= ask + minDist) tighten = false;
             }
             
-            if(IsSLValid(posType, newTightenedSL))
+            if(tighten && IsSLValid(posType, newTightenedSL))
             {
                 if(ModifyPosition(ticket, newTightenedSL, currentTP))
                 {
@@ -2900,7 +3064,7 @@ bool PartialClosePosition(ulong ticket, double closeVolume)
     
     LogPrint("Partial close ", ticket, " | Vol: ", closeVolume, " | Retcode: ", result.retcode);
     LockOrderSend(false);
-    return (result.retcode == TRADE_RETCODE_DONE);
+    return (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL);
 }
 
 // +------------------------------------------------------------------+
@@ -3082,9 +3246,21 @@ void ManageTrailingTPSL(ulong ticket)
         double tpPoints = ConvertToPoints(TPInputType, effectiveTP, volume);
         double targetTP = 0;
         
-        if(posType == POSITION_TYPE_BUY) targetTP = NormalizeDouble(entryPrice + tpPoints * _Point, _Digits);
-        else targetTP = NormalizeDouble(entryPrice - tpPoints * _Point, _Digits);
-        
+        if(posType == POSITION_TYPE_BUY) targetTP = NormalizePrice(entryPrice + tpPoints * _Point);
+        else targetTP = NormalizePrice(entryPrice - tpPoints * _Point);
+
+        // The adaptive TP may have shrunk past the price: that target is reached - take it now
+        // (sending it would be rejected as an invalid stop, and block the SL update with it)
+        double tpMinDist = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+        double closePx = (posType == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        bool tpReached = (posType == POSITION_TYPE_BUY) ? (targetTP <= closePx + tpMinDist) : (targetTP >= closePx - tpMinDist);
+        if(tpReached && targetTP != currentTP)
+        {
+            LogPrint("[ADAPTIVE TP] Target ", targetTP, " already reached for ", ticket, " - closing");
+            ClosePosition(ticket);
+            return;
+        }
+
         // Only modify if significant difference (> 1 point)
         if(MathAbs(targetTP - currentTP) > _Point)
         {
@@ -3252,6 +3428,20 @@ void ManageTrailingTPSL(ulong ticket)
     // Skip if SL is visually same (if modifier flag was triggered but value didn't change enough - redundant check)
     if(shouldModifySL && MathAbs(newSL - currentSL) < _Point && MathAbs(newTP - currentTP) < _Point) return;
 
+    // Trail in steps of at least 10% of the SL's distance from the price (min 10 points), not on
+    // every new tick high - a fast market would otherwise flood the server with modify requests
+    if(shouldModifySL && currentSL > 0)
+    {
+        double px = (posType == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        double minStep = MathMax(10 * _Point, 0.1 * MathAbs(px - newSL));
+        if(MathAbs(newSL - currentSL) < minStep)
+        {
+            shouldModifySL = false;
+            newSL = currentSL;
+            if(MathAbs(newTP - currentTP) < _Point) return;
+        }
+    }
+
     // Validate new SL
     if(shouldModifySL && !IsSLValid(posType, newSL))
     {
@@ -3276,10 +3466,12 @@ void ManageTrailingTPSL(ulong ticket)
         // Trigger if modification failed AND profit is substantial
         // Prevents losing substantial profit due to inability to trail
         
-        // Define substantial as 3x minimum target profit
+        // Define substantial as 3x minimum target profit. A busy / moving market (requote,
+        // throttling, frozen level) is retried on the next tick instead of closing the trade.
         double minSubstantialProfit = MinBreakEvenProfit * 3.0;
+        bool retryLater = IsTransientRetcode(lastModifyRetcode) || lastModifyRetcode == TRADE_RETCODE_FROZEN;
 
-        if(MinBreakEvenProfit > 0 && profit >= minSubstantialProfit)
+        if(MinBreakEvenProfit > 0 && profit >= minSubstantialProfit && !retryLater)
         {
             LogPrint("!! EMERGENCY CLOSE TRIGGERED !!");
             ClosePosition(ticket);
@@ -3321,6 +3513,8 @@ void RegisterManagedPosition(ulong ticket, ENUM_POSITION_TYPE type, double signa
     managedPositions[managedPositionCount].virtStep = 0;
     managedPositions[managedPositionCount].cpSkipsLeft = 0;
     managedPositions[managedPositionCount].cpCount = 0;
+    managedPositions[managedPositionCount].chainBooked = 0;
+    managedPositions[managedPositionCount].cpLock = 0;
     // Capture original SL from broker if position exists
     double origSL = 0;
     if(PositionSelectByTicket(ticket)) origSL = PositionGetDouble(POSITION_SL);
@@ -3367,48 +3561,71 @@ void SyncManagedPositions()
 {
     for(int i = managedPositionCount - 1; i >= 0; i--)
     {
-        if(!PositionSelectByTicket(managedPositions[i].ticket))
+        if(i >= managedPositionCount) continue;
+        ulong closedTicket = managedPositions[i].ticket;
+        if(PositionSelectByTicket(closedTicket)) continue;
+
+        // Look up this position's own deals (any exit type and magic: SL/TP, manual, close-by)
+        bool closed = false;
+        if(HistorySelectByPosition(closedTicket))
         {
-            ulong closedTicket = managedPositions[i].ticket;
-
-            // Query deal history to find the closing profit of this position
-            double closedProfit = 0;
-            bool foundDeal = false;
-
-            // Select history for recent period (last 24 hours should be sufficient)
-            datetime fromTime = TimeCurrent() - 86400;
-            datetime toTime = TimeCurrent();
-
-            if(HistorySelect(fromTime, toTime))
+            for(int d = HistoryDealsTotal() - 1; d >= 0 && !closed; d--)
             {
-                int totalDeals = HistoryDealsTotal();
-                for(int d = totalDeals - 1; d >= 0; d--)
-                {
-                    ulong dealTicket = HistoryDealGetTicket(d);
-                    if(dealTicket == 0) continue;
-
-                    // Match deal to our position
-                    ulong dealPosition = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-                    long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-                    long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
-
-                    if(dealPosition == closedTicket && dealEntry == DEAL_ENTRY_OUT && dealMagic == MagicNumber)
-                    {
-                        closedProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
-                                     + HistoryDealGetDouble(dealTicket, DEAL_SWAP)
-                                     + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
-                        foundDeal = true;
-                        break;
-                    }
-                }
+                ulong deal = HistoryDealGetTicket(d);
+                if(deal == 0) continue;
+                long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+                closed = (entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT);
             }
-
-            if(foundDeal)
-                ProcessClosedPosition(closedTicket, closedProfit);
-            else
-                RemoveManagedPosition(closedTicket); // no closing deal found — drop the stale entry
         }
+
+        if(closed)
+        {
+            ProcessClosedPosition(closedTicket, 0);          // the net result is read from its deals
+            continue;
+        }
+
+        // The closing deal may not be in the history yet: wait before dropping the entry unaccounted
+        if(!GoneLongEnough(closedTicket)) continue;
+        Print("[SYNC] Position ", closedTicket, " is gone but no closing deal was found - removed without accounting");
+        RemoveManagedPosition(closedTicket);
     }
+}
+
+// Positions that disappeared without a closing deal yet: first-seen time per ticket
+ulong goneTickets[];
+datetime goneSince[];
+
+bool GoneLongEnough(ulong ticket)
+{
+    int n = ArraySize(goneTickets);
+    for(int i = 0; i < n; i++)
+        if(goneTickets[i] == ticket) return (TimeCurrent() - goneSince[i] >= 60);
+    if(n >= 200) { ArrayResize(goneTickets, 0); ArrayResize(goneSince, 0); n = 0; }
+    ArrayResize(goneTickets, n + 1);
+    ArrayResize(goneSince, n + 1);
+    goneTickets[n] = ticket;
+    goneSince[n] = TimeCurrent();
+    return false;
+}
+
+// Net result of a whole position: all its deals (partial closes, entry + exit commission, swap, fees)
+double PositionNetResult(ulong positionId, double fallback)
+{
+    if(!HistorySelectByPosition(positionId)) return fallback;
+    double net = 0;
+    bool exited = false;
+    for(int d = 0; d < HistoryDealsTotal(); d++)
+    {
+        ulong deal = HistoryDealGetTicket(d);
+        if(deal == 0) continue;
+        net += HistoryDealGetDouble(deal, DEAL_PROFIT) + HistoryDealGetDouble(deal, DEAL_SWAP)
+             + HistoryDealGetDouble(deal, DEAL_COMMISSION) + HistoryDealGetDouble(deal, DEAL_FEE);
+        long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+        if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT) exited = true;
+    }
+    // Live, the exit deal can reach the history a moment after the close: until it is there,
+    // the caller's estimate (the P/L at the moment of closing) is the better number
+    return exited ? net : fallback;
 }
 
 // +------------------------------------------------------------------+
@@ -3448,11 +3665,11 @@ void RecordStreakResult(bool isWin, string source)
 }
 
 // Open a paper trade for a signal that a loss-streak pause kept from trading (one at a time)
-void OpenPaperTrade(int dir)
+void OpenPaperTrade(int dir, double signalScore)
 {
     if(paperDir != 0) return;
 
-    double lot = BaseLotSize;
+    double lot = CalculateDynamicLotSize(signalScore);       // same lot the real entry would use
     double slPts = GetSLPoints(lot);
     double tpPts = GetTPPoints(lot);                          // = the first checkpoint in checkpoint mode
     if(slPts <= 0) slPts = tpPts;                             // define both sides even if one is disabled
@@ -3497,8 +3714,13 @@ void ProcessClosedPosition(ulong closedTicket, double closedProfit)
     // Idempotency guard: if it is no longer tracked, this close was already handled
     if(GetManagedPositionIndex(closedTicket) == -1) return;
 
+    // Judge the whole trade (earlier partial closes, commission at entry and exit, swap, fees),
+    // not just the final closing deal. Exactly break-even counts as neither a win nor a loss.
+    closedProfit = PositionNetResult(closedTicket, closedProfit);
+
     // LOSS-STREAK PAUSE: real results feed the same streak as paper results
-    RecordStreakResult(closedProfit > 0, StringFormat("real position %I64u closed %+.2f", closedTicket, closedProfit));
+    if(closedProfit != 0)
+        RecordStreakResult(closedProfit > 0, StringFormat("real position %I64u closed %+.2f", closedTicket, closedProfit));
 
     // SIGNAL DAMPENING: Track consecutive losses for cooldown
     if(EnableSignalDampening)
@@ -3514,13 +3736,13 @@ void ProcessClosedPosition(ulong closedTicket, double closedProfit)
             if(ConsecutiveLossesBeforeCooldown > 0 && consecutiveLossCount >= ConsecutiveLossesBeforeCooldown)
             {
                 datetime currBar = iTime(_Symbol, _Period, 0);
-                cooldownUntilBarTime = currBar + ConsecutiveLossCooldownBars * PeriodSeconds(_Period);
+                cooldownUntilBarTime = currBar + (ConsecutiveLossCooldownBars + 1) * PeriodSeconds(_Period);
                 LogPrint("[COOLDOWN ACTIVATED] ", consecutiveLossCount,
                          " consecutive losses. No new entries until bar: ",
                          TimeToString(cooldownUntilBarTime));
             }
         }
-        else
+        else if(closedProfit > 0)
         {
             if(consecutiveLossCount > 0)
             {
@@ -3555,7 +3777,7 @@ void ProcessClosedPosition(ulong closedTicket, double closedProfit)
                          " | +$", DoubleToString(closedProfit, 2),
                          " | Total: $", DoubleToString(managedPositions[p].profitOffsetAccumulated, 2));
             }
-            else
+            else if(closedProfit < 0)
             {
                 // Losing trade: reset consecutive counter and accumulated profit
                 if(managedPositions[p].profitOffsetConsecWins > 0)
@@ -3584,6 +3806,19 @@ int GetManagedPositionIndex(ulong ticket)
         }
     }
     return -1;
+}
+
+// Distance from `price` to the nearest open managed position of this direction (DBL_MAX if none)
+double NearestOpenEntryDistance(ENUM_POSITION_TYPE dir, double price)
+{
+    double nearest = DBL_MAX;
+    for(int i = 0; i < managedPositionCount; i++)
+    {
+        if(managedPositions[i].type != dir) continue;
+        if(!PositionSelectByTicket(managedPositions[i].ticket)) continue;
+        nearest = MathMin(nearest, MathAbs(price - PositionGetDouble(POSITION_PRICE_OPEN)));
+    }
+    return nearest;
 }
 
 // Get Last Position Ticket by Type
@@ -3644,6 +3879,12 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     // Resolve SL (risk) and TP distances. Independent R:R mode overrides
     // both manual SL and manual TP; otherwise the manual settings apply.
     double slPoints = GetSLPoints(currentLot);
+    if(slPoints <= 0 && (EnableStopLoss || EnableRiskReward))
+    {
+        LogPrint("[ENTRY SKIPPED] SL distance unavailable (ATR / tick value not ready) - not opening without a stop");
+        LockOrderSend(false);
+        return;
+    }
 
     // Checkpoint loss-side skips: the broker SL sits at the hard cap (1 + skips) x SL distance,
     // the inner stops are EA-managed - so risk is sized on the full worst-case distance
@@ -3675,18 +3916,18 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
     {
         double brokerSL = slPoints * (1 + cpSkips);            // = slPoints unless checkpoint skips are on
         if(orderType == ORDER_TYPE_BUY)
-            request.sl = NormalizeDouble(price - (brokerSL * _Point), _Digits);
+            request.sl = NormalizePrice(price - (brokerSL * _Point));
         else
-            request.sl = NormalizeDouble(price + (brokerSL * _Point), _Digits);
+            request.sl = NormalizePrice(price + (brokerSL * _Point));
     }
 
     // Checkpoint mode keeps the TP virtual (EA-managed) - a broker TP would just close the trade
     if(tpPoints > 0 && !EnableCheckpointExit)
     {
         if(orderType == ORDER_TYPE_BUY)
-            request.tp = NormalizeDouble(price + (tpPoints * _Point), _Digits);
+            request.tp = NormalizePrice(price + (tpPoints * _Point));
         else
-            request.tp = NormalizeDouble(price - (tpPoints * _Point), _Digits);
+            request.tp = NormalizePrice(price - (tpPoints * _Point));
     }
 
     bool orderResult = OrderSend(request, result);
@@ -3753,14 +3994,30 @@ void OpenPosition(ENUM_ORDER_TYPE orderType, double signalScore = 0)
         else
         {
             LogPrint("Order failed. Return code: ", result.retcode);
+            lastOrderRetryable = IsPriceRetcode(result.retcode);
         }
     }
     else
     {
-        LogPrint("OrderSend error: ", GetLastError());
+        LogPrint("OrderSend error: ", GetLastError(), " retcode ", result.retcode);
+        lastOrderRetryable = IsPriceRetcode(result.retcode);
     }
 
     LockOrderSend(false);
+}
+
+// The price moved before the order arrived: nothing was opened, so the entry may be retried.
+// (A timeout or connection error may still have filled - never resend those blindly.)
+bool IsPriceRetcode(uint code)
+{
+    return code == TRADE_RETCODE_REQUOTE || code == TRADE_RETCODE_PRICE_CHANGED || code == TRADE_RETCODE_PRICE_OFF;
+}
+
+// Rejections worth retrying later (price moved, server busy, connection blip)
+bool IsTransientRetcode(uint code)
+{
+    return code == TRADE_RETCODE_REQUOTE || code == TRADE_RETCODE_PRICE_CHANGED || code == TRADE_RETCODE_PRICE_OFF
+        || code == TRADE_RETCODE_TIMEOUT || code == TRADE_RETCODE_CONNECTION || code == TRADE_RETCODE_TOO_MANY_REQUESTS;
 }
 
 // +------------------------------------------------------------------+
@@ -3813,7 +4070,10 @@ double ComputeHedgeLot(double olderLot, double olderLoss, double atr)
     if(lot < minLot) lot = minLot;
 
     if(HedgeMaxLot > 0 && lot > HedgeMaxLot) lot = HedgeMaxLot;
-    return NormalizeVolume(lot);
+    // Round DOWN to the volume step so rounding can never push the leg above HedgeMaxLot;
+    // 0 (= no hedge) when even that is below the broker minimum
+    lot = FloorToVolumeStep(MathMin(lot, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX)));
+    return (lot >= SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN)) ? lot : 0;
 }
 
 // +------------------------------------------------------------------+
@@ -3834,7 +4094,12 @@ ulong OpenChainHedge(ulong chainId, ENUM_POSITION_TYPE prevType, double hedgeLot
     // Reverse the previous leg's direction (chain alternates BUY/SELL)
     ENUM_ORDER_TYPE hedgeOrderType = (prevType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
 
-    hedgeLot = NormalizeVolume(hedgeLot);
+    hedgeLot = FloorToVolumeStep(hedgeLot);
+    if(hedgeLot < SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN))
+    {
+        LockOrderSend(false);
+        return 0;
+    }
 
     double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -3854,11 +4119,19 @@ ulong OpenChainHedge(ulong chainId, ENUM_POSITION_TYPE prevType, double hedgeLot
 
     ulong newTicket = 0;
     bool orderResult = OrderSend(request, result);
+    // A partial fill, or a timeout after which the position exists anyway, is still a live leg
+    bool filled = orderResult && (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL);
+    if(!filled && result.order != 0 && PositionSelectByTicket(result.order)) filled = true;
 
-    if(orderResult && result.retcode == TRADE_RETCODE_DONE)
+    if(filled)
     {
         ENUM_POSITION_TYPE hedgePosType = (hedgeOrderType == ORDER_TYPE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+        double booked = ChainBooked(chainId);
+        int existing = GetManagedPositionIndex(result.order);   // a late fill may already be registered
+        if(existing != -1) RemoveManagedPosition(result.order);
         RegisterManagedPosition(result.order, hedgePosType, 0, price, chainId, newLevel, anchorLoss, cycleNum);
+        int ni = GetManagedPositionIndex(result.order);
+        if(ni != -1) managedPositions[ni].chainBooked = booked;
         newTicket = result.order;
 
         LogPrint("+-----------------------------------------+");
@@ -3892,6 +4165,52 @@ void GraduateChainLeg(ulong ticket)
     managedPositions[idx].cycleNum        = 0;
     managedPositions[idx].hedgeGraduated  = true;   // trail this big-lot leg with HedgeTrailATR
     managedPositions[idx].hedgeLockProfit = 0;      // caller sets a recovery floor if applicable
+    managedPositions[idx].noRehedge       = true;   // never restart a chain (and its cycle limits) on it
+    managedPositions[idx].chainBooked     = 0;
+}
+
+// Booked (realized) chain result carried on the legs ($, most negative wins)
+double ChainBooked(ulong chainId)
+{
+    double booked = 0;
+    for(int i = 0; i < managedPositionCount; i++)
+        if(managedPositions[i].chainId == chainId) booked = MathMin(booked, managedPositions[i].chainBooked);
+    return booked;
+}
+
+void SetChainBooked(ulong chainId, double booked)
+{
+    for(int i = 0; i < managedPositionCount; i++)
+        if(managedPositions[i].chainId == chainId) managedPositions[i].chainBooked = booked;
+}
+
+// Chains whose loss stop fired: their legs are closed again on every tick until all are gone
+ulong stoppingChains[];
+
+bool IsChainStopping(ulong chainId)
+{
+    for(int i = 0; i < ArraySize(stoppingChains); i++) if(stoppingChains[i] == chainId) return true;
+    return false;
+}
+
+void SetChainStopping(ulong chainId, bool stopping)
+{
+    int n = ArraySize(stoppingChains);
+    for(int i = 0; i < n; i++)
+    {
+        if(stoppingChains[i] != chainId) continue;
+        if(!stopping) { stoppingChains[i] = stoppingChains[n - 1]; ArrayResize(stoppingChains, n - 1); }
+        return;
+    }
+    if(stopping) { ArrayResize(stoppingChains, n + 1); stoppingChains[n] = chainId; }
+}
+
+// With the hedge chain switched off nothing manages active chain legs (naked hedges, a root whose
+// SL was cleared): release them so ProtectGraduatedHedges puts a stop on each one
+void ReleaseOrphanChainLegs()
+{
+    for(int i = 0; i < managedPositionCount; i++)
+        if(managedPositions[i].chainId != 0) ReleaseChainToLossMgmt(managedPositions[i].chainId);
 }
 
 // +------------------------------------------------------------------+
@@ -3927,6 +4246,7 @@ void ReleaseChainToLossMgmt(ulong chainId)
         managedPositions[z].cycleNum        = 0;
         managedPositions[z].noRehedge       = true;   // exhausted - do not hedge these again
         managedPositions[z].hedgeGraduated  = true;   // trail these big-lot legs with HedgeTrailATR
+        managedPositions[z].chainBooked     = 0;
         released++;
     }
     LogPrint("[HEDGE CHAIN] Released chain ", chainId, " (", released,
@@ -3970,6 +4290,14 @@ bool ReseedCycle(ulong id, ulong olderTicket, ulong hedgeTicket, double hedgeLot
     if(closeVol < minL || remaining < minL)
         return false;                                   // can't reduce meaningfully
 
+    // Realized result of this reseed: the share of the hedge's open P/L that the partial close
+    // books, plus the older leg's P/L (it is closed below). It counts toward the chain loss stop.
+    double booked = ChainBooked(id);
+    if(PositionSelectByTicket(hedgeTicket))
+        booked += (PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP)) * closeVol / hedgeLot;
+    if(olderTicket != 0 && PositionSelectByTicket(olderTicket))
+        booked += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+
     // 1) Partial-close the deepest hedge FIRST (shrink exposure). If it fails, leave the
     //    chain fully INTACT (older not yet closed) and bail so the caller releases both
     //    legs cleanly to loss management - never a half-dismantled chain.
@@ -4002,6 +4330,7 @@ bool ReseedCycle(ulong id, ulong olderTicket, ulong hedgeTicket, double hedgeLot
     managedPositions[idx].hedgeLevel      = 0;
     managedPositions[idx].chainAnchorLoss = newAnchor;
     managedPositions[idx].cycleNum        = cycleNum + 1;
+    managedPositions[idx].chainBooked     = MathMin(0, booked);
 
     LogPrint("+-----------------------------------------+");
     LogPrint("[HEDGE CHAIN RESEED] New cycle ", cycleNum + 1, " | Chain ", id);
@@ -4048,7 +4377,11 @@ bool ReseedCycle(ulong id, ulong olderTicket, ulong hedgeTicket, double hedgeLot
 // +------------------------------------------------------------------+
 void ManageHedgeChains()
 {
-    if(!EnableHedgeChain) return;
+    if(!EnableHedgeChain)
+    {
+        ReleaseOrphanChainLegs();
+        return;
+    }
 
     // Current ATR (closed-candle [1] for stability, matching ManageLosingPositions)
     double bufATR[];
@@ -4116,25 +4449,39 @@ void ManageHedgeChains()
             }
         }
 
-        // No legs left, or only one (orphan / transient): graduate the survivor
-        // back to normal management and let the chain dissolve.
-        if(openLegs == 0) continue;
+        // No legs left: the chain is gone (also ends a stop that has closed everything)
+        if(openLegs == 0) { SetChainStopping(id, false); continue; }
+
+        // A chain whose loss stop fired keeps closing until every leg is gone (a failed close
+        // must not leave a survivor that is graduated - or that seeds a new chain)
+        if(IsChainStopping(id))
+        {
+            CloseChain(id);
+            continue;
+        }
+
+        // Only one leg (orphan / transient): graduate the survivor back to normal management
+        // and let the chain dissolve.
         if(openLegs == 1)
         {
             if(hedgeTicket != 0) GraduateChainLeg(hedgeTicket);
             continue;
         }
 
-        // STOP (checked first - a hard cap must win over any roll): total open loss across the
-        // chain exceeds the backstop ($ and/or % equity; the tighter threshold wins) -> close all.
+        // STOP (checked first - a hard cap must win over any roll): open loss across the chain plus
+        // the loss its reseeds already booked exceeds the backstop ($ and/or % equity; the tighter
+        // threshold wins) -> close all.
+        double booked = ChainBooked(id);
         double stopThr = ChainLossStopThreshold();
-        if(stopThr > 0 && totalPL <= -stopThr)
+        if(stopThr > 0 && totalPL + booked <= -stopThr)
         {
             LogPrint("+-----------------------------------------+");
             LogPrint("[HEDGE CHAIN STOPPED] Chain ", id, " | Open legs: ", openLegs);
-            LogPrint("Total loss $", DoubleToString(totalPL, 2), " <= stop $", DoubleToString(-stopThr, 2));
+            LogPrint("Total loss $", DoubleToString(totalPL + booked, 2), " (open $", DoubleToString(totalPL, 2),
+                     ", booked $", DoubleToString(booked, 2), ") <= stop $", DoubleToString(-stopThr, 2));
             LogPrint("Closing all chain legs (loss backstop).");
             LogPrint("+-----------------------------------------+");
+            SetChainStopping(id, true);
             CloseChain(id);
             continue;
         }
@@ -4198,6 +4545,7 @@ void ManageHedgeChains()
                 // Only open the bigger leg once the older one is really gone - otherwise the
                 // chain would hold three legs and the pair logic would ignore the middle one.
                 if(!ClosePosition(olderTicket)) continue;
+                SetChainBooked(id, booked + olderPL);           // the closed older leg's result is booked
                 OpenChainHedge(id, hedgeType, newLot, hedgeLevel + 1, anchorLoss, cycleNum);
                 continue;
             }
@@ -4284,6 +4632,17 @@ void ManageHedgeChains()
 
         double anchorLoss = -pl;                           // positive loss magnitude at chain start
 
+        // A root already at / past the chain loss stop would be stopped on the next tick: the
+        // extra hedge only adds spread. Leave it to its own SL instead.
+        double startStop = ChainLossStopThreshold();
+        if(startStop > 0 && anchorLoss >= startStop)
+        {
+            managedPositions[i].noRehedge = true;
+            LogPrint("[HEDGE CHAIN] Skip start for ", ticket, ": loss $", DoubleToString(anchorLoss, 2),
+                     " already >= chain loss stop $", DoubleToString(startStop, 2));
+            continue;
+        }
+
         // Size the first hedge to recover the original's loss. Only start the chain if
         // that hedge can be strictly larger than the original - otherwise the pair would
         // freeze (equal opposite lots never recover). If the original is already at/above
@@ -4307,6 +4666,7 @@ void ManageHedgeChains()
 
         // Promote this position to the first leg (level 0, cycle 0) of a new chain.
         // (Must precede OpenChainHedge: the new leg's registration finds its root by chainId.)
+        ManagedPosition before = managedPositions[i];      // restored in full if the hedge fails
         managedPositions[i].chainId         = ticket;
         managedPositions[i].hedgeLevel      = 0;
         managedPositions[i].chainAnchorLoss = anchorLoss;
@@ -4328,11 +4688,7 @@ void ManageHedgeChains()
             // Hedge not opened: undo the promotion so the position keeps its SL and stays
             // under normal management (never leave a root naked without its hedge).
             int ri = GetManagedPositionIndex(ticket);
-            if(ri != -1)
-            {
-                managedPositions[ri].chainId         = 0;
-                managedPositions[ri].chainAnchorLoss = 0;
-            }
+            if(ri != -1) managedPositions[ri] = before;     // checkpoint, graduation and floor come back too
             LogPrint("[HEDGE CHAIN] Start aborted for ", ticket, ": hedge order failed - root SL kept.");
             continue;
         }
@@ -4477,10 +4833,12 @@ void InitCheckpoint(ulong ticket, ENUM_POSITION_TYPE type, double entryPrice, do
 // Does the (closed-candle) signal score still point in the position's direction?
 bool CheckpointScoreAgrees(bool isBuy)
 {
-    double b = GetSignalStrength(ORDER_TYPE_BUY, true).finalScore;
-    double s = GetSignalStrength(ORDER_TYPE_SELL, true).finalScore;
+    double b = GetSignalStrength(ORDER_TYPE_BUY, true, true).finalScore;
+    double s = GetSignalStrength(ORDER_TYPE_SELL, true, true).finalScore;
     return isBuy ? (b > s) : (s > b);
 }
+
+datetime cpRetryAfter = 0;                                // Checkpoint SL modifies wait after a failure
 
 void ManageCheckpoints()
 {
@@ -4552,6 +4910,8 @@ void ManageCheckpoints()
             {
                 double lock = entry + dir * (CheckpointLockPct / 100.0) * MathAbs(cp - entry);
                 if(newSL == 0 || dir * (lock - newSL) > 0) newSL = lock;
+                if(managedPositions[i].cpLock == 0 || dir * (lock - managedPositions[i].cpLock) > 0)
+                    managedPositions[i].cpLock = lock;
                 cp += dir * step;
                 managedPositions[i].cpCount++;
             }
@@ -4575,17 +4935,40 @@ void ManageCheckpoints()
                 trailed = true;
             }
         }
-        if(!cpHeld && !trailed) continue;
+        // D) The lock of the last checkpoint passed stays owed until the broker has it: a rejected
+        // modify (requote, busy server) is retried, and if price falls back to the lock before
+        // the broker SL got there, the EA closes the trade at the lock itself
+        bool lockDue = false;
+        double lockLevel = managedPositions[i].cpLock;
+        if(lockLevel > 0)
+        {
+            if(sl == 0 || dir * (lockLevel - sl) > _Point)
+            {
+                if(dir * (price - lockLevel) <= 0)
+                {
+                    LogPrint("[CHECKPOINT] ", ticket, " fell back to its lock ", lockLevel, " before the SL was set -> closing");
+                    ClosePositionAndAccount(ticket);
+                    continue;
+                }
+                if(newSL == 0 || dir * (lockLevel - newSL) > 0) newSL = lockLevel;
+                lockDue = true;
+            }
+        }
+        if(!cpHeld && !trailed && !lockDue) continue;
+        if(TimeCurrent() < cpRetryAfter) continue;              // a modify just failed: retry after a second
 
-        newSL = NormalizeDouble(newSL, _Digits);
-        if(newSL != sl && IsSLValid(type, newSL) && ModifyPosition(ticket, newSL, tp))
+        newSL = NormalizePrice(newSL);
+        if(newSL == sl || !IsSLValid(type, newSL)) continue;
+        if(ModifyPosition(ticket, newSL, tp))
         {
             if(cpHeld)
                 LogPrint("[CHECKPOINT] ", ticket, " checkpoint #", managedPositions[i].cpCount, " held (trend ",
                          (trendOk ? "ok" : "-"), ", score ", (scoreOk ? "ok" : "-"), "): SL ", sl, " -> ", newSL, ", next checkpoint ", cp);
             else
-                LogPrint("[CHECKPOINT] ", ticket, " trailing SL ", sl, " -> ", newSL);
+                LogPrint("[CHECKPOINT] ", ticket, " SL ", sl, " -> ", newSL);
         }
+        else
+            cpRetryAfter = TimeCurrent() + 1;
     }
 }
 
@@ -4602,16 +4985,21 @@ int CountActiveChains()
         for(int k = 0; k < count; k++) if(ids[k] == id) { seen = true; break; }
         if(!seen) { ArrayResize(ids, count + 1); ids[count++] = id; }
     }
+    // Graduated / released legs (big lots out of a former chain) still occupy a chain slot
+    for(int i = 0; i < managedPositionCount; i++)
+        if(managedPositions[i].chainId == 0 && managedPositions[i].hedgeGraduated
+           && PositionSelectByTicket(managedPositions[i].ticket)) { count++; break; }
     return count;
 }
 
-// Open volume of every active chain leg (optionally excluding one ticket about to be closed)
+// Open volume of every chain leg, active or graduated (optionally excluding one ticket about to be closed)
 double ActiveChainLots(ulong excludeTicket = 0)
 {
     double lots = 0;
     for(int i = 0; i < managedPositionCount; i++)
     {
-        if(managedPositions[i].chainId == 0) continue;
+        // Active legs, and graduated / released legs that are still open
+        if(managedPositions[i].chainId == 0 && !managedPositions[i].hedgeGraduated) continue;
         if(managedPositions[i].ticket == excludeTicket) continue;
         if(PositionSelectByTicket(managedPositions[i].ticket))
             lots += PositionGetDouble(POSITION_VOLUME);
@@ -4760,9 +5148,16 @@ void PlaceLimitEntry(ENUM_ORDER_TYPE dir, double signalScore)
         request.type_time = ORDER_TIME_SPECIFIED;
         request.expiration = TimeCurrent() + (LimitEntryExpiryBars + 1) * PeriodSeconds(_Period);
     }
+    entry = NormalizePrice(entry);
     request.price = entry;
 
     double slPts = GetSLPoints(currentLot);
+    if(slPts <= 0 && (EnableStopLoss || EnableRiskReward))
+    {
+        LogPrint("[LIMIT ENTRY SKIPPED] SL distance unavailable (ATR / tick value not ready) - not placing without a stop");
+        LockOrderSend(false);
+        return;
+    }
     int cpSkips = CheckpointSkipsFor(slPts);                   // broker SL at the hard cap when skips are on
     if(!ApplyRiskSizing(currentLot, slPts * (1 + cpSkips)))
     {
@@ -4783,17 +5178,17 @@ void PlaceLimitEntry(ENUM_ORDER_TYPE dir, double signalScore)
     {
         request.type = ORDER_TYPE_BUY_LIMIT;
         if(slPts > 0)
-            request.sl = NormalizeDouble(entry - brokerSlPts * _Point, _Digits);
+            request.sl = NormalizePrice(entry - brokerSlPts * _Point);
         if(sendTP)
-            request.tp = NormalizeDouble(entry + tpPts * _Point, _Digits);
+            request.tp = NormalizePrice(entry + tpPts * _Point);
     }
     else
     {
         request.type = ORDER_TYPE_SELL_LIMIT;
         if(slPts > 0)
-            request.sl = NormalizeDouble(entry + brokerSlPts * _Point, _Digits);
+            request.sl = NormalizePrice(entry + brokerSlPts * _Point);
         if(sendTP)
-            request.tp = NormalizeDouble(entry - tpPts * _Point, _Digits);
+            request.tp = NormalizePrice(entry - tpPts * _Point);
     }
 
     if(OrderSend(request, result) && result.retcode == TRADE_RETCODE_DONE)
@@ -5077,6 +5472,8 @@ void CloseAllPositions(bool unProfitableOnly = false, bool skipChainLegs = false
 }
 
 // Modify position SL/TP
+uint lastModifyRetcode = 0;                                // Retcode of the last ModifyPosition request
+
 bool ModifyPosition(ulong ticket, double newSL, double newTP)
 {
     // Select the position
@@ -5098,18 +5495,19 @@ bool ModifyPosition(ulong ticket, double newSL, double newTP)
     request.action = TRADE_ACTION_SLTP;
     request.position = ticket;
     request.symbol = symbol;
-    request.sl = NormalizeDouble(newSL, _Digits);
-    request.tp = NormalizeDouble(newTP, _Digits);
+    request.sl = (newSL > 0) ? NormalizePrice(newSL) : 0;
+    request.tp = (newTP > 0) ? NormalizePrice(newTP) : 0;
 
     // Prevent unnecessary modifications
-    if(NormalizeDouble(newSL, _Digits) == NormalizeDouble(currentSL, _Digits) && 
-       NormalizeDouble(newTP, _Digits) == NormalizeDouble(currentTP, _Digits))
+    if(request.sl == NormalizeDouble(currentSL, _Digits) && request.tp == NormalizeDouble(currentTP, _Digits))
     {
         return true;
     }
     
     // Send modification request (success = DONE, or NO_CHANGES when the levels already match)
-    if(!OrderSend(request, result)
+    bool sent = OrderSend(request, result);
+    lastModifyRetcode = result.retcode;
+    if(!sent
        || (result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_NO_CHANGES))
     {
         LogPrint("PositionModify failed for position #", ticket, " Error: ", GetLastError());
@@ -5130,11 +5528,11 @@ bool ModifyPosition(ulong ticket, double newSL, double newTP)
 // | market close). Shared by fresh entries, virtual-SL re-entries,   |
 // | hedge-chain starts/rolls and pending-order housekeeping.         |
 // +------------------------------------------------------------------+
-string GetEntryBlockReason()
+string GetEntryBlockReason(bool ignoreStreakPause = false)
 {
     if(targetEquityReached || minimumEquityReached || minEquityTriggersExceeded) return "trading stopped";
     if(IsPaused()) return "paused: " + GetPauseReasons();
-    if(streakPaused) return "loss-streak pause (paper trading until a paper win)";
+    if(streakPaused && !ignoreStreakPause) return "loss-streak pause (paper trading until a paper win)";
     if(isOutsideTradingHours) return "outside trading hours";
     if(isLeverageDiffFromInitial) return "leverage changed";
     if(isNearMarketClose) return "market closing soon";
@@ -5157,9 +5555,9 @@ bool IsNewRiskAllowed(string &why)
 }
 
 // Helper function to check is allowed to open position
-bool IsAllowedToOpenPosition()
+bool IsAllowedToOpenPosition(bool ignoreStreakPause = false)
 {
-    string blockReason = GetEntryBlockReason();
+    string blockReason = GetEntryBlockReason(ignoreStreakPause);
     if (blockReason != "")
     {
         LogPrint("+-----------------------------------------+");
@@ -5240,6 +5638,14 @@ bool IsSpreadTooWide()
     return false;
 }
 
+
+// Round a price to the symbol's tick size (some symbols trade in ticks larger than one point)
+double NormalizePrice(double price)
+{
+    double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    if(ts <= 0) return NormalizeDouble(price, _Digits);
+    return NormalizeDouble(MathRound(price / ts) * ts, _Digits);
+}
 
 // Helper function to lock/unlock OrderSend execution
 void LockOrderSend(bool isLocked)
@@ -5422,7 +5828,7 @@ int CountOpenOrdersByType(ENUM_POSITION_TYPE posType)
 //+-------------------------------------------------------------------+
 double CalculateDynamicLotSize(double signalScore = 0)
 {
-    if(!EnableDynamicLots) return BaseLotSize;
+    if(!EnableDynamicLots) return FloorToVolumeStep(MathMin(BaseLotSize, MaxLotSize));
     
     double currentLot = BaseLotSize;
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -5533,8 +5939,8 @@ double CalculateDynamicLotSize(double signalScore = 0)
              " | Equity Drop Steps=", equitySteps, " (+", equityLotIncrease, ")",
              " | Signal Steps=", (signalScore >= MinSignalStrengthForLot ? (signalScore - MinSignalStrengthForLot) / 2 : 0),
              " | Final Lot=", currentLot);
-    
-    return currentLot;
+
+    return NormalizeVolume(currentLot);
 }
 
 // +------------------------------------------------------------------+
@@ -5804,7 +6210,14 @@ string IsHighImpactNewsTime(int minutesBefore, int minutesAfter, ulong &eventID,
     datetime start = serverTime - lookRange * 60;
     datetime end = serverTime + lookRange * 60 + 120;
     
-    if(CalendarValueHistory(values, start, end))
+    bool calendarOk = CalendarValueHistory(values, start, end);
+    static bool testerCalendarWarned = false;
+    if(!calendarOk && MQLInfoInteger(MQL_TESTER) && !testerCalendarWarned)
+    {
+        testerCalendarWarned = true;
+        Print("[NEWS] The economic calendar is not available in the Strategy Tester - the news filter is inactive in this backtest");
+    }
+    if(calendarOk)
     {
         for(int i = 0; i < ArraySize(values); i++)
         {
@@ -5979,6 +6392,10 @@ int StartBasketPause()
 // +------------------------------------------------------------------+
 void CheckPeakEquity()
 {
+    // Right after a balance change the deposit may not be applied to the baselines yet: wait a
+    // few seconds so it can't become a false new peak (and then a false drawdown)
+    if(TimeCurrent() - balanceChangedAt < 5) return;
+
     // Get current equity
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     
@@ -6082,7 +6499,10 @@ void CheckMinTradeableEquity()
 // | Check Equity Drawdawn                                            |
 // +------------------------------------------------------------------+
 void CheckEquityDrawdawn()
-{   
+{
+    // Same wait after a balance change: a withdrawal is not a drawdown
+    if(TimeCurrent() - balanceChangedAt < 5) return;
+
     // Get current equity
     double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
 
@@ -6261,7 +6681,7 @@ void CheckHighImpactNews()
 // +------------------------------------------------------------------+
 void CheckTradingHours()
 {
-    if(!EnableTradingHours) return;
+    if(!EnableTradingHours) { isOutsideTradingHours = false; return; }
     
     bool currentlyWithinHours = IsWithinTradingHours();
     
@@ -6457,8 +6877,8 @@ bool GetCurrentSessionEnd(datetime now, datetime &sessionEnd)
 // +------------------------------------------------------------------+
 void CheckLeverageChange()
 {
-    // Skip if feature is disabled
-    if(!EnableLeveragePause) return;
+    // Skip if feature is disabled (and lift a block it raised before it was switched off)
+    if(!EnableLeveragePause) { isLeverageDiffFromInitial = false; return; }
     
     long currentLeverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     
@@ -6551,18 +6971,14 @@ void CheckTradeReport()
         }
     }
     
-    // Check for End of Day (23:59) Report
-    if(!EnableTradingHours && dt.hour == 23 && dt.min == 59)
+    // End-of-day report: sent on the first tick of a new server day. A tick exactly at 23:59 is
+    // not guaranteed (Friday's early close, the near-close filter, pauses, quiet markets).
+    static int reportDay = -1;
+    if(reportDay == -1) reportDay = dt.day_of_year;
+    else if(dt.day_of_year != reportDay)
     {
-        // Check if report already sent today (to avoid spamming in the last minute)
-        // lastDailyReportTime checks full timestamp
-        MqlDateTime lastReportDt;
-        TimeToStruct(lastDailyReportTime, lastReportDt);
-        
-        if(lastReportDt.day != dt.day)
-        {
-            sendReport = true;
-        }
+        reportDay = dt.day_of_year;
+        if(!EnableTradingHours) sendReport = true;
     }
     
     if (sendReport)
@@ -6642,7 +7058,7 @@ void ComputeTradeStats(TradeStats& daily, TradeStats& allTime)
     // Start from last report generated, or from start of bot started if no last report
     datetime sessionStartTime = (lastDailyReportTime > 0) ? lastDailyReportTime : startTime;
 
-    if(HistorySelect(0, TimeCurrent()))
+    if(HistorySelect(0, TimeCurrent() + 86400))
     {
         CHashMap<ulong, int> posIndex;
         ulong    posIds[];
@@ -6656,8 +7072,7 @@ void ComputeTradeStats(TradeStats& daily, TradeStats& allTime)
         {
             ulong ticket = HistoryDealGetTicket(i);
             if(ticket == 0) continue;
-            if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol ||
-               HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
+            if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
 
             long entryType = HistoryDealGetInteger(ticket, DEAL_ENTRY);
             bool isOut = (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT || entryType == DEAL_ENTRY_OUT_BY);
@@ -6665,6 +7080,12 @@ void ComputeTradeStats(TradeStats& daily, TradeStats& allTime)
 
             ulong posId = (ulong)HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
             if(posId == 0) continue;
+
+            // Our positions are those we opened (our magic). Their exits count whatever magic they
+            // carry: a manual or close-by close has none (history is in time order, so the entry is known)
+            int known;
+            if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber && !(isOut && posIndex.TryGetValue(posId, known)))
+                continue;
 
             double pl = HistoryDealGetDouble(ticket, DEAL_PROFIT)
                       + HistoryDealGetDouble(ticket, DEAL_SWAP)
@@ -6731,7 +7152,8 @@ void SendTradeReport()
 
     // Session net profit
     double sessionNetProfit = dailyStats.profit + dailyStats.loss; // loss is already negative
-    double sessionNetPercent = (balance > 0) ? (sessionNetProfit / balance) * 100.0 : 0.0;
+    double sessionStartBalance = balance - sessionNetProfit;           // balance when the session began
+    double sessionNetPercent = (sessionStartBalance > 0) ? (sessionNetProfit / sessionStartBalance) * 100.0 : 0.0;
     
     // All time net profit
     double allTimeNetProfit = allTimeStats.profit + allTimeStats.loss;
@@ -6902,6 +7324,10 @@ struct PersistHeader
     double   paperEntry;
     double   paperTarget;
     double   paperStop;
+    long     initialLeverage;
+    double   initialBalance;
+    datetime savedAt;
+    ulong    lastBalanceDeal;
 };
 
 bool IsPersistenceActive()
@@ -6914,8 +7340,8 @@ string StateFileName()
     string sym = _Symbol;
     string bad[] = {"\\", "/", ":", "*", "?", "\"", "<", ">", "|"};
     for(int i = 0; i < ArraySize(bad); i++) StringReplace(sym, bad[i], "_");
-    return StringFormat("NyaoScalper\\state_%I64d_%s_%I64d.bin",
-                        AccountInfoInteger(ACCOUNT_LOGIN), sym, (long)MagicNumber);
+    long login = (stateLogin > 0) ? stateLogin : AccountInfoInteger(ACCOUNT_LOGIN);
+    return StringFormat("NyaoScalper\\state_%I64d_%s_%I64d.bin", login, sym, (long)MagicNumber);
 }
 
 bool SameManagedPosition(const ManagedPosition &a, const ManagedPosition &b)
@@ -6928,7 +7354,7 @@ bool SameManagedPosition(const ManagedPosition &a, const ManagedPosition &b)
         && a.cycleNum == b.cycleNum && a.noRehedge == b.noRehedge && a.hedgeGraduated == b.hedgeGraduated
         && a.hedgeLockProfit == b.hedgeLockProfit
         && a.cpPrice == b.cpPrice && a.cpStep == b.cpStep && a.virtSL == b.virtSL && a.virtStep == b.virtStep
-        && a.cpSkipsLeft == b.cpSkipsLeft && a.cpCount == b.cpCount;
+        && a.cpSkipsLeft == b.cpSkipsLeft && a.cpCount == b.cpCount && a.chainBooked == b.chainBooked && a.cpLock == b.cpLock;
 }
 
 void FillPersistHeader(PersistHeader &h)
@@ -6936,7 +7362,7 @@ void FillPersistHeader(PersistHeader &h)
     h.version               = STATE_FILE_VERSION;
     h.recordSize            = sizeof(ManagedPosition);
     h.count                 = managedPositionCount;
-    h.login                 = AccountInfoInteger(ACCOUNT_LOGIN);
+    h.login                 = stateLogin;
     h.magic                 = MagicNumber;
     h.peakEquity            = peakEquity;
     h.lastPeakEquity        = lastPeakEquity;
@@ -6951,6 +7377,10 @@ void FillPersistHeader(PersistHeader &h)
     h.paperEntry            = paperEntry;
     h.paperTarget           = paperTarget;
     h.paperStop             = paperStop;
+    h.initialLeverage       = initialLeverage;
+    h.initialBalance        = initialBalance;
+    h.savedAt               = TimeCurrent();
+    h.lastBalanceDeal       = lastBalanceDeal;
 }
 
 // Write state if anything changed since the last save (force = always write)
@@ -6972,7 +7402,9 @@ void SaveState(bool force = false)
        && header.equityPauseUntil == lastHeader.equityPauseUntil
        && header.basketPauseUntil == lastHeader.basketPauseUntil
        && header.streakLosses == lastHeader.streakLosses && header.streakPaused == lastHeader.streakPaused
-       && header.paperDir == lastHeader.paperDir && header.paperEntry == lastHeader.paperEntry)
+       && header.paperDir == lastHeader.paperDir && header.paperEntry == lastHeader.paperEntry
+       && header.initialLeverage == lastHeader.initialLeverage && header.initialBalance == lastHeader.initialBalance
+       && header.lastBalanceDeal == lastHeader.lastBalanceDeal)
     {
         bool same = true;
         for(int i = 0; i < managedPositionCount && same; i++)
@@ -6997,10 +7429,146 @@ void SaveState(bool force = false)
     lastHeader = header;
 }
 
+// Apply every deposit / withdrawal / credit newer than the last one applied (deals since `from`)
+void CatchUpBalanceOperations(datetime from)
+{
+    if(!HistorySelect(MathMax(0, from), TimeCurrent() + 86400)) return;
+    int total = HistoryDealsTotal();
+    for(int d = 0; d < total; d++)                          // oldest first: lastBalanceDeal only grows
+    {
+        ulong deal = HistoryDealGetTicket(d);
+        if(deal == 0) continue;
+        long type = HistoryDealGetInteger(deal, DEAL_TYPE);
+        if(type == DEAL_TYPE_BALANCE || type == DEAL_TYPE_CREDIT)
+            ApplyBalanceOperation(deal, HistoryDealGetDouble(deal, DEAL_PROFIT));
+    }
+}
+
+// Newest deposit / withdrawal deal in the whole account history (0 = none)
+ulong LatestBalanceDeal()
+{
+    ulong latest = 0;
+    if(!HistorySelect(0, TimeCurrent() + 86400)) return 0;
+    for(int d = HistoryDealsTotal() - 1; d >= 0; d--)
+    {
+        ulong deal = HistoryDealGetTicket(d);
+        long type = HistoryDealGetInteger(deal, DEAL_TYPE);
+        if(deal > latest && (type == DEAL_TYPE_BALANCE || type == DEAL_TYPE_CREDIT)) latest = deal;
+    }
+    return latest;
+}
+
+// A deposit / withdrawal shifts the equity baselines by the same amount, so it never reads as a
+// drawdown (or a new peak) for the drawdown gate, the min-equity pause and the reports.
+// Each deal is applied once: it may be seen by the transaction event, the per-tick catch-up
+// and the restart catch-up.
+void ApplyBalanceOperation(ulong deal, double amount)
+{
+    if(deal <= lastBalanceDeal) return;
+    lastBalanceDeal = deal;
+    if(amount == 0) return;
+    peakEquity     = MathMax(0, peakEquity + amount);
+    lastPeakEquity = MathMax(0, lastPeakEquity + amount);
+    initialBalance = MathMax(0, initialBalance + amount);
+    LogPrint("[BALANCE] ", (amount > 0 ? "Deposit" : "Withdrawal"), " of $", DoubleToString(MathAbs(amount), 2),
+             " - equity baselines adjusted (peak $", DoubleToString(peakEquity, 2), ")");
+}
+
+bool WasRestored(ulong ticket)
+{
+    for(int i = 0; i < ArraySize(restoredTickets); i++)
+        if(restoredTickets[i] == ticket) return true;
+    return false;
+}
+
+// Positions the saved state did not cover (no file, ResetSavedState, other version, a crash before
+// the save): give them the protection a fresh entry gets - a stop if they have none (e.g. a hedge
+// root whose SL was cleared) and the checkpoint exit, which has no broker TP to fall back on.
+void AdoptUnrestoredPositions()
+{
+    int adopted = 0;
+    ArrayResize(adoptPending, 0);
+    for(int i = 0; i < managedPositionCount; i++)
+    {
+        ulong ticket = managedPositions[i].ticket;
+        if(WasRestored(ticket) || !PositionSelectByTicket(ticket)) continue;
+        if(!AdoptPosition(i))
+        {
+            int n = ArraySize(adoptPending);
+            ArrayResize(adoptPending, n + 1);
+            adoptPending[n] = ticket;
+        }
+        adopted++;
+    }
+    if(adopted > 0)
+        Print("[STATE] ", adopted, " open position(s) had no saved state - stop and checkpoint exit re-armed",
+              (ArraySize(adoptPending) > 0 ? " (some still pending, retried every tick)" : ""));
+}
+
+// Retry the positions whose stop / checkpoint could not be set yet
+void RetryAdoption()
+{
+    for(int k = ArraySize(adoptPending) - 1; k >= 0; k--)
+    {
+        int idx = GetManagedPositionIndex(adoptPending[k]);
+        if(idx == -1 || !PositionSelectByTicket(adoptPending[k]) || AdoptPosition(idx))
+        {
+            adoptPending[k] = adoptPending[ArraySize(adoptPending) - 1];
+            ArrayResize(adoptPending, ArraySize(adoptPending) - 1);
+        }
+    }
+}
+
+// Stop + checkpoint for one unrestored position (position must be selected). True = nothing left to do.
+bool AdoptPosition(int i)
+{
+    bool done = true;
+    {
+        ulong ticket = managedPositions[i].ticket;
+
+        ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        bool isBuy  = (type == POSITION_TYPE_BUY);
+        double dir  = isBuy ? 1.0 : -1.0;
+        double vol  = PositionGetDouble(POSITION_VOLUME);
+        double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+        double sl   = PositionGetDouble(POSITION_SL);
+        double tp   = PositionGetDouble(POSITION_TP);
+        double slPts = GetSLPoints(vol);
+
+        if(sl == 0)
+        {
+            // Unknown history: never let it seed a hedge chain, and put a stop on it
+            managedPositions[i].noRehedge = true;
+            if(slPts > 0)
+            {
+                double price = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                double newSL = entry - dir * slPts * _Point;
+                if(!IsSLValid(type, NormalizePrice(newSL))) newSL = price - dir * slPts * _Point;  // already past it
+                newSL = NormalizePrice(newSL);
+                if(IsSLValid(type, newSL) && ModifyPosition(ticket, newSL, tp))
+                    Print("[STATE] Position ", ticket, " had no stop loss - SL set at ", DoubleToString(newSL, _Digits));
+                else
+                    done = false;
+            }
+            else
+                done = false;                                // SL distance not available yet (ATR / tick value)
+        }
+
+        if(EnableCheckpointExit && managedPositions[i].cpStep <= 0 && managedPositions[i].chainId == 0)
+        {
+            double tpPts = GetTPPoints(vol);
+            if(tpPts > 0) InitCheckpoint(ticket, type, entry, tpPts, slPts, 0);
+            else done = false;
+        }
+    }
+    return done;
+}
+
 // Restore saved state onto the freshly rebuilt managedPositions (call after the position scan)
 void RestoreState()
 {
     lastSavedCount = -1;
+    ArrayResize(restoredTickets, 0);
     if(!IsPersistenceActive()) return;
 
     string fileName = StateFileName();
@@ -7024,7 +7592,7 @@ void RestoreState()
     bool ok = (FileReadStruct(h, header) == sizeof(PersistHeader));
     ok = ok && header.version == STATE_FILE_VERSION
             && header.recordSize == sizeof(ManagedPosition)
-            && header.login == AccountInfoInteger(ACCOUNT_LOGIN)
+            && header.login == stateLogin
             && header.magic == MagicNumber
             && header.count >= 0 && header.count <= 10000;
 
@@ -7039,9 +7607,18 @@ void RestoreState()
         return;
     }
 
-    // Account-level guards
-    if(header.peakEquity > peakEquity) peakEquity = header.peakEquity;
+    // Account-level guards. Deposits / withdrawals made while the EA was offline move the
+    // equity baselines too - a withdrawal is not a drawdown. Each one is applied exactly once.
+    double currentEquity = peakEquity;                       // InitializeEA set it to the current equity
+    peakEquity = header.peakEquity;
     if(header.lastPeakEquity > 0) lastPeakEquity = header.lastPeakEquity;
+    if(header.initialBalance > 0) initialBalance = header.initialBalance;
+    lastBalanceDeal = header.lastBalanceDeal;
+    CatchUpBalanceOperations(header.savedAt - 86400);
+    if(currentEquity > peakEquity) peakEquity = currentEquity;
+    // Keep the original leverage reference while positions are open (a restart during a temporary
+    // leverage change must not turn the normal leverage into a "change" later); when flat, start fresh.
+    if(header.initialLeverage > 0 && managedPositionCount > 0) initialLeverage = header.initialLeverage;
     minEquityTriggerCount = header.minEquityTriggerCount;
     consecutiveLossCount  = header.consecutiveLossCount;
     cooldownUntilBarTime  = header.cooldownUntilBarTime;
@@ -7061,6 +7638,9 @@ void RestoreState()
         int idx = GetManagedPositionIndex(saved[i].ticket);
         if(idx == -1) continue;
         managedPositions[idx] = saved[i];
+        int n = ArraySize(restoredTickets);
+        ArrayResize(restoredTickets, n + 1);
+        restoredTickets[n] = saved[i].ticket;
         restored++;
         if(saved[i].chainId != 0) chainLegs++;
     }
@@ -7072,30 +7652,88 @@ void RestoreState()
 // +------------------------------------------------------------------+
 // | Send Discord alert via webhook                                   |
 // +------------------------------------------------------------------+
+// Discord alerts are queued and sent at most one per tick, after the tick's trading work:
+// WebRequest blocks, so a slow or unreachable Discord must never hold up position management
+string   alertTitles[];
+string   alertMessages[];
+int      alertColors[];
+int      alertTries = 0;
+datetime alertRetryAfter = 0;
+
 bool SendDiscordAlert(string title, string message, int embedColor = 3447003)
 {
     if(!EnableDiscordAlerts || DiscordWebhookURL == "") return false;
+    if(MQLInfoInteger(MQL_TESTER)) return false;           // WebRequest is not available in the tester
+    int n = ArraySize(alertTitles);
+    if(n >= 20) return false;                               // backlog full - drop rather than pile up
+    ArrayResize(alertTitles, n + 1);
+    ArrayResize(alertMessages, n + 1);
+    ArrayResize(alertColors, n + 1);
+    alertTitles[n] = title;
+    alertMessages[n] = message;
+    alertColors[n] = embedColor;
+    return true;
+}
 
-    // Escape special characters in message
-    StringReplace(message, "\\", "\\\\");
-    StringReplace(message, "\"", "\\\"");
-    StringReplace(message, "\n", "\\n");
-    
+// Send the oldest queued alert (call once per tick). Failures back off 30s; 3 failures drop it.
+void FlushDiscordAlerts()
+{
+    if(ArraySize(alertTitles) == 0 || TimeCurrent() < alertRetryAfter) return;
+    bool ok = PostDiscordAlert(alertTitles[0], alertMessages[0], alertColors[0]);
+    if(!ok && ++alertTries < 3)
+    {
+        alertRetryAfter = TimeCurrent() + 30;
+        return;
+    }
+    alertTries = 0;
+    int n = ArraySize(alertTitles);
+    for(int i = 1; i < n; i++)
+    {
+        alertTitles[i - 1] = alertTitles[i];
+        alertMessages[i - 1] = alertMessages[i];
+        alertColors[i - 1] = alertColors[i];
+    }
+    ArrayResize(alertTitles, n - 1);
+    ArrayResize(alertMessages, n - 1);
+    ArrayResize(alertColors, n - 1);
+}
+
+// JSON string escaping: quotes, backslash and every control character
+string JsonEscape(string text)
+{
+    string out = "";
+    int len = StringLen(text);
+    for(int i = 0; i < len; i++)
+    {
+        ushort c = StringGetCharacter(text, i);
+        if(c == '"') out += "\\\"";
+        else if(c == '\\') out += "\\\\";
+        else if(c == '\n') out += "\\n";
+        else if(c == '\r') out += "\\r";
+        else if(c == '\t') out += "\\t";
+        else if(c < 32) out += StringFormat("\\u%04x", c);
+        else out += ShortToString(c);
+    }
+    return out;
+}
+
+bool PostDiscordAlert(string title, string message, int embedColor)
+{
     // Build JSON payload
     string json = "";
     json += "{\"embeds\":[{";
-    json += "\"title\":\"" + title + "\",";
-    json += "\"description\":\"" + message + "\",";
+    json += "\"title\":\"" + JsonEscape(title) + "\",";
+    json += "\"description\":\"" + JsonEscape(message) + "\",";
     json += "\"color\":" + IntegerToString(embedColor) + ",";
-    json += "\"footer\":{\"text\":\"" + EA_TITLE + "\"}";
+    json += "\"footer\":{\"text\":\"" + JsonEscape(EA_TITLE) + "\"}";
     json += "}]}";
-    
+
     // Prepare HTTP request
     char post[];
     char result[];
     string headers = "Content-Type: application/json\r\n";
     string resultHeaders = "";
-    int timeout = 5000;
+    int timeout = 3000;
     
     // Convert JSON to char array
     StringToCharArray(json, post, 0, WHOLE_ARRAY, CP_UTF8);
