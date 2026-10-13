@@ -50,7 +50,7 @@ RSIMomentumSell=40
 EnableHTFTrendFilter=true
 HTFTimeframe=16408
 HTFEMAPeriod=50
-HTFMinDistancePct=0.0
+HTFMinDistancePct=0.5
 HTFMinSlopePct=0.0
 HTFSlopeBars=5
 ; ⚖️ Score Weight Settings

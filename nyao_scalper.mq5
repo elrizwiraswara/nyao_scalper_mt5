@@ -97,7 +97,7 @@ input int RSIMomentumSell = 40;                           // RSI Momentum Sell T
 input bool EnableHTFTrendFilter = true;                   // Only Enter With Higher-Timeframe Trend (HTF EMA)
 input ENUM_TIMEFRAMES HTFTimeframe = PERIOD_D1;           // Higher Timeframe for Trend Filter
 input int HTFEMAPeriod = 50;                              // Higher Timeframe EMA Period
-input double HTFMinDistancePct = 0.0;                     // HTF Filter: Close Must Be >= this % Beyond the EMA (0 = Off)
+input double HTFMinDistancePct = 0.5;                  // HTF Filter: Close Must Be >= this % Beyond the EMA (0 = Off)
 input double HTFMinSlopePct = 0.0;                        // HTF Filter: EMA Must Move >= this % Over HTFSlopeBars (0 = Off)
 input int HTFSlopeBars = 5;                               // HTF Filter: Bars Used for the EMA Slope Check
 
