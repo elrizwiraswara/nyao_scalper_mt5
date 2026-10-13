@@ -30,7 +30,7 @@ The EA calculates a "Signal Score" for every tick based on:
 - **Range Filter** _(off by default)_: `MinEfficiencyToTrade` blocks entries unless the last `RangeFilterPeriod` closed bars moved efficiently **in the signal's direction** (directional efficiency ratio = net move ÷ path travelled). In a sideways market the momentum score peaks right at the range edges — buying the top, selling the bottom — and this filter refuses those entries. Try `0.30` with a 20-bar lookback.
 - **ATR-Based Stops** _(opt-in)_: every distance input type (`SLInputType`, `TPInputType`, `TSInputType`) accepts **ATR Multiple**, so stops and trailing scale with current volatility instead of fixed dollars that become too tight as price and volatility rise. `BreakEvenTriggerATR` and `TrailStartATR` delay the break-even lock and trailing until the trade has moved that many ATRs in its favor (0 = legacy dollar/spread triggers).
 - **Regime & Trend Filters**:
-  - **`EnableHTFTrendFilter`** _(on in the default profile, D1 EMA50)_: only allows buys above a rising higher-timeframe EMA, and sells below a falling one.
+  - **`EnableHTFTrendFilter`** _(on in the default profile, D1 EMA50)_: only allows buys above a rising higher-timeframe EMA, and sells below a falling one. `HTFMinDistancePct` (0.5 in the default profile, 0 = off) also requires the last closed higher-timeframe bar to close at least that % beyond the EMA, so entries are skipped while price hugs it and the trend is unclear.
   - **`RegimeScoreMode = Efficiency Ratio`** _(off, uncalibrated)_: replaces the ATR-expansion "chop" score with a directional Kaufman Efficiency Ratio (net move in the signal direction ÷ path travelled). This separates a clean trend from a volatile whipsaw.
 
 ### Risk & Equity Management
@@ -206,7 +206,7 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 | default | |
 |---|---|
 | Symbol / timeframe | XAUUSDm (3-digit quotes) on **M5** |
-| Entries | Signal score ≥ 6, only in the D1 trend direction (close vs rising / falling EMA50) |
+| Entries | Signal score ≥ 6, only in the D1 trend direction (close at least 0.5% beyond a rising / falling EMA50) |
 | Stop | Fixed $20 (20000 points at 0.01 lot) |
 | Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10 |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
