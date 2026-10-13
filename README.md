@@ -1,4 +1,4 @@
-# Nyao Scalper v44.0
+# Nyao Scalper v45.0
 
 **Indicator-Based Signal Strength EA for MetaTrader 5**
 
