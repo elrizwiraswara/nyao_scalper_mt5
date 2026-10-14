@@ -14,13 +14,15 @@ It includes position management, adaptive trailing stops, and lot sizing based o
 
 ### Signal Scoring
 
-The EA calculates a "Signal Score" for every tick based on:
+The EA scores buys and sells from 0.0 to 10.0 on every tick. `ScoreModel` chooses how (see [Strategy Logic](#strategy-logic)):
 
-- **Trend**: Fast/Slow EMA crossover and slope alignment.
-- **Momentum**: RSI "sweet spots" (trending ranges), breakouts, and candle body momentum. With `DirectionalBodyMomentum` (default on), a large candle only adds body and impulse points to the side it moved toward: a big bearish candle no longer raises the buy score.
-- **Impulse**: Detects price acceleration and directional continuity (consecutive candles).
-- **Volatility**: ATR-based analysis to detect chopping vs. trending markets.
-- **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
+- **Trend score** _(default)_: how strongly price has trended over the last several hours: its position in the recent high-low range, its distance from a slow EMA, how efficiently it moved and its net move. Every part is continuous and directional, so the score changes smoothly and buy + sell always add up to 10.
+- **Legacy score** (short-term confluence):
+  - **Trend**: Fast/Slow EMA crossover and slope alignment.
+  - **Momentum**: RSI "sweet spots" (trending ranges), breakouts, and candle body momentum. With `DirectionalBodyMomentum` (default on), a large candle only adds body and impulse points to the side it moved toward: a big bearish candle no longer raises the buy score.
+  - **Impulse**: Detects price acceleration and directional continuity (consecutive candles).
+  - **Volatility**: ATR-based analysis to detect chopping vs. trending markets.
+  - **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
 - **Velocity** _(informational)_: Tracks the _change_ in signal score between bars and shows it on the dashboard. It is not used for any trading decision.
 - **Blended Weighted Average Signal Smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
 - **Multi-Bar EMA Slope**: Trend slope is measured over `SlopeLookback` bars instead of a single bar, reducing M1 whipsaw.
@@ -69,9 +71,11 @@ The EA calculates a "Signal Score" for every tick based on:
 
 ### Hedge Chain Recovery (Optional, Off in the Default Profile)
 
-> ⚠️ **This is a martingale.** Lot size grows as a losing trade is hedged and re-hedged. It can recover many drawdowns smoothly but carries genuine **ruin risk** in strongly trending or choppy markets — it converts frequent small losses into rarer large ones. It is **opt-in per profile** (`EnableHedgeChain`) and **off in the `safe` profile by design**. Size `HedgeMaxLot` and the loss caps for an account you can afford to draw down.
+> ⚠️ **This is a martingale.** Lot size grows as a losing trade is hedged and re-hedged. It can recover many drawdowns smoothly but carries genuine **ruin risk** in strongly trending or choppy markets — it converts frequent small losses into rarer large ones. It is **opt-in** (`EnableHedgeChain`) and **off in the default profile**. Size `HedgeMaxLot` and the loss caps for an account you can afford to draw down.
 
-When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-direction signal confirms** (`HedgeRequireSignal`: the opposite-side score ≥ `HedgeMinSignalScore`), the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time. The signal gate is an **anti-spike filter**: a wick that crosses the ATR trigger intrabar but isn't a real reversal won't have a strong opposite-side score, so no hedge is opened — the chain waits for the move to be confirmed (or the position to recover).
+> **What to expect:** a hedge is a new bet in the opposite direction, against the trend the original trade followed, so it cannot recover losses for free. A covered chain ends near break-even, a stopped chain loses its cap. With the trend-turn gate and the 1.5× SL cap it was roughly neutral in backtests; with a loose gate and a 5%-of-equity cap it lost noticeably.
+
+When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-direction signal confirms** (`HedgeRequireSignal`: the opposite-side score ≥ `HedgeMinSignalScore`, default 6.5: with the Trend score, the multi-hour trend has clearly turned against the position), the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time. The signal gate is an **anti-spike filter**: a wick that crosses the ATR trigger intrabar but isn't a real reversal won't have a strong opposite-side score, so no hedge is opened — the chain waits for the move to be confirmed (or the position to recover).
 
 - **Recovery Sizing** (`HedgeAutoLot`): each hedge lot is *computed* so its profit covers `HedgeRecoveryPct%` of the leg it hedges within a `HedgeRecoveryATR × ATR` favorable move — instead of a blind fixed multiplier (which often can't catch up before price reverses). Falls back to `HedgeLotMultiplier` when auto-sizing is off, and is always clamped to `HedgeMaxLot`.
 - **Covered**: hedge profit covers the older leg's current loss → close the older leg; the hedge graduates and trails to ride for more. Two safeguards on the graduated hedge:
@@ -80,7 +84,7 @@ When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-di
 - **Roll**: hedge is losing but the older leg has recovered to break-even → close the older leg (free) and open a larger reverse hedge against the current one. Repeats up to `HedgeCycleLevels` per cycle.
 - **Reseed**: at the cycle/lot limit, partial-close the deepest hedge by `HedgeCyclePartialPct%` and start a fresh, smaller cycle (up to `HedgeMaxCycles`) — capping lot growth instead of stacking ever-larger legs.
 - **Exhausted → release** (not closed): once the chain can no longer expand (`HedgeMaxCycles` reached, or the `HedgeMaxLot` / `HedgeMaxTotalLots` ceiling hit with reseed off), the legs are **handed back to the adaptive loss management** — trailing, health-revalidation, partial close — and flagged so no new hedge is started on them. The chain is **not** force-closed at this point.
-- **Chain loss stop** (`HedgeMaxChainLossPct` / `HedgeMaxChainLossUSD`; the tighter wins): closes the whole chain when its combined loss crosses the cap. It is checked **before** any roll (default 5% of equity).
+- **Chain loss stop** (`HedgeMaxChainLossSL` / `HedgeMaxChainLossPct` / `HedgeMaxChainLossUSD`; the tightest wins): closes the whole chain when its combined loss crosses the cap. It is checked **before** any roll. By default a chain may lose at most **1.5× the base lot's SL loss** ($30 with the default $20 stop at 0.01 lot) or 5% of equity, so it can never cost much more than the stop it replaced.
 - **Entry gates**: anything that adds exposure — starting a chain, rolling to a bigger leg, reseeding a cycle — obeys the same blocks as a fresh entry: news window, pauses, trading hours, market close, leverage change and the spread filter. While blocked, an existing pair is simply held (still bounded by the chain loss stop and the total hard stop). Closing actions (covered, stop, release) always run.
 - **Concurrency caps**: `HedgeMaxActiveChains` (default 1) limits how many chains can run at once, so a sharp reversal can't open a hedge for every stacked position on the same tick. `HedgeMaxTotalLots` caps the combined volume of all active chain legs; a roll that would exceed it reseeds or releases instead.
 
@@ -104,13 +108,30 @@ Chain state is saved to disk (see **Restart-Safe State**), so a restart doesn't 
 
 ## Strategy Logic
 
-The strategy uses a **weighted scoring system** (0.0 - 10.0 scale). A trade is taken only if the _Total Score_ exceeds the `MinSignalScore` threshold (Default: 6.0).
+The EA scores both sides from **0.0 to 10.0** and opens a trade when a side's score reaches `MinBuySignalScore` / `MinSellSignalScore` (default **5.0**), only in the direction the D1 trend filter allows. `ScoreModel` chooses how the score is built.
 
-> **Calibration note:** The Chop and Volatility components add nothing in a dead or quiet market (their low tiers default to `0.0`), so the score separates market regimes rather than rewarding every market. When `ATR/AvgATR` falls below `MinVolRatioToTrade`, the score is forced to `0` (no trade).
+### Trend Score (`ScoreModel = Trend`, default)
 
-**Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
+Four readings of the closed bars, each from -1 (strong down) to +1 (strong up), averaged into `s`:
 
-The score is calculated by summing up weights from specialized components:
+| Part | Measures | Input (default) |
+|---|---|---|
+| Range | Where the close sits in the high-low range | `TrendRangeBars` (200) |
+| EMA | Distance from the EMA, in ATRs (`TrendATRPeriod`, 14) | `TrendEMAPeriod` (200) |
+| Efficiency | Net move / total path: a clean trend vs. a whipsaw | `TrendERBars` (100) |
+| Momentum | Net move over the lookback, in ATRs | `TrendROCBars` (192) |
+
+- **Buy score = 5 + 5s, sell score = 5 - 5s**, so the two always add up to 10: 5 means no trend, 7.5 a clear uptrend for buys (2.5 for sells).
+- A small price change moves the score a little, never in fixed jumps, and nothing adds points for volatility alone.
+- With the default minimum of 5.0 the EA buys while the multi-hour trend leans up and the D1 filter allows buys, and the mirror for sells. On M5 the lookbacks cover about 8 to 17 hours; scale them for other timeframes.
+- The checkpoint hold (`CheckpointHoldMode = Score`) keeps a trade while its side still scores higher, i.e. while the multi-hour trend agrees.
+- The dashboard shows the four parts as `Rng`, `EMA`, `Eff` and `Mom`.
+
+> **Why it is the default:** on XAUUSDm M5 history, the legacy parts that only look at the last few bars (EMA 5/12, RSI 8, candle shape) and its direction-blind volatility points barely separated winning entries from losing ones, and the score jumped 1 to 3 points on tiny price changes. Multi-hour trend readings carried the most information. It is still a modest edge: the score measures trend strength, it is not a probability.
+
+### Legacy Score (`ScoreModel = Legacy`)
+
+The original short-term confluence score; use a minimum of about 6.0 with it. It sums weights from these components:
 
 1.  **Trend Score (Max 3.0)**:
     - **Alignment (+1.5)**: Fast EMA > Slow EMA (Buy) or Fast EMA < Slow EMA (Sell).
@@ -134,18 +155,23 @@ The score is calculated by summing up weights from specialized components:
 4.  **Penalties (Deductions)**:
     - **Wick Rejection**: Long opposing wicks (e.g., long upper wick on a Buy signal) reduce the final score by the wick-to-body ratio.
 
-5.  **Velocity Tracking** _(informational)_:
-    - Tracks the _change_ in signal score between bars and shows it on the dashboard (`Vel`). It does not drive trailing or lot sizing.
+> **Calibration note:** The Chop and Volatility components add nothing in a dead or quiet market (their low tiers default to `0.0`), so the score separates market regimes rather than rewarding every market. When `ATR/AvgATR` falls below `MinVolRatioToTrade`, the score is forced to `0` (no trade).
 
-6.  **Signal Smoothing (Blended Weighted Average)**:
-    - Combines weighted average of recent closed candles with a dampened current candle contribution.
-    - **SignalSmoothingCandles**: Number of closed candles to average (1-10, default per profile).
-    - **CurrentCandleBlend**: Weight factor for the forming candle (0.0-1.0, where 0.0 = closed candles only, 1.0 = current candle only). Used for position management. With `EnableNewBarEntryOnly` (default), **entry decisions use closed candles only** — on the first tick of a bar the forming candle has no body or range yet and would only drag the score down.
-    - Results in smooth yet responsive signal scoring that adapts to market conditions.
+**Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
 
-> **What the score is (and isn't):** most components — EMA alignment and slope, RSI, candle body, breakout, consecutive candles — all measure "price has been rising/falling over the last few bars", so they are strongly correlated. The 0-10 score is a momentum confluence count, not a probability. Thresholds are best treated as tuning knobs to validate out-of-sample, not as confidence levels.
+> **What the legacy score is (and isn't):** most components — EMA alignment and slope, RSI, candle body, breakout, consecutive candles — all measure "price has been rising/falling over the last few bars", so they are strongly correlated. The 0-10 score is a momentum confluence count, not a probability. Thresholds are best treated as tuning knobs to validate out-of-sample, not as confidence levels.
 
-**Entry Condition**: `Total Score` >= `MinSignalScore` (plus the optional HTF trend filter)
+### Both Models
+
+- **Dead-Market Block**: if the last closed candle's `ATR/AvgATR < MinVolRatioToTrade`, entries are blocked (off by default).
+- **Velocity Tracking** _(informational)_: tracks the _change_ in signal score between bars and shows it on the dashboard (`Vel`). It does not drive trailing or lot sizing.
+- **Signal Smoothing (Blended Weighted Average)**:
+  - Combines weighted average of recent closed candles with a dampened current candle contribution.
+  - **SignalSmoothingCandles**: Number of closed candles to average (1-10, default 2).
+  - **CurrentCandleBlend**: Weight factor for the forming candle (0.0-1.0, where 0.0 = closed candles only, 1.0 = current candle only). Used for position management. With `EnableNewBarEntryOnly` (default), **entry decisions use closed candles only** — on the first tick of a bar the forming candle has no body or range yet and would only drag the score down.
+  - Results in smooth yet responsive signal scoring that adapts to market conditions.
+
+**Entry Condition**: the side's score >= `MinBuySignalScore` / `MinSellSignalScore` (plus the HTF trend filter and the entry guards)
 
 ### Entry Execution (Market vs. Limit)
 
@@ -174,13 +200,17 @@ With `EnableCheckpointExit` the take-profit is **not sent to the broker** — it
 - **No longer valid → close** at the checkpoint.
 - **What "valid" means** (`CheckpointHoldMode`): the higher-timeframe trend still agrees (uses the `EnableHTFTrendFilter` settings — turn it on), the signal score still points the same way, or both.
 - **Trailing stop** (`CheckpointTrailPct`, `CheckpointTrailStartPct`; 0 = off): both are a **% of the checkpoint distance** (the TP distance), so they follow it automatically if you change it. Once the trade is `CheckpointTrailStartPct`% of that distance in profit, the SL follows the price `CheckpointTrailPct`% of it behind and never moves back. With a start of 0, trailing begins after the first held checkpoint. The checkpoint lock still applies, and whichever stop is tighter wins. The default profile uses 100% / 50%: with its $20 checkpoint, the SL trails $20 behind the price from +$10.
+- **Break-even lock** (`CheckpointBreakEvenPct`, default 0 = off): once the trade is this % of the checkpoint distance in profit, the SL moves to the **smallest possible profit**: one tick beyond the entry plus commission and any negative swap. On a fast market the stop can still fill a little below that level.
 - **All checkpoint settings at a glance:**
   - distance: `TPInputType` / `TPValue`
   - what keeps a trade: `CheckpointHoldMode`
   - profit locked per checkpoint: `CheckpointLockPct`
   - trailing distance and start: `CheckpointTrailPct` / `CheckpointTrailStartPct`
   - loss-side skips: `CheckpointMaxSkips`
+  - early exit when the trend turns: `TrendFlipExitScore`
+  - smallest-profit lock: `CheckpointBreakEvenPct`
 - **Loss side** (`CheckpointMaxSkips`, default 0 = off): when the SL is touched while the signal score still agrees, the stop may be pushed one SL-distance further, at most this many times. The broker always holds a **hard stop at the maximum distance** (`(1 + skips) × SL`), so the worst case is fixed even if the EA or terminal is offline; the inner stops are managed by the EA. Risk sizing uses the full worst-case distance.
+- **Trend-flip exit** (`TrendFlipExitScore`, default 6.0, 0 = off): a losing trade is closed as soon as the **opposite** side's closed-candle score reaches this value, i.e. the trend it was opened with has turned against it, instead of waiting for the full SL. With the Trend score, 6.0 to 7.0 means the multi-hour trend has clearly reversed. It cut the average loss in backtests without hurting results. Hedge chain legs are left to the chain logic.
 
 ### Risk:Reward TP/SL (Optional)
 
@@ -206,9 +236,9 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 | default | |
 |---|---|
 | Symbol / timeframe | XAUUSDm (3-digit quotes) on **M5** |
-| Entries | Signal score ≥ 6, only in the D1 trend direction (close at least 0.5% beyond a rising / falling EMA50) |
+| Entries | Trend score ≥ 5 (the multi-hour trend agrees), only in the D1 trend direction (close at least 0.5% beyond a rising / falling EMA50) |
 | Stop | Fixed $20 (20000 points at 0.01 lot) |
-| Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10 |
+| Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
 | Hedge chain | Off |
 | Account | About $2,000 or more: each 0.01-lot trade risks a fixed $20 (about 1%) |

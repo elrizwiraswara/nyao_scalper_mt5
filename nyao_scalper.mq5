@@ -67,6 +67,11 @@ enum ENUM_REGIME_MODE
     REGIME_ATR_EXPANSION,                                // ATR Expansion (legacy)
     REGIME_EFFICIENCY_RATIO                              // Directional Efficiency Ratio
 };
+enum ENUM_SCORE_MODEL
+{
+    SCORE_LEGACY,                                        // Short-Term Confluence (legacy)
+    SCORE_TREND                                          // Multi-Hour Trend Strength
+};
 
 input group "+-----------------------------------------+"
 input group " Nyao Scalper v45.0"
@@ -102,6 +107,12 @@ input double HTFMinSlopePct = 0.0;                        // HTF Filter: EMA Mus
 input int HTFSlopeBars = 5;                               // HTF Filter: Bars Used for the EMA Slope Check
 
 input group "⚖️ Score Weight Settings"
+input ENUM_SCORE_MODEL ScoreModel = SCORE_TREND;          // Score Model (Trend: range, EMA, efficiency and momentum over hours)
+input int TrendRangeBars = 200;                           // Trend Score: Range Position Lookback (bars)
+input int TrendEMAPeriod = 200;                           // Trend Score: EMA Period
+input int TrendERBars = 100;                              // Trend Score: Efficiency Ratio Lookback (bars)
+input int TrendROCBars = 192;                             // Trend Score: Momentum Lookback (bars)
+input int TrendATRPeriod = 14;                            // Trend Score: ATR Period (distance unit)
 input double TrendWeight = 1.5;                           // Trend Alignment Initial Weight
 input double SlopeWeight = 1.5;                           // Trend Slope Confirmation Weight
 input double MomentumBaseWeight = 1.0;                    // Momentum Base Weight (RSI Sweet Spot)
@@ -141,8 +152,8 @@ input double SellDuplicateMultiplier = 1.5;               // Min Distance Multip
 input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($ | 0 = Disabled)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
 input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
-input double MinBuySignalScore = 6.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
-input double MinSellSignalScore = 6.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
+input double MinBuySignalScore = 5.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
+input double MinSellSignalScore = 5.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
 input group "🎯 Limit Entry Settings"
 input bool EnableLimitEntry = false;                      // Fresh Entries Use Pending Limit (pullback) Instead of Market
@@ -195,7 +206,7 @@ input group "🔀 Hedge Chain (Rolling Martingale Recovery) Settings"
 input bool EnableHedgeChain = false;                      // Enable Hedge Chain (MARTINGALE - high risk)
 input double HedgeTriggerATR = 1.5;                       // Adverse Move (ATR) to Start the Chain
 input bool HedgeRequireSignal = true;                     // Only Hedge if Reverse Signal Confirms (anti-spike)
-input double HedgeMinSignalScore = 4.5;                   // Min Reverse-Direction Score to Open Hedge
+input double HedgeMinSignalScore = 6.5;                   // Min Reverse-Direction Score to Open Hedge (Trend score: the trend has turned)
 input bool HedgeAutoLot = true;                           // Auto-size Hedge Lot to Recover (else Multiplier)
 input double HedgeRecoveryATR = 1.0;                      // Favorable Move (ATR) to Recover Within
 input double HedgeLotMultiplier = 2.0;                    // Fixed Hedge Lot Multiplier (Auto-size OFF)
@@ -210,6 +221,7 @@ input double HedgeCyclePartialPct = 50.0;                 // % of Deepest Hedge 
 input int HedgeMaxCycles = 3;                             // Max Cycles Before Releasing Chain (0 = Unlimited)
 input double HedgeMaxChainLossUSD = 0.0;                  // Close Chain if Loss >= this $ (0 = Off)
 input double HedgeMaxChainLossPct = 5.0;                  // Close Chain if Loss >= this % Equity (0 = Off)
+input double HedgeMaxChainLossSL = 1.5;                   // Close Chain if Loss >= this x the Base Lot's SL Loss (0 = Off)
 input bool HedgeClearRootSL = true;                       // Clear First Position SL on Chain Start
 input double HedgeTrailATR = 1.0;                         // Graduated Hedge Trail Distance (ATR; 0 = normal trailing)
 
@@ -259,8 +271,10 @@ input bool EnableCheckpointExit = true;                   // TP Becomes a Checkp
 input ENUM_CHECKPOINT_HOLD CheckpointHoldMode = CP_HOLD_SCORE; // Keep the Trade at a Checkpoint If...
 input double CheckpointLockPct = 50.0;                    // % of the Move to the Checkpoint Locked Into the SL
 input int CheckpointMaxSkips = 0;                         // Loss Side: Times the SL May Be Pushed One SL-Distance Further While Score Agrees (0 = Never)
+input double TrendFlipExitScore = 6.0;                    // Loss Side: Close a Losing Trade When the Opposite Score Reaches This (0 = Off)
 input double CheckpointTrailPct = 100.0;                  // Trailing Stop Distance Behind the Price, % of the Checkpoint Distance (0 = Off)
 input double CheckpointTrailStartPct = 50.0;              // Start Trailing at This Profit, % of the Checkpoint Distance (0 = After the 1st Held Checkpoint)
+input double CheckpointBreakEvenPct = 0.0;                // Lock the Smallest Profit Once Profit Reaches This % of the Checkpoint Distance (0 = Off)
 
 input group "💸 Trailing TP/SL Settings"
 input bool EnableTrailing = false;                        // Enable Trailing TP/SL
@@ -368,6 +382,8 @@ int emaFastHandle = INVALID_HANDLE;                       // Handle for Fast EMA
 int emaSlowHandle = INVALID_HANDLE;                       // Handle for Slow EMA
 int rsiHandle = INVALID_HANDLE;                           // Handle for RSI
 int atrSignalHandle = INVALID_HANDLE;                     // Handle for Signal ATR
+int trendEmaHandle = INVALID_HANDLE;                      // Handle for the Trend Score EMA
+int trendAtrHandle = INVALID_HANDLE;                      // Handle for the Trend Score ATR
 
 // Signal Strength Structure - Indicator-Based Scoring System
 // Weights are adjustable via Score Weight Settings inputs
@@ -391,6 +407,10 @@ struct SignalStrength
     double velocity;                                      // Current Score - Previous Score (informational)
     double normalizedVelocity;                            // 0.0-1.0 Normalized Velocity (informational)
     bool deadMarket;                                      // Last closed candle failed MinVolRatioToTrade
+    double trendRange;                                    // Trend model: position in the range (-1..+1, + = bullish)
+    double trendEma;                                      // Trend model: distance from the EMA (-1..+1)
+    double trendEfficiency;                               // Trend model: directional efficiency (-1..+1)
+    double trendMomentum;                                 // Trend model: move over the lookback (-1..+1)
     string reasoning;                                     // Detailed explanation
 };
 
@@ -646,6 +666,16 @@ int InitializeEA()
         Alert("ERROR: indicator periods / lookbacks must be >= 1 and VelocityWindow > 0");
         return(INIT_PARAMETERS_INCORRECT);
     }
+    if(ScoreModel == SCORE_TREND && (TrendRangeBars < 2 || TrendEMAPeriod < 1 || TrendERBars < 2 || TrendROCBars < 1 || TrendATRPeriod < 1))
+    {
+        Alert("ERROR: Trend Score lookbacks must be >= 2 (range, efficiency) and >= 1 (EMA, momentum, ATR)");
+        return(INIT_PARAMETERS_INCORRECT);
+    }
+    if(HedgeMaxChainLossSL < 0 || TrendFlipExitScore < 0 || TrendFlipExitScore > 10 || CheckpointBreakEvenPct < 0)
+    {
+        Alert("ERROR: HedgeMaxChainLossSL and CheckpointBreakEvenPct must be >= 0, TrendFlipExitScore 0-10");
+        return(INIT_PARAMETERS_INCORRECT);
+    }
     if(EnableLossManagement && MaxAdverseATR <= 0)
     {
         Alert("ERROR: MaxAdverseATR must be > 0 when EnableLossManagement is on");
@@ -722,6 +752,17 @@ int InitializeEA()
     {
         Print("Error creating Signal ATR handle!");
         return(INIT_FAILED);
+    }
+
+    if(ScoreModel == SCORE_TREND)
+    {
+        trendEmaHandle = iMA(_Symbol, _Period, TrendEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+        trendAtrHandle = iATR(_Symbol, _Period, TrendATRPeriod);
+        if(trendEmaHandle == INVALID_HANDLE || trendAtrHandle == INVALID_HANDLE)
+        {
+            Print("Error creating Trend Score indicator handles!");
+            return(INIT_FAILED);
+        }
     }
 
     if(EnableHTFTrendFilter)
@@ -934,6 +975,10 @@ void OnDeinit(const int reason)
     IndicatorRelease(atrSignalHandle);
     if(htfEmaHandle != INVALID_HANDLE) IndicatorRelease(htfEmaHandle);
     htfEmaHandle = INVALID_HANDLE;
+    if(trendEmaHandle != INVALID_HANDLE) IndicatorRelease(trendEmaHandle);
+    if(trendAtrHandle != INVALID_HANDLE) IndicatorRelease(trendAtrHandle);
+    trendEmaHandle = INVALID_HANDLE;
+    trendAtrHandle = INVALID_HANDLE;
 
     Print(EA_TITLE, " Deinitialized");
 }
@@ -1922,6 +1967,9 @@ void ManagePositions()
     // Checkpoint exits: virtual TP checkpoints (keep & lock, or close) and the capped loss-side skips
     ManageCheckpoints();
 
+    // Trend-flip exit: a losing trade whose trend has turned against it is closed before its SL
+    ManageTrendFlipExits();
+
     // Loss-streak pause: resolve the open paper trade
     ManagePaperTrade();
 
@@ -1960,6 +2008,8 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
 
 double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrength &components, bool fillComponents)
 {
+    if(ScoreModel == SCORE_TREND) return ComputeTrendScore(orderType, signalIndex, components, fillComponents);
+
     bool isBuy = (orderType == ORDER_TYPE_BUY);
     bool isSell = (orderType == ORDER_TYPE_SELL);
 
@@ -2190,6 +2240,107 @@ double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrengt
 }
 
 // +------------------------------------------------------------------+
+// | Trend Score Model - Multi-Hour Trend Strength                    |
+// | Four continuous readings of the same bar, each -1 (strong down)  |
+// | to +1 (strong up), averaged into s:                             |
+// |  - Range: close's position in the TrendRangeBars high-low range  |
+// |  - EMA: distance from the TrendEMAPeriod EMA, in ATRs            |
+// |  - Efficiency: net move / path over TrendERBars                  |
+// |  - Momentum: net move over TrendROCBars, in ATRs                 |
+// | Buy score = 5 + 5s, Sell score = 5 - 5s (they always sum to 10). |
+// | Small price changes move it a little, never in fixed steps, and  |
+// | every part is directional (no points for volatility alone).      |
+// +------------------------------------------------------------------+
+struct TrendReading
+{
+    datetime bar;
+    double s;
+    double range;
+    double ema;
+    double efficiency;
+    double momentum;
+    bool dead;
+};
+TrendReading trendCache[16];                              // closed bars never change: keep their readings
+int trendCacheNext = 0;
+
+bool ReadTrend(int signalIndex, TrendReading &r)
+{
+    datetime bar = iTime(_Symbol, _Period, signalIndex);
+    if(bar == 0) return false;
+    if(signalIndex > 0)
+        for(int k = 0; k < ArraySize(trendCache); k++)
+            if(trendCache[k].bar == bar) { r = trendCache[k]; return true; }
+
+    int rangeBars = MathMax(2, TrendRangeBars);
+    int erBars = MathMax(2, TrendERBars);
+    int rocBars = MathMax(1, TrendROCBars);
+    int closeBars = MathMax(erBars, rocBars) + 1;
+
+    double close[], high[], low[], ema[], atr[];
+    ArraySetAsSeries(close, true);
+    if(CopyClose(_Symbol, _Period, signalIndex, closeBars, close) < closeBars) return false;
+    if(CopyHigh(_Symbol, _Period, signalIndex, rangeBars, high) < rangeBars) return false;
+    if(CopyLow(_Symbol, _Period, signalIndex, rangeBars, low) < rangeBars) return false;
+    if(CopyBuffer(trendEmaHandle, 0, signalIndex, 1, ema) < 1) return false;
+    if(CopyBuffer(trendAtrHandle, 0, signalIndex, 1, atr) < 1 || atr[0] <= 0) return false;
+
+    double c = close[0];
+    double hi = high[ArrayMaximum(high)];
+    double lo = low[ArrayMinimum(low)];
+    double path = 0;
+    for(int k = 0; k < erBars; k++) path += MathAbs(close[k] - close[k + 1]);
+
+    // Scales put a typical strong trend near +-0.8 (calibrated on XAUUSDm M5, 2024-2025)
+    r.bar = bar;
+    r.range = (hi > lo) ? (c - (hi + lo) / 2.0) / ((hi - lo) / 2.0) : 0;
+    r.ema = MathTanh((c - ema[0]) / (4.0 * atr[0]));
+    r.efficiency = (path > 0) ? MathTanh((c - close[erBars]) / path / 0.25) : 0;
+    r.momentum = MathTanh((c - close[rocBars]) / (12.0 * atr[0]));
+    r.s = (r.range + r.ema + r.efficiency + r.momentum) / 4.0;
+
+    // Same dead-market gate as the legacy model (ATR collapsed vs its average)
+    r.dead = false;
+    if(MinVolRatioToTrade > 0)
+    {
+        int n = MathMax(1, ATRAvgLookback);
+        double a[];
+        ArraySetAsSeries(a, true);
+        if(CopyBuffer(atrSignalHandle, 0, signalIndex, n, a) == n)
+        {
+            double sum = 0;
+            for(int k = 0; k < n; k++) sum += a[k];
+            double ratio = (sum > 0) ? a[0] / (sum / n) : 0;
+            r.dead = (ratio > 0 && ratio < MinVolRatioToTrade);
+        }
+    }
+
+    if(signalIndex > 0)
+    {
+        trendCache[trendCacheNext] = r;
+        trendCacheNext = (trendCacheNext + 1) % ArraySize(trendCache);
+    }
+    return true;
+}
+
+double ComputeTrendScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrength &components, bool fillComponents)
+{
+    TrendReading r;
+    if(!ReadTrend(signalIndex, r)) return 0;
+    if(fillComponents)
+    {
+        components.trendRange = r.range;
+        components.trendEma = r.ema;
+        components.trendEfficiency = r.efficiency;
+        components.trendMomentum = r.momentum;
+        components.deadMarket = r.dead;
+    }
+    if(r.dead) return 0;
+    double side = (orderType == ORDER_TYPE_BUY) ? 1.0 : -1.0;
+    return MathMax(0.0, MathMin(10.0, 5.0 + 5.0 * side * r.s));
+}
+
+// +------------------------------------------------------------------+
 // | Signal Strength Analysis - Blended Weighted Average              |
 // | Combines weighted avg of N closed candles + dampened current     |
 // | candle for smooth yet responsive signal scoring                  |
@@ -2226,6 +2377,10 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = fal
     strength.penaltyBody = 0;
     strength.penaltyWick = 0;
     strength.deadMarket = false;
+    strength.trendRange = 0;
+    strength.trendEma = 0;
+    strength.trendEfficiency = 0;
+    strength.trendMomentum = 0;
     strength.reasoning = "";
 
     bool isBuy = (orderType == ORDER_TYPE_BUY);
@@ -2294,10 +2449,15 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = fal
     if(strength.normalizedVelocity > 1.0) strength.normalizedVelocity = 1.0;
 
     // Debug Construction
-    strength.reasoning = StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f [Smooth:%d Blend:%.0f%%]%s",
-        strength.trendScore, strength.momentumScore, strength.impulseStrength,
-        strength.chopScore, strength.peakScore, strength.volatilityScore, strength.normalizedVelocity,
-        N, blend * 100, strength.deadMarket ? " DEAD" : "");
+    if(ScoreModel == SCORE_TREND)
+        strength.reasoning = StringFormat("Rng:%+.2f EMA:%+.2f Eff:%+.2f Mom:%+.2f | Vel:%.2f [Smooth:%d Blend:%.0f%%]%s",
+            strength.trendRange, strength.trendEma, strength.trendEfficiency, strength.trendMomentum,
+            strength.normalizedVelocity, N, blend * 100, strength.deadMarket ? " DEAD" : "");
+    else
+        strength.reasoning = StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f [Smooth:%d Blend:%.0f%%]%s",
+            strength.trendScore, strength.momentumScore, strength.impulseStrength,
+            strength.chopScore, strength.peakScore, strength.volatilityScore, strength.normalizedVelocity,
+            N, blend * 100, strength.deadMarket ? " DEAD" : "");
 
     // Cache result for this tick
     _strengthCache[slot] = strength;
@@ -4254,18 +4414,29 @@ void ReleaseChainToLossMgmt(ulong chainId)
 }
 
 // +------------------------------------------------------------------+
-// | Effective chain-loss stop ($): combines the fixed-$ and          |
-// | %-of-equity caps. Returns the tighter (smaller) of whichever are  |
-// | enabled, or 0 if neither is set.                                  |
+// | Effective chain-loss stop ($): combines the fixed-$, %-of-equity  |
+// | and x-SL caps. Returns the tightest (smallest) of whichever are   |
+// | enabled, or 0 if none is set.                                     |
 // +------------------------------------------------------------------+
 double ChainLossStopThreshold()
 {
-    double usd = (HedgeMaxChainLossUSD > 0) ? HedgeMaxChainLossUSD : 0;
-    double pct = (HedgeMaxChainLossPct > 0)
-                 ? AccountInfoDouble(ACCOUNT_EQUITY) * HedgeMaxChainLossPct / 100.0
-                 : 0;
-    if(usd > 0 && pct > 0) return MathMin(usd, pct);
-    return MathMax(usd, pct);
+    double caps[3];
+    caps[0] = (HedgeMaxChainLossUSD > 0) ? HedgeMaxChainLossUSD : 0;
+    caps[1] = (HedgeMaxChainLossPct > 0)
+              ? AccountInfoDouble(ACCOUNT_EQUITY) * HedgeMaxChainLossPct / 100.0
+              : 0;
+    // Relative to the trade's own stop: a chain may never cost much more than the SL it replaced
+    caps[2] = 0;
+    double slPts = GetSLPoints(BaseLotSize);
+    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    if(HedgeMaxChainLossSL > 0 && slPts > 0 && tickValue > 0 && tickSize > 0)
+        caps[2] = HedgeMaxChainLossSL * (slPts * _Point / tickSize) * tickValue * BaseLotSize;
+
+    double thr = 0;
+    for(int k = 0; k < 3; k++)
+        if(caps[k] > 0 && (thr == 0 || caps[k] < thr)) thr = caps[k];
+    return thr;
 }
 
 // +------------------------------------------------------------------+
@@ -4840,6 +5011,57 @@ bool CheckpointScoreAgrees(bool isBuy)
 
 datetime cpRetryAfter = 0;                                // Checkpoint SL modifies wait after a failure
 
+// Smallest-profit stop: one tick beyond the entry plus round-trip commission and any negative swap.
+// The close-side price (bid for buys, ask for sells) already includes the spread paid at entry.
+double MinProfitLockPrice(ulong ticket, bool isBuy, double entry)
+{
+    if(!PositionSelectByTicket(ticket)) return 0;
+    double volume = PositionGetDouble(POSITION_VOLUME);
+    double swap = PositionGetDouble(POSITION_SWAP);
+    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    if(tickValue <= 0 || tickSize <= 0 || volume <= 0) return 0;
+
+    double cost = GetPositionRoundTripCommission(ticket) + ((swap < 0) ? -swap : 0);
+    double dist = cost / volume * (tickSize / tickValue) + tickSize;
+    double lock = isBuy ? entry + dist : entry - dist;
+    // Round away from the entry so rounding can never turn the lock into a loss
+    lock = isBuy ? MathCeil(lock / tickSize - 1e-9) * tickSize : MathFloor(lock / tickSize + 1e-9) * tickSize;
+    PositionSelectByTicket(ticket);
+    return NormalizeDouble(lock, _Digits);
+}
+
+// +------------------------------------------------------------------+
+// | Trend-Flip Exit (TrendFlipExitScore > 0)                         |
+// | A losing trade is closed once the OPPOSITE side's closed-candle  |
+// | score reaches TrendFlipExitScore: the reason for the trade is    |
+// | gone, so the loss is cut instead of waiting for the full SL.     |
+// | Hedge chain legs are left to the chain logic.                    |
+// +------------------------------------------------------------------+
+void ManageTrendFlipExits()
+{
+    if(TrendFlipExitScore <= 0) return;
+
+    for(int i = managedPositionCount - 1; i >= 0; i--)
+    {
+        if(i >= managedPositionCount) continue;
+        if(managedPositions[i].chainId != 0) continue;
+
+        ulong ticket = managedPositions[i].ticket;
+        if(!PositionSelectByTicket(ticket)) continue;
+        double pl = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+        if(pl >= 0) continue;
+
+        bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+        double against = GetSignalStrength(isBuy ? ORDER_TYPE_SELL : ORDER_TYPE_BUY, true, true).finalScore;
+        if(against < TrendFlipExitScore) continue;
+
+        LogPrint("[TREND FLIP EXIT] ", ticket, " losing $", DoubleToString(-pl, 2), " and the opposite score is ",
+                 DoubleToString(against, 2), " >= ", DoubleToString(TrendFlipExitScore, 2), " -> closing");
+        ClosePositionAndAccount(ticket);
+    }
+}
+
 void ManageCheckpoints()
 {
     if(!EnableCheckpointExit) return;
@@ -4935,6 +5157,21 @@ void ManageCheckpoints()
                 trailed = true;
             }
         }
+        // C2) Optional break-even lock: once the trade is CheckpointBreakEvenPct% of the checkpoint
+        // distance in profit, the SL moves to the smallest profit (and, like every stop here, only forward)
+        bool beDue = false;
+        if(CheckpointBreakEvenPct > 0 && managedPositions[i].cpStep > 0
+           && (sl == 0 || dir * (sl - entry) <= 0)                       // not locked in profit yet
+           && dir * (price - entry) >= (CheckpointBreakEvenPct / 100.0) * managedPositions[i].cpStep)
+        {
+            double be = MinProfitLockPrice(ticket, isBuy, entry);
+            if(be > 0 && (newSL == 0 || dir * (be - newSL) > 0))
+            {
+                newSL = be;
+                beDue = (sl == 0 || dir * (be - sl) > _Point);
+            }
+        }
+
         // D) The lock of the last checkpoint passed stays owed until the broker has it: a rejected
         // modify (requote, busy server) is retried, and if price falls back to the lock before
         // the broker SL got there, the EA closes the trade at the lock itself
@@ -4954,7 +5191,7 @@ void ManageCheckpoints()
                 lockDue = true;
             }
         }
-        if(!cpHeld && !trailed && !lockDue) continue;
+        if(!cpHeld && !trailed && !lockDue && !beDue) continue;
         if(TimeCurrent() < cpRetryAfter) continue;              // a modify just failed: retry after a second
 
         newSL = NormalizePrice(newSL);
