@@ -244,7 +244,9 @@ def ea_version(ea_src):
 
 def ea_label(plan):
     v = plan.get('ea_version', '')
-    return f'Nyao Scalper v{v}' if v else 'Nyao Scalper'
+    stem = Path(plan['ea']).stem
+    name = 'Nyao Scalper' if stem == 'nyao_scalper' else stem.replace('_', ' ').title()
+    return f'{name} v{v}' if v else name
 
 
 def git_info(paths):
