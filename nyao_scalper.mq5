@@ -102,7 +102,7 @@ input int RSIMomentumSell = 40;                           // RSI Momentum Sell T
 input bool EnableHTFTrendFilter = true;                   // Only Enter With Higher-Timeframe Trend (HTF EMA)
 input ENUM_TIMEFRAMES HTFTimeframe = PERIOD_D1;           // Higher Timeframe for Trend Filter
 input int HTFEMAPeriod = 50;                              // Higher Timeframe EMA Period
-input double HTFMinDistancePct = 0.5;                  // HTF Filter: Close Must Be >= this % Beyond the EMA (0 = Off)
+input double HTFMinDistancePct = 0.5;                     // HTF Filter: Close Must Be >= this % Beyond the EMA (0 = Off)
 input double HTFMinSlopePct = 0.0;                        // HTF Filter: EMA Must Move >= this % Over HTFSlopeBars (0 = Off)
 input int HTFSlopeBars = 5;                               // HTF Filter: Bars Used for the EMA Slope Check
 
@@ -158,7 +158,7 @@ input double MinSellSignalScore = 5.0;                    // Min Signal Strength
 input group "🎯 Limit Entry Settings"
 input bool EnableLimitEntry = false;                      // Fresh Entries Use Pending Limit (pullback) Instead of Market
 input ENUM_LIMIT_ANCHOR LimitEntryAnchor = LIMIT_ANCHOR_FIXED_ATR; // Pullback Anchor (Smart = nearer of Swing/EMA)
-input double LimitEntryATRFraction = 0.25;               // Pullback Depth / ATR Cap as Fraction of ATR (below Ask / above Bid)
+input double LimitEntryATRFraction = 0.25;                // Pullback Depth / ATR Cap as Fraction of ATR (below Ask / above Bid)
 input int LimitEntryExpiryBars = 1;                       // Cancel Unfilled Limit After N Bars (0 = no expiry)
 input bool LimitEntryCancelOnFlip = true;                 // Cancel Pending When Directional Signal Drops Below Threshold
 
