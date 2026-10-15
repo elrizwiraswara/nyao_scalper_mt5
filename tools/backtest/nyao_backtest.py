@@ -447,11 +447,27 @@ def fmt_pf(pf):
     return '-' if pf is None else '∞' if pf == float('inf') else f'{pf:.2f}'
 
 
-def setup_rows(plan):
+def tick_labels(plan, rows):
+    """(setup row, short intro text) for the tick data the runs actually got. The 'real' model only uses real ticks
+    where the server has them; elsewhere MT5 generates ticks from 1-minute bars (the report's History Quality)."""
+    fixed = {'every': ('Every tick (generated)', 'generated ticks'), 'ohlc': ('1 minute OHLC', '1-minute OHLC'),
+             'open': ('Open prices only', 'open prices')}
+    if plan['model'] != 'real':
+        return fixed[plan['model']]
+    pcts = [int(m.group(1)) for r in rows if not r['missing'] for m in [re.match(r'\s*(\d+)%', r.get('quality') or '')] if m]
+    if not pcts or min(pcts) == 100:
+        return 'Every tick based on real ticks', 'real ticks'
+    if max(pcts) == 0:
+        return 'Generated from 1-minute bars (no real tick history for this period)', 'ticks generated from 1-minute bars'
+    return (f'Real ticks where available ({min(pcts)}-{max(pcts)}% real), generated from 1-minute bars elsewhere',
+            'partly real ticks')
+
+
+def setup_rows(plan, rows):
     split = 'One run per month, each starting from a fresh deposit' if plan['split'] == 'monthly' else 'One run over the whole range'
     return [('EA', f'{ea_label(plan)} (`{plan["ea"]}`)'), ('Settings', f'`{plan["set"]}`'), ('Git commit', plan['version']),
             ('Symbol / timeframes', f'{plan["symbol"]} / {", ".join(plan["periods"])}'),
-            ('Tick data', {'real': 'Every tick based on real ticks', 'every': 'Every tick (generated)', 'ohlc': '1 minute OHLC', 'open': 'Open prices only'}[plan['model']]),
+            ('Tick data', tick_labels(plan, rows)[0]),
             ('Deposit / leverage', f'{plan["deposit"]:,.0f} {plan["currency"]} / 1:{plan["leverage"]}'), ('Runs', split),
             ('Generated', f'{plan["generated"]} with `tools/backtest/nyao_backtest.py`')]
 
@@ -474,7 +490,7 @@ def cell_text(r):
 def render_markdown(plan, rows, summary):
     by = {(r['period'], r['window']): r for r in rows}
     md = [f'# {plan["title"]}', '', '| Setting | Value |', '|---|---|']
-    md += [f'| {k} | {v} |' for k, v in setup_rows(plan)]
+    md += [f'| {k} | {v} |' for k, v in setup_rows(plan, rows)]
     md += ['', '## Summary', '']
     if plan['split'] == 'monthly':
         md += ['Total return is the sum of the monthly returns (each month starts from the same deposit, not compounded).', '']
@@ -573,7 +589,7 @@ def render_html(plan, rows, summary):
     e = html.escape
     by = {(r['period'], r['window']): r for r in rows}
     year = plan['generated'][:4]
-    tick = {'real': 'real ticks', 'every': 'generated ticks', 'ohlc': '1-minute OHLC', 'open': 'open prices'}[plan['model']]
+    tick = tick_labels(plan, rows)[1]
     windows = plan['windows']
     span = windows[0] if len(windows) == 1 else f'{windows[0]} to {windows[-1]}'
 
@@ -593,7 +609,7 @@ def render_html(plan, rows, summary):
              + ('Each month is a separate run starting from the same deposit.' if plan['split'] == 'monthly' else 'One run over the whole period.')
              + '</p></div>')
 
-    setup = ''.join(f'<div><span class="label">{e(k)}</span><span class="value">{e(v.replace("`", ""))}</span></div>' for k, v in setup_rows(plan))
+    setup = ''.join(f'<div><span class="label">{e(k)}</span><span class="value">{e(v.replace("`", ""))}</span></div>' for k, v in setup_rows(plan, rows))
 
     cards = ''
     for p, s in summary.items():
