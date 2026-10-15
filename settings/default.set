@@ -4,32 +4,33 @@
 ; +-----------------------------------------+
 ; D1-trend entries + checkpoint exit + trailing stop (= the EA's built-in input defaults).
 ; EXPERIMENTAL - backtested only; demo forward-test before using real money.
-; Built for gold quoted with 3 decimals (XAUUSDm), hedge OFF. Attach it to an M5 chart (see below).
+; Built for gold quoted with 3 decimals (XAUUSDm), hedge OFF. Attach it to an M5 chart.
 ; Point values are written for 3-decimal gold quotes (PointInputDigits=3) and rescaled automatically:
 ; where gold is quoted with 2 decimals, 20000 points become 2000, the same $20 move.
-;   Entry : signal score >= 6, only in the D1 trend direction (close vs rising/falling EMA50).
+;   Entry : trend score >= 5 (the multi-hour trend agrees), only in the D1 trend direction
+;           (close at least 0.5% beyond a rising / falling EMA50).
 ;   Stop  : fixed $20 (20000 points on 3-decimal quotes, 0.01 lot).
 ;   Exit  : +$20 is a checkpoint - score still agrees -> keep the trade, lock 50% of the move,
 ;           next checkpoint $20 further; otherwise close.
 ;   Trail : once +$10 in profit (50% of the checkpoint distance), the SL follows the price
 ;           $20 behind (100% of it) and never moves back.
+;   Flip  : a losing trade is closed early once the opposite score reaches 6 (the trend turned).
 ;   Pause : after 4 losses in a row, paper-trade until a paper win, then trade again.
-; Backtest, $2,000 per month, 0.01 lot (2025 = generated ticks from real M1 bars, 2026 = real ticks):
-;   Jan 2025 - Jun 2026: +110% total, 14/18 months profitable, worst month -17%,
-;   intra-month drawdown up to 30% (average 14%). 2025: +80.8%, Jan-Jun 2026: +29.5%.
-;   Same setup without the trailing stop: +141% but only 10/18 months up, worst -23%,
-;   drawdown up to 40% (one outlier trend month, Jan 2026, made most of that profit).
-;   Note: designed using data that included this period - not a blind test.
-; Timeframe: real-tick re-test Jan-Sep 2026 (reports/default-2026-real-ticks/summary.md):
-;   M5: +44.1% total (Jan-Jun +54.6%, Jul-Sep -10.6%), worst month -9.5%, max DD 19%, PF 1.12
-;   M1: -12.6% total (Jan-Jun +29.5%, Jul-Sep -42.0%), worst month -28.5%, max DD 39%, PF 0.98
-;   Jul-Sep 2026 is out-of-sample: both timeframes lost there - M5 only limited the damage.
-;   Jan 2025 - Jun 2026 on M5: +124%, worst month -7%, max DD 19% (M1 numbers above).
+; Backtest v47.0, $2,000 per month (each month a fresh run), 0.01 lot, sums of monthly returns:
+;   Jan-Sep 2026, real ticks (reports/default-2026-real-ticks):
+;     M5: +83.4%, 6/9 months up, worst month -3.1%, max DD 20.0%, PF 1.20
+;         (Jan-Jun +85.7%, Jul-Sep -2.3%)
+;     M1: +22.0%, 5/9 months up, worst month -17.8%, max DD 32.3%, PF 1.04
+;   2025, ticks generated from 1-minute bars (reports/default-2025):
+;     M5: +66.2%, 10/12 months up, worst month -2.2%, max DD 11.7%, PF 1.38
+;     M1: +25.2%, 7/12 months up, worst month -3.9%, max DD 14.1%, PF 1.12
+;   2022 / 2023 / 2024 on M5, generated ticks: -11.6% / -13.9% / +6.2%.
+;   The profile makes its money when gold trends hard (2025-2026) and loses in sideways years.
+;   It was designed on data that includes 2025-2026, so those years are not a blind test.
 ; Requirements / warnings:
-;   - Points assume a 3-digit gold quote (0.001): on a 2-digit symbol divide SLValue, TPValue,
-;     ZonePoints and MaxSpreadPoints by 10 (the trailing stop is a % of the checkpoint distance).
 ;   - $20 stop at the 0.01 minimum lot: use ~$2,000+ for ~1% risk per trade.
 ;   - Needs a hedging account (up to 2 positions open).
+;   - Prefer M5: on M1 the same rules trade more often with deeper drawdowns.
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
 DirectionalBodyLookback=10
