@@ -133,7 +133,8 @@ input double WickRejectionWeight = 1.0;                   // Wick Rejection Pena
 input double MinBodyRatio = 1.5;                          // Min Body Ratio for Wick Calculation
 
 input group "📝 Order & Position Settings"
-input bool EnableBuyOrders = true;                        // Enable Buy Orders
+input int PointInputDigits = 3;                           // Point Inputs Are Written for N-Decimal Quotes, Rescaled to This Symbol (0 = As-Is)
+input bool EnableBuyOrders = true;                       // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input bool EnableNewBarEntryOnly = true;                  // Evaluate/Open Entries Only on New Bar (stable signals)
 input double MinEfficiencyToTrade = 0.0;                  // Range Filter: Min Directional Efficiency Ratio to Enter (0 = Off)
@@ -671,6 +672,15 @@ int InitializeEA()
         Alert("ERROR: Trend Score lookbacks must be >= 2 (range, efficiency) and >= 1 (EMA, momentum, ATR)");
         return(INIT_PARAMETERS_INCORRECT);
     }
+    if(PointInputDigits < 0 || PointInputDigits > 8)
+    {
+        Alert("ERROR: PointInputDigits must be 0 (use points as-is) or 1-8 (the quote decimals the point inputs are written for)");
+        return(INIT_PARAMETERS_INCORRECT);
+    }
+    if(PointScale() != 1.0)
+        Print("[POINTS] Point inputs are written for ", PointInputDigits, "-decimal quotes and ", _Symbol, " has ", _Digits,
+              " decimals: point values x", DoubleToString(PointScale(), 4), " (same price distances, e.g. SL ",
+              DoubleToString(GetSLPoints(BaseLotSize), 0), " pts = ", DoubleToString(GetSLPoints(BaseLotSize) * _Point, _Digits), ")");
     if(HedgeMaxChainLossSL < 0 || TrendFlipExitScore < 0 || TrendFlipExitScore > 10 || CheckpointBreakEvenPct < 0)
     {
         Alert("ERROR: HedgeMaxChainLossSL and CheckpointBreakEvenPct must be >= 0, TrendFlipExitScore 0-10");
@@ -1887,7 +1897,7 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
     if(checkDuplicate)
     {
         double dupMult = isBuy ? BuyDuplicateMultiplier : SellDuplicateMultiplier;
-        double minDistance = ZonePoints * _Point * dupMult;
+        double minDistance = ZonePoints * PointScale() * _Point * dupMult;
         if(minDistance > 0 && NearestOpenEntryDistance(dir, price) < minDistance) return false;
     }
 
@@ -3593,7 +3603,7 @@ void ManageTrailingTPSL(ulong ticket)
     if(shouldModifySL && currentSL > 0)
     {
         double px = (posType == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        double minStep = MathMax(10 * _Point, 0.1 * MathAbs(px - newSL));
+        double minStep = MathMax(10 * PointScale() * _Point, 0.1 * MathAbs(px - newSL));
         if(MathAbs(newSL - currentSL) < minStep)
         {
             shouldModifySL = false;
@@ -5853,7 +5863,7 @@ bool IsSpreadTooWide()
 
     double spreadPoints = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
 
-    double cap = MaxSpreadPoints;
+    double cap = MaxSpreadPoints * PointScale();
     if(cap <= 0)
     {
         // Auto mode: cap = fraction of current ATR expressed in points
@@ -6270,16 +6280,28 @@ double GetPositionRoundTripCommission(ulong positionTicket)
 // +------------------------------------------------------------------+
 
 // +------------------------------------------------------------------+
+// | Point-input scale: point values are written for PointInputDigits |
+// | -decimal quotes (3 for the default XAUUSDm profile). On a symbol |
+// | quoted with other decimals they keep the same price distance:    |
+// | x0.1 on 2-decimal gold, so 20000 points stay a 20.00 move.       |
+// +------------------------------------------------------------------+
+double PointScale()
+{
+    if(PointInputDigits <= 0 || _Digits == PointInputDigits) return 1.0;
+    return MathPow(10.0, _Digits - PointInputDigits);
+}
+
+// +------------------------------------------------------------------+
 // | Convert Input Value to Points Based on Input Type                |
 // +------------------------------------------------------------------+
 double ConvertToPoints(ENUM_INPUT_TYPE inputType, double value, double lotSize)
 {
     double points = 0;
-    
+
     switch(inputType)
     {
         case INPUT_POINTS:
-            points = value;
+            points = value * PointScale();
             break;
 
         case INPUT_ATR:

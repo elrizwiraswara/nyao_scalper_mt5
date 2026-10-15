@@ -4,9 +4,11 @@
 ; +-----------------------------------------+
 ; D1-trend entries + checkpoint exit + trailing stop (= the EA's built-in input defaults).
 ; EXPERIMENTAL - backtested only; demo forward-test before using real money.
-; Built for XAUUSDm (3-digit quotes), hedge OFF. Attach it to an M5 chart (see below).
+; Built for gold quoted with 3 decimals (XAUUSDm), hedge OFF. Attach it to an M5 chart (see below).
+; Point values are written for 3-decimal gold quotes (PointInputDigits=3) and rescaled automatically:
+; where gold is quoted with 2 decimals, 20000 points become 2000, the same $20 move.
 ;   Entry : signal score >= 6, only in the D1 trend direction (close vs rising/falling EMA50).
-;   Stop  : fixed $20 (20000 points at 0.01 lot).
+;   Stop  : fixed $20 (20000 points on 3-decimal quotes, 0.01 lot).
 ;   Exit  : +$20 is a checkpoint - score still agrees -> keep the trade, lock 50% of the move,
 ;           next checkpoint $20 further; otherwise close.
 ;   Trail : once +$10 in profit (50% of the checkpoint distance), the SL follows the price
@@ -79,6 +81,7 @@ PeakScoreWeight=1.0
 WickRejectionWeight=1.0
 MinBodyRatio=1.5
 ; 📝 Order & Position Settings
+PointInputDigits=3
 EnableBuyOrders=true
 EnableSellOrders=true
 EnableNewBarEntryOnly=true
