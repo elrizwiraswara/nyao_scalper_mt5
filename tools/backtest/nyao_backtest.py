@@ -29,17 +29,29 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 EXPERT_SUBDIR = 'NyaoBacktest'
-TERMINAL_CANDIDATES = [r'C:\Program Files\MetaTrader 5\terminal64.exe']
 MODELS = {'every': 0, 'ohlc': 1, 'open': 2, 'real': 4}
 BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 
 
 # --------------------------------------------------------------------------- terminal / files
 
+def terminal_candidates():
+    """Installed MetaTrader 5 terminals: the standard folder first, then any other Program Files folder with terminal64.exe."""
+    found = []
+    for var in ('ProgramW6432', 'ProgramFiles'):
+        root = Path(os.environ.get(var, ''))
+        if not str(root) or not root.is_dir():
+            continue
+        for p in [root / 'MetaTrader 5' / 'terminal64.exe', *sorted(root.glob('*/terminal64.exe'))]:
+            if p.is_file() and p not in found:
+                found.append(p)
+    return found
+
+
 def find_terminal(path):
-    for p in ([path] if path else TERMINAL_CANDIDATES):
-        if p and Path(p).is_file():
-            return Path(p)
+    for p in ([Path(path)] if path else terminal_candidates()):
+        if p.is_file():
+            return p
     sys.exit('terminal64.exe not found - pass --terminal "C:\\...\\terminal64.exe"')
 
 
