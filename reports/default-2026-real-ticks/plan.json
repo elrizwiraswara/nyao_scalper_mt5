@@ -3,8 +3,8 @@
   "title": "Default profile - XAUUSDm M1 vs M5, real ticks Jan-Sep 2026",
   "ea": "nyao_scalper.mq5",
   "set": "settings/default.set",
-  "version": "9f9a934",
-  "ea_version": "46.0",
+  "version": "679fbe5",
+  "ea_version": "47.0",
   "symbol": "XAUUSDm",
   "periods": [
     "M1",
@@ -26,7 +26,7 @@
   "deposit": 2000,
   "currency": "USD",
   "leverage": 500,
-  "generated": "2026-10-14 03:28",
+  "generated": "2026-10-15 23:49",
   "runs": [
     {
       "period": "M1",
