@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v46.0                                               |
+// | Nyao Scalper v47.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version "46.0"
+#property version "47.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -17,7 +17,7 @@
 #property strict
 
 // Display name used in logs, alerts and the dashboard (keep in sync with #property version)
-#define EA_TITLE "Nyao Scalper v46.0"
+#define EA_TITLE "Nyao Scalper v47.0"
 
 // Per-position persistent state file format (bump when ManagedPosition changes)
 #define STATE_FILE_VERSION 4
@@ -74,7 +74,7 @@ enum ENUM_SCORE_MODEL
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v46.0"
+input group " Nyao Scalper v47.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
@@ -134,7 +134,7 @@ input double MinBodyRatio = 1.5;                          // Min Body Ratio for 
 
 input group "📝 Order & Position Settings"
 input int PointInputDigits = 3;                           // Point Inputs Are Written for N-Decimal Quotes, Rescaled to This Symbol (0 = As-Is)
-input bool EnableBuyOrders = true;                       // Enable Buy Orders
+input bool EnableBuyOrders = true;                        // Enable Buy Orders
 input bool EnableSellOrders = true;                       // Enable Sell Orders
 input bool EnableNewBarEntryOnly = true;                  // Evaluate/Open Entries Only on New Bar (stable signals)
 input double MinEfficiencyToTrade = 0.0;                  // Range Filter: Min Directional Efficiency Ratio to Enter (0 = Off)
@@ -441,21 +441,21 @@ struct ManagedPosition
     int profitOffsetConsecWins;                           // Consecutive winning trades closed since this position opened
     double profitOffsetAccumulated;                       // Accumulated profit from consecutive wins (USD)
     double profitOffsetOriginalSL;                        // Original SL price when position was opened
-    ulong chainId;                                       // Rolling-hedge chain id (current cycle's root ticket); 0 = standalone
-    int hedgeLevel;                                      // Level within the cycle: 0 = root, 1+ = each successive hedge
-    double chainAnchorLoss;                              // Cycle start loss ($, positive) carried on every leg of the cycle
-    int cycleNum;                                        // Which cycle this leg belongs to (0 = first; +1 on each reseed)
-    bool noRehedge;                                      // true = exhausted chain released to loss mgmt; never start a new chain on it
-    bool hedgeGraduated;                                 // true = former chain leg; trail with HedgeTrailATR (lot-independent) not the $ distance
-    double hedgeLockProfit;                              // min profit ($) to keep locked on a graduated hedge (recovery floor); 0 = none
-    double cpPrice;                                      // Checkpoint exit: next checkpoint price (0 = not in checkpoint mode)
-    double cpStep;                                       // Checkpoint exit: price distance between checkpoints (= initial TP distance)
-    double virtSL;                                       // Checkpoint exit: EA-managed inner stop for the loss-side skip rule (0 = none)
-    double virtStep;                                     // Checkpoint exit: distance each skip pushes the inner stop (= initial SL distance)
-    int cpSkipsLeft;                                     // Checkpoint exit: loss-side skips remaining
-    int cpCount;                                         // Checkpoint exit: checkpoints passed so far
-    double chainBooked;                                  // Hedge chain: loss already booked by reseed partial closes ($, <= 0), on every leg
-    double cpLock;                                       // Checkpoint exit: SL price owed by the last checkpoint passed (0 = none)
+    ulong chainId;                                        // Rolling-hedge chain id (current cycle's root ticket); 0 = standalone
+    int hedgeLevel;                                       // Level within the cycle: 0 = root, 1+ = each successive hedge
+    double chainAnchorLoss;                               // Cycle start loss ($, positive) carried on every leg of the cycle
+    int cycleNum;                                         // Which cycle this leg belongs to (0 = first; +1 on each reseed)
+    bool noRehedge;                                       // true = exhausted chain released to loss mgmt; never start a new chain on it
+    bool hedgeGraduated;                                  // true = former chain leg; trail with HedgeTrailATR (lot-independent) not the $ distance
+    double hedgeLockProfit;                               // min profit ($) to keep locked on a graduated hedge (recovery floor); 0 = none
+    double cpPrice;                                       // Checkpoint exit: next checkpoint price (0 = not in checkpoint mode)
+    double cpStep;                                        // Checkpoint exit: price distance between checkpoints (= initial TP distance)
+    double virtSL;                                        // Checkpoint exit: EA-managed inner stop for the loss-side skip rule (0 = none)
+    double virtStep;                                      // Checkpoint exit: distance each skip pushes the inner stop (= initial SL distance)
+    int cpSkipsLeft;                                      // Checkpoint exit: loss-side skips remaining
+    int cpCount;                                          // Checkpoint exit: checkpoints passed so far
+    double chainBooked;                                   // Hedge chain: loss already booked by reseed partial closes ($, <= 0), on every leg
+    double cpLock;                                        // Checkpoint exit: SL price owed by the last checkpoint passed (0 = none)
 };
 
 // Managed positions array
