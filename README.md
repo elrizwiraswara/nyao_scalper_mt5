@@ -94,7 +94,8 @@ Chain state is saved to disk (see **Restart-Safe State**), so a restart doesn't 
 
 ### Lot Sizing
 
-- **Base Lot**: Every entry starts at `BaseLotSize`, capped at `MaxLotSize`, the broker limits and available margin.
+- **Risk-Based Lot** _(`RiskPerTradePct`, default 1.25)_: each entry uses the largest lot whose stop-out loses at most this % of equity, capped at `MaxLotSize` (default 0.05), the broker limits and available margin. The lot is rounded down, and when even the broker's minimum lot would lose more, the entry is skipped instead of over-risking. With the default $20 stop: 0.01 lot on a $2,000 standard account (about 1% risk), 0.05 lot on a $100 cent account (10,000 cents), smaller lots as a balance shrinks, and no new trades on a standard account below about $1,600. Works only with a lot-independent stop (Points, ATR); set 0 to trade a fixed `BaseLotSize` instead.
+- **Base Lot**: With `RiskPerTradePct = 0`, every entry starts at `BaseLotSize`, capped at `MaxLotSize`, the broker limits and available margin.
 - **Drawdown Recovery Steps** _(`EnableDynamicLots`)_: Adds `LotStepSize` for every `EquityDropPercent`% the equity is below its peak — but **only** when the entry's signal score is at least `MinSignalStrengthForLot` (default 8.0). The score is a gate for these steps, not a separate lot boost. _Guardrails:_ capped at `MaxEquityDropLotSteps` total steps, and **disabled** while in a post-loss cooldown or while the basket is in floating loss — so size never scales up while actively bleeding.
 
 ### Dashboard & Alerts
@@ -237,11 +238,12 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 |---|---|
 | Symbol / timeframe | Gold (written for XAUUSDm, 3-digit quotes; 2-digit brokers are rescaled automatically) on **M5** |
 | Entries | Trend score ≥ 5 (the multi-hour trend agrees), only in the D1 trend direction (close at least 0.5% beyond a rising / falling EMA50) |
-| Stop | Fixed $20 (20000 points on 3-digit quotes, 0.01 lot) |
+| Stop | Fixed $20 move (20000 points on 3-digit quotes) |
+| Lot size | Largest lot that loses at most 1.25% at the stop (`RiskPerTradePct`), capped at 0.05: 0.01 lot on $2,000, 0.05 lot on a $100 cent account |
 | Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
 | Hedge chain | Off |
-| Account | About $2,000 or more: each 0.01-lot trade risks a fixed $20 (about 1%) |
+| Account | **Standard account: $2,000 or more** (0.01 lot risks $20, about 1%; below about $1,600 the EA opens no new trades). **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%). A standard account under $2,000 can't trade the profile safely: the broker's minimum lot already risks more than 1.25% |
 
 > **Brokers with other quote decimals**: point values are written for a 3-digit gold quote (0.001), and `PointInputDigits` (default 3) rescales them to the symbol's own decimals so every distance keeps the same price meaning. Where gold is quoted with 2 decimals, 20000 points become 2000, still a $20 move, instead of a $200 stop with 10× the risk. This covers `SLValue`, `TPValue`, `TrailingDistanceValue` and `RRRiskValue` when their type is Points, plus `ZonePoints` and `MaxSpreadPoints`. The EA prints a `[POINTS]` line at start-up when it rescales. Set `PointInputDigits = 0` to use point values exactly as typed (for example on forex, where your own values are written for that symbol).
 
@@ -264,7 +266,7 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 
 5.  **Run**:
     Drag the EA onto an **M5** chart. Its built-in defaults are the `default.set` profile.
-    - The built-in defaults (= `default.set`) are made for **XAUUSDm on M5** with 3-digit quotes and an account of about $2,000+.
+    - The built-in defaults (= `default.set`) are made for **XAUUSDm on M5** with 3-digit quotes and a **$2,000+ standard** or **$100+ cent** account (see the Account row above).
     - 2-digit gold quotes are rescaled automatically (`PointInputDigits`); for other symbols set your own distances (see [Settings Profile](#settings-profile)).
     - Requires a **hedging** account (the EA refuses to start on netting accounts).
     - When an equity stop fires (Min Equity, Target Equity or Max Times Trigger), the EA closes all its positions and pending orders and then **removes itself from the chart**. Other EAs in the terminal keep running.

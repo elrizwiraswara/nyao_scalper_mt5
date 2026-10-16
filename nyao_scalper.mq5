@@ -227,7 +227,7 @@ input bool HedgeClearRootSL = true;                       // Clear First Positio
 input double HedgeTrailATR = 1.0;                         // Graduated Hedge Trail Distance (ATR; 0 = normal trailing)
 
 input group "🧮 Dynamic Lot Sizing Settings"
-input double RiskPerTradePct = 0.0;                       // Risk-Based Lot: % Equity Lost at SL (ATR/Points SL only; 0 = Off)
+input double RiskPerTradePct = 1.25;                      // Risk-Based Lot: % Equity Lost at SL (ATR/Points SL only; 0 = Off, Use BaseLotSize)
 input bool EnableDynamicLots = false;                     // Enable Dynamic Lot Sizing
 input double EquityDropPercent = 5.0;                     // Equity Drop % per Lot Step
 input int MaxEquityDropLotSteps = 2;                      // Max Drawdown-Based Lot Steps (0 = Unlimited)
