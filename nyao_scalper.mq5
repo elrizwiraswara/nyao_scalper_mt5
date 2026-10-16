@@ -1,10 +1,10 @@
 // +------------------------------------------------------------------+
-// | Nyao Scalper v47.0                                               |
+// | Nyao Scalper v48.0                                               |
 // | Indicator-Based Signal Strength EA with Comprehensive Features   |
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version "47.0"
+#property version "48.0"
 #property description "Auto Trading EA Robot with Comprehensive Features"
 #property description ""
 #property description "This is an open-source project for educational and experimental purposes only"
@@ -17,7 +17,7 @@
 #property strict
 
 // Display name used in logs, alerts and the dashboard (keep in sync with #property version)
-#define EA_TITLE "Nyao Scalper v47.0"
+#define EA_TITLE "Nyao Scalper v48.0"
 
 // Per-position persistent state file format (bump when ManagedPosition changes)
 #define STATE_FILE_VERSION 4
@@ -74,7 +74,7 @@ enum ENUM_SCORE_MODEL
 };
 
 input group "+-----------------------------------------+"
-input group " Nyao Scalper v47.0"
+input group " Nyao Scalper v48.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
 input group "+-----------------------------------------+"
 
