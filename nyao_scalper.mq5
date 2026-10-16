@@ -1843,7 +1843,7 @@ string EntryConditionsBlock(ENUM_POSITION_TYPE dir, double price, bool checkDupl
     if(!HTFTrendAllows(isBuy))
     {
         LogPrint("[HTF FILTER] ", dirName, " BLOCKED: against ", EnumToString(HTFTimeframe), " EMA", HTFEMAPeriod, " trend");
-        return StringFormat("needs a %s %s (close %.1f%% %s a %s EMA%d)", StringSubstr(EnumToString(HTFTimeframe), 7),
+        return StringFormat("needs a %s %s (%.1f%% %s a %s EMA%d)", StringSubstr(EnumToString(HTFTimeframe), 7),
                             isBuy ? "uptrend" : "downtrend", HTFMinDistancePct, isBuy ? "above" : "below",
                             isBuy ? "rising" : "falling", HTFEMAPeriod);
     }
@@ -8034,25 +8034,62 @@ void CheckDiscordAlert()
 // +------------------------------------------------------------------+
 // | Update On-Chart Dashboard                                        |
 // +------------------------------------------------------------------+
+int dashTextRight = 0;                                    // right edge (px) of the widest label this redraw
+
 void DrawDashboardLabel(string name, string text, int x, int y, int fontSize, color clr, bool bold = false)
 {
     if(ObjectFind(0, name) < 0)
     {
         ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
         ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-        ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
         ObjectSetInteger(0, name, OBJPROP_BACK, false);
         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
         ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     }
-    
+
+    // MT5 shows at most 63 characters of a label: make a cut visible instead of silent
+    if(StringLen(text) > 63) text = StringSubstr(text, 0, 62) + "\x2026";
+
+    // Position every redraw: optional lines (hedge chains) shift the rows below them
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
     ObjectSetString(0, name, OBJPROP_TEXT, text);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
     ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
     ObjectSetString(0, name, OBJPROP_FONT, bold ? "Arial Bold" : "Arial");
+
+    // Measure the text the way the label renders it (points, scaled like the chart) for the background
+    uint w = 0, h = 0;
+    if(TextSetFont(bold ? "Arial Bold" : "Arial", -fontSize * 10) && TextGetSize(text, w, h))
+        dashTextRight = MathMax(dashTextRight, x + (int)w);
+    else
+        dashTextRight = MathMax(dashTextRight, x + StringLen(text) * fontSize * 3 / 4);
+}
+
+// Dark panel behind the dashboard. Created before any label so it is drawn underneath them.
+void DrawDashboardBackground(int x, int y, int width, int height, color bg, color border)
+{
+    string name = "NyaoDash_Bg";
+    if(ObjectFind(0, name) < 0)
+    {
+        ObjectsDeleteAll(0, "NyaoDash_");                 // labels made before the panel would sit under it
+        ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+        ObjectSetInteger(0, name, OBJPROP_BACK, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+    }
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, name, OBJPROP_XSIZE, MathMax(width, 10));
+    ObjectSetInteger(0, name, OBJPROP_YSIZE, MathMax(height, 10));
+    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, border);
 }
 
 // +------------------------------------------------------------------+
@@ -8079,11 +8116,28 @@ string DashboardEntryGate(bool isBuy, EntryScore &e, string riskBlock)
     return riskBlock;
 }
 
+// Score components for the dashboard (the log keeps the full reasoning with the smoothing settings)
+string DashReasonText(SignalStrength &s)
+{
+    if(ScoreModel == SCORE_TREND)
+        return StringFormat("Rng:%+.2f EMA:%+.2f Eff:%+.2f Mom:%+.2f | Vel:%.2f%s", s.trendRange, s.trendEma,
+                            s.trendEfficiency, s.trendMomentum, s.normalizedVelocity, s.deadMarket ? " DEAD" : "");
+    return StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f%s", s.trendScore, s.momentumScore,
+                        s.impulseStrength, s.chopScore, s.peakScore, s.volatilityScore, s.normalizedVelocity,
+                        s.deadMarket ? " DEAD" : "");
+}
+
+// $1.23 / -$1.23
+string Usd(double v)
+{
+    return (v < 0 ? "-$" : "$") + DoubleToString(MathAbs(v), 2);
+}
+
 string EntryLineText(EntryScore &e)
 {
     string parts = "";
     if(e.candleBoost > 0) parts += StringFormat("+%.1f candles", e.candleBoost);
-    if(e.ddBoost > 0)     parts += (parts == "" ? "" : ", ") + StringFormat("+%.1f drawdown", e.ddBoost);
+    if(e.ddBoost > 0)     parts += (parts == "" ? "" : ", ") + StringFormat("+%.1f DD", e.ddBoost);
     if(e.penalty > 0)     parts += (parts == "" ? "" : ", ") + StringFormat("-%.1f losing", e.penalty);
     return StringFormat("Entry: %.2f / need %.2f", e.score, e.threshold) + (parts == "" ? "" : " (" + parts + ")");
 }
@@ -8113,9 +8167,13 @@ void UpdateDashboard()
     // Clear old comment based dashboard
     Comment("");
 
+    // Background first, so every label is drawn on top of it (sized to the content at the end)
+    if(ObjectFind(0, "NyaoDash_Bg") < 0) DrawDashboardBackground(10, 10, 10, 10, C'30,30,30', clrGold);
+    dashTextRight = 0;
+
     // Layout Constants
     int startX = 20;
-    int startY = 20;
+    int startY = 36;                                      // panel top at 30 px: below the chart's symbol / OHLC line
     int lineHeight = 18;
     int headersize = 10;
     int textsize = 9;
@@ -8181,11 +8239,11 @@ void UpdateDashboard()
     double equity = AccountInfoDouble(ACCOUNT_EQUITY);
     double equityDrop = (peakEquity > 0) ? ((peakEquity - equity) / peakEquity) * 100.0 : 0.0;
     
-    DrawDashboardLabel("NyaoDash_Bal", StringFormat("Balance: $%.2f", balance), startX, currentY, textsize, colorText);
+    DrawDashboardLabel("NyaoDash_Bal", "Balance: " + Usd(balance), startX, currentY, textsize, colorText);
     currentY += lineHeight;
-    DrawDashboardLabel("NyaoDash_Eq", StringFormat("Equity: $%.2f", equity), startX, currentY, textsize, colorText);
+    DrawDashboardLabel("NyaoDash_Eq", "Equity: " + Usd(equity), startX, currentY, textsize, colorText);
     currentY += lineHeight;
-    DrawDashboardLabel("NyaoDash_Peak", StringFormat("Peak: $%.2f (Drop: %.1f%%)", peakEquity, equityDrop), startX, currentY, textsize, colorText);
+    DrawDashboardLabel("NyaoDash_Peak", "Peak: " + Usd(peakEquity) + StringFormat(" (Drop: %.1f%%)", equityDrop), startX, currentY, textsize, colorText);
     currentY += lineHeight + 5;
 
     // Hedge Chain status (only when feature enabled)
@@ -8257,7 +8315,7 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_BuyGate", GateLineText(buyGate), startX, currentY, detailsSize, GateLineColor(buyGate));
     currentY += lineHeight;
 
-    string buyDet = StringFormat("%s", buyStrength.reasoning);
+    string buyDet = DashReasonText(buyStrength);
     DrawDashboardLabel("NyaoDash_BuyDet", buyDet, startX, currentY, detailsSize, colorText);
     currentY += lineHeight + 2;
 
@@ -8272,7 +8330,7 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_SellGate", GateLineText(sellGate), startX, currentY, detailsSize, GateLineColor(sellGate));
     currentY += lineHeight;
 
-    string sellDet = StringFormat("%s",sellStrength.reasoning);
+    string sellDet = DashReasonText(sellStrength);
     DrawDashboardLabel("NyaoDash_SellDet", sellDet, startX, currentY, detailsSize, colorText);
     currentY += lineHeight + 10;
 
@@ -8287,20 +8345,26 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_Trades", StringFormat("Trades: %d (W:%d / L:%d)", allTime.count, allTime.won, allTime.lost), startX, currentY, textsize, colorText);
     currentY += lineHeight;
 
-    DrawDashboardLabel("NyaoDash_PL", StringFormat("Profit: $%.2f | Loss: $%.2f", allTime.profit, allTime.loss), startX, currentY, textsize, colorText);
+    DrawDashboardLabel("NyaoDash_PL", "Profit: " + Usd(allTime.profit) + " | Loss: " + Usd(allTime.loss), startX, currentY, textsize, colorText);
     currentY += lineHeight;
 
     // Win rate alone hides a small-wins / big-losses payoff - show the numbers that decide it
-    DrawDashboardLabel("NyaoDash_AvgWL", StringFormat("Avg Win: $%.2f | Avg Loss: $%.2f", allTime.avgProfit, allTime.avgLoss),
+    DrawDashboardLabel("NyaoDash_AvgWL", "Avg Win: " + Usd(allTime.avgProfit) + " | Avg Loss: " + Usd(allTime.avgLoss),
                        startX, currentY, textsize, colorText);
     currentY += lineHeight;
 
     double expectancy = TradeExpectancy(allTime);
-    DrawDashboardLabel("NyaoDash_Expect", StringFormat("Expectancy: $%.2f/trade | PF: %s", expectancy, ProfitFactorText(allTime)),
+    DrawDashboardLabel("NyaoDash_Expect", "Expectancy: " + Usd(expectancy) + "/trade | PF: " + ProfitFactorText(allTime),
                        startX, currentY, textsize, expectancy >= 0 ? colorText : colorSell);
     currentY += lineHeight;
 
     color profitColor = allTimeNetProfit >= 0 ? colorBuy : colorSell;
-    DrawDashboardLabel("NyaoDash_Net", StringFormat("NET PROFIT: $%.2f", allTimeNetProfit), startX, currentY, textsize, profitColor, true);
+    DrawDashboardLabel("NyaoDash_Net", "NET PROFIT: " + Usd(allTimeNetProfit), startX, currentY, textsize, profitColor, true);
+
+    // Panel around everything drawn above
+    int pad = 10;
+    DrawDashboardBackground(startX - pad, startY - pad, dashTextRight - startX + 2 * pad,
+                            currentY + lineHeight - startY + 2 * pad, colorBg, colorBorder);
+    ChartRedraw(0);
 }
 // +------------------------------------------------------------------+
