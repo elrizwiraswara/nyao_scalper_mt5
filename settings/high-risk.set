@@ -1,0 +1,243 @@
+; +-----------------------------------------+
+; Nyao Scalper v49.0 - HIGH-RISK PROFILE
+; © Copyright Nyao Scalper by Elriz Wiraswara
+; +-----------------------------------------+
+; The default profile's rules with twice the risk per trade: higher return, deeper drawdowns.
+; EXPERIMENTAL - backtested only; demo forward-test before using real money. Attach it to an M5 chart.
+; Differences from settings/default.set (everything else is identical):
+;   RiskPerTradePct 2.5 (default 1.25): the lot loses at most 2.5% at the $20 stop - 0.02 lot on
+;           $2,000 (2%), 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more
+;           than 2.5% and is still traded down to about $400 (MaxRiskPerTradePct 5, as in the default).
+;   MaxLotSize 0.10 (default 0.05): lets a $100 cent account trade 0.10 lot (2%).
+; Backtest v49.0, $2,000 per month (each month a fresh run), sums of monthly returns:
+;   Jan-Sep 2026, real ticks (reports/high-risk-2026-real-ticks):
+;     M5: +176.4%, 5/9 months up, worst month -16.1%, max DD 36.3%, PF 1.19
+;     M1: +4.0%, 5/9 months up, worst month -27.0%, max DD 46.3%, PF 1.00
+;   2025, ticks generated from 1-minute bars (reports/high-risk-2025):
+;     M5: +97.4%, 11/12 months up, worst month -0.6%, max DD 26.4%, PF 1.27
+;     M1: +78.3%, 9/12 months up, worst month -8.8%, max DD 23.6%, PF 1.20
+;   M5 by year: 2022 -15.1% / 2023 -7.9% / 2024 -4.7% / 2025 +97.4% / Jan-Sep 2026 +176.4%
+;   57 months on M5: +246.1% (default.set +130.2%), 30/57 months up, worst month -16.4%
+;   (default -5.7%), max drawdown 36.3% (default 20.0%).
+;   Doubling the risk doubled the size of the edge, not the edge itself: return per unit of
+;   drawdown stayed the same. 3.75% and 5% risk made more but with 52-64% drawdowns. Frequent M1
+;   trading (entries during the bar, 4 positions, $1.50 apart) lost up to 60% in a month at 2.5%.
+;   Both were rejected. Like the default, the profile loses in years when gold moves sideways.
+; Requirements / warnings:
+;   - Account: $2,000+ standard, or $100+ cent (balance in cents). Expect -16% months.
+;   - Needs a hedging account (up to 2 positions open).
+;   - Use M5: on M1 the same rules made almost nothing in 2026 with -27% months.
+; +-----------------------------------------+
+; 📊 Indicator Settings
+DirectionalBodyLookback=10
+EMAFastPeriod=5
+EMASlowPeriod=12
+SlopeLookback=3
+RSIPeriod=8
+ATRPeriod=8
+ATRAvgLookback=10
+MinVolRatioToTrade=0.0
+ImpulseLookback=3
+ImpulseBoostWeight=1.0
+SignalSmoothingCandles=2
+CurrentCandleBlend=0.40
+VelocityWindow=2.0
+RSIOverbought=80
+RSIOversold=20
+RSIMomentumBuy=60
+RSIMomentumSell=40
+EnableHTFTrendFilter=true
+HTFTimeframe=16408
+HTFEMAPeriod=50
+HTFMinDistancePct=0.5
+HTFMinSlopePct=0.0
+HTFSlopeBars=5
+; ⚖️ Score Weight Settings
+ScoreModel=1
+TrendRangeBars=200
+TrendEMAPeriod=200
+TrendERBars=100
+TrendROCBars=192
+TrendATRPeriod=14
+TrendWeight=1.5
+SlopeWeight=1.5
+MomentumBaseWeight=1.0
+MomentumTriggerWeight=0.5
+BodyMomentumWeight=1.5
+DirectionalBodyMomentum=true
+RegimeScoreMode=0
+ERPeriod=10
+ERHighThreshold=0.50
+ERMedThreshold=0.30
+ChopScoreHigh=2.0
+ChopScoreMed=1.0
+ChopScoreLow=0.0
+VolatilityScoreHigh=1.0
+VolatilityScoreLow=0.0
+PeakScoreWeight=1.0
+WickRejectionWeight=1.0
+MinBodyRatio=1.5
+; 📝 Order & Position Settings
+PointInputDigits=3
+EnableBuyOrders=true
+EnableSellOrders=true
+EnableNewBarEntryOnly=true
+MinEfficiencyToTrade=0.0
+RangeFilterPeriod=20
+EnableMaxSpreadFilter=true
+MaxSpreadPoints=500
+MaxSpreadATRRatio=0.25
+BaseLotSize=0.01
+MaxOpenOrders=2
+MaxTradesPerCandle=1
+ConsecutiveCandleThresholdBoost=1.0
+MaxConsecutiveCandleBoosts=3
+ZonePoints=10000.0
+BuyDuplicateMultiplier=1.5
+SellDuplicateMultiplier=1.5
+MinBreakEvenProfit=0.5
+ProfitThresholdMultiplier=1.5
+LossThresholdMultiplier=2.0
+MinBuySignalScore=5.0
+MinSellSignalScore=5.0
+; 🎯 Limit Entry Settings
+EnableLimitEntry=false
+LimitEntryAnchor=0
+LimitEntryATRFraction=0.25
+LimitEntryExpiryBars=1
+LimitEntryCancelOnFlip=true
+; 🛡️ Signal Dampening Settings
+EnableSignalDampening=true
+MaxLosingPositionsSameDir=2
+LosingPosScorePenalty=1.5
+DrawdownThresholdPct=3.0
+DrawdownScoreBoost=2.0
+ConsecutiveLossesBeforeCooldown=3
+ConsecutiveLossCooldownBars=3
+LossStreakPauseCount=4
+; 🩺 Loss Management Settings
+EnableLossManagement=false
+MaxHoldingLossPositions=2
+MinHealthScore=0.40
+MaxAdverseATR=1.5
+HealthTrendWeight=0.40
+HealthRSIWeight=0.25
+HealthATRWeight=0.25
+HealthSwingWeight=0.10
+HealthRSIBuyMin=40.0
+HealthRSISellMax=60.0
+HealthSwingLookback=20
+HealthGraceBars=2
+EnablePartialClose=true
+PartialClose75Pct=0.25
+PartialClose50Pct=0.50
+PartialClose25Pct=1.00
+EnableHealthSLTightening=true
+SLTightenATRMultiplier=2.0
+SLTightenMinHealthPct=0.50
+EnableBreakEvenOnSpread=false
+BreakEvenSpreadMultiplier=1.5
+BreakEvenTriggerATR=0.0
+EnableVirtualSLReentry=true
+ReentryRespectsNewBarGate=false
+ReentryMinSignalPct=0.75
+EnableProfitOffsetSL=true
+ConsecutiveWinsRequired=3
+MinOffsetProfit=1.0
+; 🔀 Hedge Chain (Rolling Martingale Recovery) Settings
+EnableHedgeChain=false
+HedgeTriggerATR=1.5
+HedgeRequireSignal=true
+HedgeMinSignalScore=6.5
+HedgeAutoLot=true
+HedgeRecoveryATR=1.0
+HedgeLotMultiplier=2.0
+HedgeMaxLot=0.10
+HedgeMaxTotalLots=0.20
+HedgeMaxActiveChains=1
+HedgeRecoveryPct=100.0
+HedgeRollMinProfit=0.0
+HedgeCycleLevels=2
+EnableHedgeCycleReset=true
+HedgeCyclePartialPct=50.0
+HedgeMaxCycles=3
+HedgeMaxChainLossUSD=0.0
+HedgeMaxChainLossPct=5.0
+HedgeMaxChainLossSL=1.5
+HedgeClearRootSL=true
+HedgeTrailATR=1.0
+; 🧮 Dynamic Lot Sizing Settings
+RiskPerTradePct=2.5
+MaxRiskPerTradePct=5.0
+EnableDynamicLots=false
+EquityDropPercent=5.0
+MaxEquityDropLotSteps=2
+MinSignalStrengthForLot=8.0
+LotStepSize=0.01
+MaxLotSize=0.10
+; 🏦 Equity Settings
+EnableBasketStop=true
+MaxBasketLossPct=8.0
+MaxTotalLossPct=12.0
+MinEquityPercent=70.0
+MaxDrawdownFromPeak=0.0
+PauseMinutes=5
+PauseMinutesMultiplier=1.5
+MaxPauseMinutes=120
+MaxMinEquityTriggers=0
+ResetOnNewPeak=true
+TargetEquity=0.0
+MinimumEquity=20.0
+; 📈 Take Profit Settings
+EnableTakeProfit=true
+TPInputType=2
+TPValue=20000
+; 📉 Stop Loss Settings
+EnableStopLoss=true
+SLInputType=2
+SLValue=20000
+; ⚖️ Risk:Reward Settings
+EnableRiskReward=false
+RRRiskMode=1
+RRRiskInputType=2
+RRRiskValue=200.0
+RRAtrMultiplier=1.5
+RiskRewardRatio=1.5
+; 🏁 Checkpoint Exit Settings
+EnableCheckpointExit=true
+CheckpointHoldMode=1
+CheckpointLockPct=50.0
+CheckpointMaxSkips=0
+TrendFlipExitScore=6.0
+CheckpointTrailPct=100
+CheckpointTrailStartPct=50
+CheckpointBreakEvenPct=0.0
+; 💸 Trailing TP/SL Settings
+EnableTrailing=false
+TrailingEnableBreakEvenLock=true
+TrailingSLOnProfitableOnly=true
+EnableAdaptiveTP=true
+EnableAdaptiveSL=true
+TSInputType=0
+TrailingDistanceValue=0.20
+TrailingValueMultiplier=0.20
+TrailStartATR=0.0
+; 🤖 Robot Settings
+MagicNumber=6926268
+EnableDiscordAlerts=false
+DiscordWebhookURL=
+EnableTradingHours=false
+TradingStartTime=00:00
+TradingEndTime=23:59
+EnableReports=true
+SendReportEveryHour=1
+EnableMarketCloseFilter=true
+MinutesBeforeClose=30
+EnableNewsFilter=true
+NewsMinutesBefore=30
+NewsMinutesAfter=30
+EnableLeveragePause=true
+CloseAllOnLeverageChange=true
+EnablePersistState=true
+ResetSavedState=false
+EnableLogging=false

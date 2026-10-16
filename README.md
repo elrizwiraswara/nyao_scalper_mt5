@@ -94,14 +94,15 @@ Chain state is saved to disk (see **Restart-Safe State**), so a restart doesn't 
 
 ### Lot Sizing
 
-- **Risk-Based Lot** _(`RiskPerTradePct`, default 1.25)_: each entry uses the largest lot whose stop-out loses at most this % of equity, capped at `MaxLotSize` (default 0.05), the broker limits and available margin. The lot is rounded down, and when even the broker's minimum lot would lose more, the entry is skipped instead of over-risking. With the default $20 stop: 0.01 lot on a $2,000 standard account (about 1% risk), 0.05 lot on a $100 cent account (10,000 cents), smaller lots as a balance shrinks, and no new trades on a standard account below about $1,600. Works only with a lot-independent stop (Points, ATR); set 0 to trade a fixed `BaseLotSize` instead.
+- **Risk-Based Lot** _(`RiskPerTradePct`, default 1.25)_: each entry uses the largest lot whose stop-out loses at most this % of equity, capped at `MaxLotSize` (default 0.05), the broker limits and available margin. The lot is rounded down, so it shrinks as a balance shrinks. With the default $20 stop: 0.01 lot on a $2,000 standard account (about 1% risk), 0.05 lot on a $100 cent account (10,000 cents). Works only with a lot-independent stop (Points, ATR); set 0 to trade a fixed `BaseLotSize` instead.
+- **Small-Account Cap** _(`MaxRiskPerTradePct`, default 5)_: when even the broker's minimum lot loses more than `RiskPerTradePct`, the EA still trades the minimum lot as long as its stop-out loses no more than this % of equity, and says so (an orange **Lot** line on the dashboard and a daily `[RISK SIZING]` note in the Experts tab, even with logging off). Above the cap the entry is skipped instead of over-risking. With the default $20 stop a standard account trades 0.01 lot at up to 1.25% risk from about $1,600, at 1.25-5% between about $400 and $1,600, and opens nothing below about $400. Set 0 to skip every entry that would risk more than `RiskPerTradePct`.
 - **Base Lot**: With `RiskPerTradePct = 0`, every entry starts at `BaseLotSize`, capped at `MaxLotSize`, the broker limits and available margin.
 - **Drawdown Recovery Steps** _(`EnableDynamicLots`)_: Adds `LotStepSize` for every `EquityDropPercent`% the equity is below its peak — but **only** when the entry's signal score is at least `MinSignalStrengthForLot` (default 8.0). The score is a gate for these steps, not a separate lot boost. _Guardrails:_ capped at `MaxEquityDropLotSteps` total steps, and **disabled** while in a post-loss cooldown or while the basket is in floating loss — so size never scales up while actively bleeding.
 
 ### Dashboard & Alerts
 
 - **On-Chart Dashboard**: Display of Signal Scores, Equity, Drawdown, hedge-chain usage and Statistics (refreshed once per second; hidden in non-visual backtests). Statistics count one trade per closed position (partial closes summed, entry commission included) and show **average win / average loss, expectancy per trade and profit factor** — the numbers that decide profitability, which a high win rate alone can hide.
-  - **Lot**: the lot the next entry would use and what it risks at the stop, or `NONE` with the reason when risk sizing can't fit even the broker's minimum lot (the status then reads _No Entries (Account Too Small)_ and the Experts tab gets a `[RISK SIZING]` warning at start-up and hourly, even with logging off).
+  - **Lot**: the lot the next entry would use and what it risks at the stop. It turns orange when the broker's minimum lot risks more than `RiskPerTradePct` but is still traded (within `MaxRiskPerTradePct`), and reads `NONE` with the reason when even the minimum lot is over that cap (the status then reads _No Entries (Account Too Small)_ and the Experts tab gets a `[RISK SIZING]` warning at start-up and hourly, even with logging off).
   - **BUY / SELL SCORE**: the live score (closed bars blended with the forming one). Below it, **Entry** is what the next bar's entry decision actually uses: the closed-bar score after the losing-position penalty against the effective minimum, with each boost listed (consecutive candles, drawdown).
   - **Ready / Blocked**: the first gate that currently stops a new trade that way, e.g. _needs a D1 uptrend_, _score 4.80 below 5.00_, _spread 620 pts > cap 500_, _2 positions open (max 2)_, _loss cooldown_ or _account too small_. Entries are decided once per new bar.
 - **Discord Integration**: Sends alerts to Discord via Webhook for:
@@ -235,7 +236,7 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 
 ## Settings Profile
 
-`settings/default.set` is the only bundled profile. It holds the same values as the EA's built-in input defaults, so attaching the EA without loading anything gives the same setup. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
+Two profiles are bundled: `settings/default.set` and `settings/high-risk.set` (see [High-Risk Profile](#high-risk-profile)). `default.set` holds the same values as the EA's built-in input defaults, so attaching the EA without loading anything gives the same setup. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
 
 | default | |
 |---|---|
@@ -246,7 +247,20 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 | Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
 | Hedge chain | Off |
-| Account | **Standard account: $2,000 or more** (0.01 lot risks $20, about 1%; below about $1,600 the EA opens no new trades). **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%). A standard account under $2,000 can't trade the profile safely: the broker's minimum lot already risks more than 1.25% |
+| Account | **Standard account: $2,000 or more recommended** (0.01 lot risks $20, about 1%). Below about $1,600 the 0.01 minimum lot risks more than 1.25%: the EA still trades it down to about $400 (up to 5% per trade, `MaxRiskPerTradePct`, shown in orange on the dashboard) and opens nothing below that. **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%) |
+
+### High-Risk Profile
+
+`settings/high-risk.set` uses the default rules with twice the risk per trade. Only two inputs differ: `RiskPerTradePct` 2.5 (0.02 lot on $2,000, dropping to 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more than 2.5% and is traded down to about $400, the same 5% cap as the default) and `MaxLotSize` 0.10 (so a $100 cent account can trade 0.10 lot). Use it on **M5**.
+
+| M5, $2,000 per month | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Max DD |
+|---|---|---|---|---|---|---|---|---|---|
+| `default.set` (1.25%) | -11.6% | -13.9% | +6.2% | +66.2% | +83.3% | +130.2% | 27/57 | -5.7% | 20.0% |
+| `high-risk.set` (2.5%) | -15.1% | -7.9% | -4.7% | +97.4% | +176.4% | **+246.1%** | 30/57 | **-16.4%** | **36.3%** |
+
+Monthly reports with every balance graph, M1 and M5: [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +176.4%, M1 +4.0%) and [`reports/high-risk-2025`](reports/high-risk-2025/summary.md) (M5 +97.4%, M1 +78.3%); the default profile's are [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) and [`reports/default-2025`](reports/default-2025/summary.md).
+
+Doubling the risk doubles the size of the edge, not the edge itself: the return per unit of drawdown stays the same, and the profile still loses when gold moves sideways. Higher risk (3.75% and 5%) returned more but with 52-64% drawdowns. A frequent-trading M1 variant (entries during the bar, up to 4 positions $1.50 apart, a faster trend score) was tested and rejected: at 2.5% risk it lost up to 60% in a single month.
 
 > **Brokers with other quote decimals**: point values are written for a 3-digit gold quote (0.001), and `PointInputDigits` (default 3) rescales them to the symbol's own decimals so every distance keeps the same price meaning. Where gold is quoted with 2 decimals, 20000 points become 2000, still a $20 move, instead of a $200 stop with 10× the risk. This covers `SLValue`, `TPValue`, `TrailingDistanceValue` and `RRRiskValue` when their type is Points, plus `ZonePoints` and `MaxSpreadPoints`. The EA prints a `[POINTS]` line at start-up when it rescales. Set `PointInputDigits = 0` to use point values exactly as typed (for example on forex, where your own values are written for that symbol).
 

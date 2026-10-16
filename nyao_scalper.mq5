@@ -228,6 +228,7 @@ input double HedgeTrailATR = 1.0;                         // Graduated Hedge Tra
 
 input group "🧮 Dynamic Lot Sizing Settings"
 input double RiskPerTradePct = 1.25;                      // Risk-Based Lot: % Equity Lost at SL (ATR/Points SL only; 0 = Off, Use BaseLotSize)
+input double MaxRiskPerTradePct = 5.0;                    // Risk-Based Lot: Still Trade Min Lot up to this % at SL (0 = Skip Instead)
 input bool EnableDynamicLots = false;                     // Enable Dynamic Lot Sizing
 input double EquityDropPercent = 5.0;                     // Equity Drop % per Lot Step
 input int MaxEquityDropLotSteps = 2;                      // Max Drawdown-Based Lot Steps (0 = Unlimited)
@@ -682,9 +683,10 @@ int InitializeEA()
         Print("[POINTS] Point inputs are written for ", PointInputDigits, "-decimal quotes and ", _Symbol, " has ", _Digits,
               " decimals: point values x", DoubleToString(PointScale(), 4), " (same price distances, e.g. SL ",
               DoubleToString(GetSLPoints(BaseLotSize), 0), " pts = ", DoubleToString(GetSLPoints(BaseLotSize) * _Point, _Digits), ")");
-    if(HedgeMaxChainLossSL < 0 || TrendFlipExitScore < 0 || TrendFlipExitScore > 10 || CheckpointBreakEvenPct < 0)
+    if(HedgeMaxChainLossSL < 0 || TrendFlipExitScore < 0 || TrendFlipExitScore > 10 || CheckpointBreakEvenPct < 0 ||
+       MaxRiskPerTradePct < 0)
     {
-        Alert("ERROR: HedgeMaxChainLossSL and CheckpointBreakEvenPct must be >= 0, TrendFlipExitScore 0-10");
+        Alert("ERROR: HedgeMaxChainLossSL, CheckpointBreakEvenPct and MaxRiskPerTradePct must be >= 0, TrendFlipExitScore 0-10");
         return(INIT_PARAMETERS_INCORRECT);
     }
     if(EnableLossManagement && MaxAdverseATR <= 0)
@@ -936,13 +938,17 @@ int InitializeEA()
     Print(EA_TITLE, " Initialized Successfully");
     Print("+-----------------------------------------+");
 
-    // An account too small for RiskPerTradePct can't open anything with a fixed-distance stop: say so now
+    // An account too small for RiskPerTradePct trades the minimum lot at a higher risk, or (above
+    // MaxRiskPerTradePct) can't open anything with a fixed-distance stop: say so now
     if(RiskSizingApplies())
     {
         double slPts = GetSLPoints(BaseLotSize);
         double lossAtMinLot, riskMoney;
-        if(slPts > 0 && RiskSizedLot(slPts * (1 + CheckpointSkipsFor(slPts)), lossAtMinLot, riskMoney) == 0)
+        double sized = (slPts > 0) ? RiskSizedLot(slPts * (1 + CheckpointSkipsFor(slPts)), lossAtMinLot, riskMoney) : -1;
+        if(sized == 0)
             WarnRiskBlocksEntries(lossAtMinLot, riskMoney);
+        else if(sized > 0 && lossAtMinLot > riskMoney)
+            NoteRiskAboveBudget(lossAtMinLot, riskMoney);
     }
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
@@ -5878,10 +5884,12 @@ ENUM_ORDER_TYPE_FILLING GetFillingMode()
 // | Only meaningful when the SL distance does not depend on the lot  |
 // | (ATR or Points units, or R:R in ATR/Points) - with a $ or %-of-  |
 // | equity SL the risk is already fixed by the SL itself, so the lot  |
-// | is left unchanged. Returns false (= skip the entry) when even the|
-// | broker's minimum lot would lose more than the allowed risk: with |
-// | volatility-scaled stops that is how wild sessions are sat out    |
-// | instead of being traded with oversized risk.                     |
+// | is left unchanged. When even the broker's minimum lot loses more |
+// | than the allowed risk, the minimum lot is still traded while its |
+// | loss stays within MaxRiskPerTradePct (small accounts, flagged on |
+// | the dashboard and in the log); above that cap the entry is       |
+// | skipped - with volatility-scaled stops that is how wild sessions |
+// | are sat out instead of being traded with oversized risk.         |
 // +------------------------------------------------------------------+
 bool RiskSizingApplies()
 {
@@ -5891,9 +5899,10 @@ bool RiskSizingApplies()
         : (SLInputType == INPUT_ATR || SLInputType == INPUT_POINTS);
 }
 
-// The lot RiskPerTradePct allows at this SL distance, without side effects: 0 = even the broker's
-// minimum lot loses more, -1 = symbol data not ready (can't judge). lossAtMinLot / riskMoney are
-// what the minimum lot loses at the SL and the allowed loss.
+// The lot RiskPerTradePct allows at this SL distance, without side effects: the minimum lot when it
+// loses more than RiskPerTradePct but no more than MaxRiskPerTradePct (lossAtMinLot > riskMoney),
+// 0 = even the minimum lot loses more than that cap, -1 = symbol data not ready (can't judge).
+// lossAtMinLot / riskMoney are what the minimum lot loses at the SL and the RiskPerTradePct loss.
 double RiskSizedLot(double slPoints, double &lossAtMinLot, double &riskMoney)
 {
     lossAtMinLot = 0; riskMoney = 0;
@@ -5906,9 +5915,13 @@ double RiskSizedLot(double slPoints, double &lossAtMinLot, double &riskMoney)
     riskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * RiskPerTradePct / 100.0;
     lossAtMinLot = minLot * moneyPerLotAtSL;
     double riskLot = FloorToVolumeStep(riskMoney / moneyPerLotAtSL);
-    if(riskLot < minLot) return 0;
+    if(riskLot < minLot)
+        return (lossAtMinLot <= AccountInfoDouble(ACCOUNT_EQUITY) * MaxRiskPerTradePct / 100.0 + 1e-9) ? minLot : 0;
     return MathMin(riskLot, MathMin(MaxLotSize, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX)));
 }
+
+// The highest % one trade may lose: the cap a minimum-lot trade on a small account may reach
+double MaxTradeRiskPct() { return MathMax(RiskPerTradePct, MaxRiskPerTradePct); }
 
 // With a fixed-distance stop a too-small account can never trade - that must be visible even
 // with EnableLogging off: printed at start-up and at most once an hour while it lasts
@@ -5920,10 +5933,26 @@ void WarnRiskBlocksEntries(double lossAtMinLot, double riskMoney)
     lastWarn = now;
     double equity = AccountInfoDouble(ACCOUNT_EQUITY);
     PrintFormat("[RISK SIZING] No new trades: the minimum lot %.2f would lose $%.2f at the stop = %.2f%% of equity, "
-                "but RiskPerTradePct allows %.2f%% ($%.2f). Needs about $%.0f equity (or a cent account), "
-                "or set RiskPerTradePct = 0 to trade a fixed BaseLotSize.",
+                "more than RiskPerTradePct %.2f%% ($%.2f) and MaxRiskPerTradePct %.2f%%. Needs about $%.0f equity "
+                "(or a cent account), or set RiskPerTradePct = 0 to trade a fixed BaseLotSize.",
                 SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), lossAtMinLot, equity > 0 ? 100.0 * lossAtMinLot / equity : 0,
-                RiskPerTradePct, riskMoney, lossAtMinLot / (RiskPerTradePct / 100.0));
+                RiskPerTradePct, riskMoney, MaxRiskPerTradePct, lossAtMinLot / (MaxTradeRiskPct() / 100.0));
+}
+
+// The minimum lot is traded above RiskPerTradePct (within MaxRiskPerTradePct): always printed, at
+// start-up and at most once a day while it lasts, so the higher risk is never a surprise
+void NoteRiskAboveBudget(double lossAtMinLot, double riskMoney)
+{
+    static datetime lastNote = 0;
+    datetime now = TimeCurrent();
+    if(lastNote != 0 && now - lastNote < 86400) return;
+    lastNote = now;
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    PrintFormat("[RISK SIZING] Small account: the minimum lot %.2f loses $%.2f at the stop = %.2f%% of equity, above "
+                "RiskPerTradePct %.2f%% ($%.2f). Trading it anyway (MaxRiskPerTradePct allows up to %.2f%%); "
+                "about $%.0f equity brings each trade back to %.2f%%.",
+                SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), lossAtMinLot, equity > 0 ? 100.0 * lossAtMinLot / equity : 0,
+                RiskPerTradePct, riskMoney, MaxRiskPerTradePct, lossAtMinLot / (RiskPerTradePct / 100.0), RiskPerTradePct);
 }
 
 bool ApplyRiskSizing(double &lot, double slPoints)
@@ -5936,11 +5965,12 @@ bool ApplyRiskSizing(double &lot, double slPoints)
     if(sized == 0)
     {
         LogPrint("[RISK SIZING] Entry skipped: min lot ", SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), " would risk $",
-                 DoubleToString(lossAtMinLot, 2), " > ", DoubleToString(RiskPerTradePct, 2),
-                 "% of equity ($", DoubleToString(riskMoney, 2), ")");
+                 DoubleToString(lossAtMinLot, 2), " > ", DoubleToString(MaxTradeRiskPct(), 2),
+                 "% of equity ($", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY) * MaxTradeRiskPct() / 100.0, 2), ")");
         WarnRiskBlocksEntries(lossAtMinLot, riskMoney);
         return false;
     }
+    if(lossAtMinLot > riskMoney) NoteRiskAboveBudget(lossAtMinLot, riskMoney);
     lot = sized;
     return true;
 }
@@ -8195,6 +8225,7 @@ void UpdateDashboard()
 
     // Lot the next entry would use (risk sizing), or why none can be opened
     string lotText, riskBlock = "";
+    bool riskHigh = false;                                               // min lot traded above RiskPerTradePct
     double dashEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     double dashSl = GetSLPoints(BaseLotSize);
     if(RiskSizingApplies() && dashSl > 0)
@@ -8207,9 +8238,15 @@ void UpdateDashboard()
             lotText = "Lot: waiting for symbol data";
         else if(lot == 0)
         {
-            riskBlock = StringFormat("account too small: %.2f lot risks %.1f%% > %.2f%%", minLot, pctAtMin, RiskPerTradePct);
+            riskBlock = StringFormat("account too small: %.2f lot risks %.1f%% > %.2f%%", minLot, pctAtMin, MaxTradeRiskPct());
             lotText = StringFormat("Lot: NONE - %.2f lot risks $%.2f (%.1f%%) > %.2f%%, needs ~$%.0f",
-                                   minLot, lossAtMinLot, pctAtMin, RiskPerTradePct, lossAtMinLot / (RiskPerTradePct / 100.0));
+                                   minLot, lossAtMinLot, pctAtMin, MaxTradeRiskPct(), lossAtMinLot / (MaxTradeRiskPct() / 100.0));
+        }
+        else if(lossAtMinLot > riskMoney)
+        {
+            riskHigh = true;
+            lotText = StringFormat("Lot: %.2f (risks $%.2f = %.2f%%, above %.2f%%; max %.2f%%)", lot, lossAtMinLot,
+                                   pctAtMin, RiskPerTradePct, MaxRiskPerTradePct);
         }
         else
             lotText = StringFormat("Lot: %.2f (risks $%.2f = %.2f%% at the stop)", lot, lossAtMinLot / minLot * lot,
@@ -8301,7 +8338,7 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_SigHead", "SIGNAL STRENGTH:", startX, currentY, headersize, colorHeader, true);
     currentY += lineHeight;
 
-    DrawDashboardLabel("NyaoDash_Lot", lotText, startX, currentY, detailsSize, riskBlock != "" ? clrOrange : colorText);
+    DrawDashboardLabel("NyaoDash_Lot", lotText, startX, currentY, detailsSize, (riskBlock != "" || riskHigh) ? clrOrange : colorText);
     currentY += lineHeight;
 
     // Buy Row

@@ -12,19 +12,19 @@
 ;   Stop  : fixed $20 move (20000 points on 3-decimal quotes).
 ;   Size  : the largest lot that loses at most 1.25% at the stop (RiskPerTradePct), max 0.05 lot:
 ;           0.01 lot on $2,000 (about 1%), 0.05 lot on a $100 cent account (10,000 cents).
+;           When even 0.01 lot risks more than 1.25%, it is still traded up to 5% (MaxRiskPerTradePct).
 ;   Exit  : +$20 is a checkpoint - score still agrees -> keep the trade, lock 50% of the move,
 ;           next checkpoint $20 further; otherwise close.
 ;   Trail : once +$10 in profit (50% of the checkpoint distance), the SL follows the price
 ;           $20 behind (100% of it) and never moves back.
 ;   Flip  : a losing trade is closed early once the opposite score reaches 6 (the trend turned).
 ;   Pause : after 4 losses in a row, paper-trade until a paper win, then trade again.
-; Backtest v48.0, $2,000 per month (each month a fresh run), 1.25% risk sizing (= 0.01 lot),
+; Backtest v49.0, $2,000 per month (each month a fresh run), 1.25% risk sizing (= 0.01 lot),
 ; sums of monthly returns:
 ;   Jan-Sep 2026, real ticks (reports/default-2026-real-ticks):
 ;     M5: +83.3%, 6/9 months up, worst month -3.1%, max DD 20.0%, PF 1.20
 ;         (Jan-Jun +85.8%, Jul-Sep -2.5%)
-;     M1: +8.9%, 5/9 months up, worst month -20.1%, max DD 27.5%, PF 1.02
-;         (two M1 months fell to the ~$1,600 floor and stopped trading instead of recovering)
+;     M1: +19.5%, 5/9 months up, worst month -17.8%, max DD 32.3%, PF 1.04
 ;   2025, ticks generated from 1-minute bars (reports/default-2025):
 ;     M5: +66.2%, 10/12 months up, worst month -2.2%, max DD 11.7%, PF 1.38
 ;     M1: +25.2%, 7/12 months up, worst month -3.9%, max DD 14.1%, PF 1.12
@@ -32,8 +32,9 @@
 ;   The profile makes its money when gold trends hard (2025-2026) and loses in sideways years.
 ;   It was designed on data that includes 2025-2026, so those years are not a blind test.
 ; Requirements / warnings:
-;   - Account: $2,000+ standard, or $100+ cent (balance in cents). On a standard account below
-;     about $1,600 the 0.01 minimum lot would risk more than 1.25%, so no new trades are opened.
+;   - Account: $2,000+ standard recommended, or $100+ cent (balance in cents). On a standard
+;     account below about $1,600 the 0.01 minimum lot risks more than 1.25%: it is still traded
+;     down to about $400 (up to 5% per trade, orange Lot line on the dashboard), nothing below.
 ;   - Needs a hedging account (up to 2 positions open).
 ;   - Prefer M5: on M1 the same rules trade more often with deeper drawdowns.
 ; +-----------------------------------------+
@@ -177,6 +178,7 @@ HedgeClearRootSL=true
 HedgeTrailATR=1.0
 ; 🧮 Dynamic Lot Sizing Settings
 RiskPerTradePct=1.25
+MaxRiskPerTradePct=5.0
 EnableDynamicLots=false
 EquityDropPercent=5.0
 MaxEquityDropLotSteps=2
