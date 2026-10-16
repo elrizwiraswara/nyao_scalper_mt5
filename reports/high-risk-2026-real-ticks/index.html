@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>High-risk profile - XAUUSDm M1 vs M5, real ticks Jan-Sep 2026</title><meta name="theme-color" content="#121314">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg:#121314;--surface:#18191b;--surface-2:#1f2022;--text:#f5f5f5;--muted:#a9abae;--faint:#75777c;
+--border:#26282a;--border-strong:#34373a;--accent:#ffb547;--accent-hover:#ffc670;--success:#4ade80;--danger:#ff7b72;
+--radius-ui:6px;--frame:1360px;--pad:clamp(20px,4vw,48px);--gutter:16px;
+--sans:'Geist',system-ui,sans-serif;--mono:'Geist Mono',ui-monospace,'Cascadia Code',Menlo,Consolas,monospace}
+@media (max-width:560px){:root{--pad:16px;--gutter:10px}}
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--bg);-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--text);text-decoration:none}a:hover{color:var(--accent)}
+img{max-width:100%;height:auto}
+::selection{background:var(--accent);color:var(--bg)}
+h1,h2,h3{margin:0 0 .5em;line-height:1.15;font-weight:600;letter-spacing:-.02em}
+.mono{font-family:var(--mono)}.muted{color:var(--muted)}.faint{color:var(--faint)}
+.pos{color:var(--success)}.neg{color:var(--danger)}
+/* Frame system: full-width bands, a framed column with corner squares, cells that share their lines */
+.band{position:relative;border-top:1px solid var(--border)}
+.frame{position:relative;width:min(var(--frame),calc(100% - 2*var(--gutter)));margin-inline:auto;border-inline:1px solid var(--border)}
+.band>.frame::before,.band>.frame::after{content:'';position:absolute;top:-5px;z-index:2;width:9px;height:9px;border:1px solid var(--border-strong);background:var(--bg)}
+.band>.frame::before{left:-5px}.band>.frame::after{right:-5px}
+.spacer>.frame{height:clamp(16px,3.2vw,56px)}
+main>.spacer:first-child{border-top:0}main>.spacer:first-child>.frame::before,main>.spacer:first-child>.frame::after{display:none}
+.cells{display:grid;margin-bottom:-1px}
+.cells>*{position:relative}
+.cells>*::before,.cells>*::after{content:'';position:absolute;z-index:1;background:var(--border);pointer-events:none}
+.cells>*::after{top:0;right:-1px;width:1px;height:calc(100% + 1px)}
+.cells>*::before{bottom:-1px;left:0;width:calc(100% + 1px);height:1px}
+.section-title{margin:0;padding:clamp(28px,4vw,40px) var(--pad);font:500 clamp(18px,2.2vw,22px)/1.2 var(--mono);letter-spacing:-.01em}
+.slashes{color:var(--accent);font-weight:400}
+.tag{display:inline-block;padding:2px 8px;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface);color:var(--muted);font:11.5px/1.6 var(--mono);white-space:nowrap}
+/* Header and footer */
+.site-header{position:sticky;top:0;z-index:20;border-bottom:1px solid var(--border);background:rgb(18 19 20/.85);backdrop-filter:blur(12px)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 24px;width:min(var(--frame),calc(100% - 2*var(--gutter)));min-height:72px;margin-inline:auto}
+.brand{display:inline-flex;align-items:center;gap:12px;font-weight:600;letter-spacing:-.02em}
+.brand .tag{font-weight:400}
+.links{display:flex;gap:20px;font:13.5px var(--mono)}.links a{color:var(--muted)}.links a:hover{color:var(--accent)}
+.site-footer .bar{padding-block:18px;color:var(--faint);font:13px var(--mono)}
+.site-footer a{color:var(--muted)}
+/* Intro */
+.intro{padding:clamp(32px,6vw,64px) var(--pad);border-top:1px solid var(--border)}
+.intro h1{max-width:24ch;margin:0;font-size:clamp(32px,5vw,52px);line-height:1.05;letter-spacing:-.045em}
+.lead{max-width:64ch;margin:20px 0 0;color:var(--muted);font-size:18px}.lead b{color:var(--text);font-weight:600}
+/* Setup cells */
+.setup{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));border-top:1px solid var(--border)}
+.setup>div{padding:clamp(18px,2.4vw,28px) var(--pad)}
+.label{display:block;margin-bottom:8px;color:var(--faint);font:12px var(--mono);letter-spacing:.02em}
+.setup .value{font-size:15px;word-break:break-word}
+/* Summary cells */
+.summary{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));border-top:1px solid var(--border)}
+.summary>div{padding:clamp(24px,3vw,36px) var(--pad)}
+.big{display:block;margin:14px 0 2px;font-size:clamp(40px,5vw,56px);font-weight:600;line-height:1;letter-spacing:-.045em}
+.metrics{margin:22px 0 0;display:grid;gap:0}
+.metrics div{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-top:1px solid var(--border)}
+.metrics dt{color:var(--muted);font-size:14.5px}.metrics dd{margin:0;font:14px var(--mono);text-align:right}
+/* Table */
+.table-wrap{overflow-x:auto;border-top:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{padding:12px var(--pad);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+thead th{color:var(--faint);font:500 12px var(--mono);letter-spacing:.02em}
+tbody th{font:500 14px var(--mono)}
+tbody tr:hover{background:var(--surface)}
+td .ret{font:600 15px var(--mono)}td .sub{margin-left:10px;color:var(--faint);font:12.5px var(--mono)}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
+/* Graphs */
+.tf{margin:0;padding:18px var(--pad);border-top:1px solid var(--border);font:500 15px var(--mono)}
+.graphs{grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));border-top:1px solid var(--border)}
+.graphs figure{margin:0;padding:clamp(16px,2vw,24px)}
+.graphs figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-bottom:12px;font:13.5px var(--mono)}
+.graphs figcaption b{color:var(--text);font-weight:500}
+.graphs img{display:block;width:100%;border:1px solid var(--border);border-radius:var(--radius-ui);background:#fff}
+.note{padding:clamp(20px,3vw,28px) var(--pad);border-top:1px solid var(--border);color:var(--muted);font-size:14.5px}
+.note p{margin:0 0 .6em}.note p:last-child{margin:0}
+@media (max-width:640px){.links{display:none}}
+</style></head>
+<body>
+<header class="site-header"><div class="bar">
+<span class="brand">Nyao Scalper v50.0 <span class="tag">Backtest Report</span></span>
+<nav class="links" aria-label="Links"><a href="https://github.com/elrizwiraswara/nyao_scalper_mt5">GitHub &#8599;</a></nav>
+</div></header>
+<main>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+<section class="band"><div class="frame"><p class="section-title"><span class="slashes">//</span> Backtest Report</p><div class="intro"><h1>High-risk profile - XAUUSDm M1 vs M5, real ticks Jan-Sep 2026</h1><p class="lead"><b>Nyao Scalper v50.0</b> with <b>settings/high-risk.set</b> on XAUUSDm M1, M5, real ticks, 2026-01 to 2026-09. Each month is a separate run starting from the same deposit.</p></div></div></section>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+<section class="band"><div class="frame"><h2 class="section-title"><span class="slashes">//</span> Setup</h2><div class="cells setup"><div><span class="label">EA</span><span class="value">Nyao Scalper v50.0 (nyao_scalper.mq5)</span></div><div><span class="label">Settings</span><span class="value">settings/high-risk.set</span></div><div><span class="label">Git commit</span><span class="value">5894cd7</span></div><div><span class="label">Symbol / timeframes</span><span class="value">XAUUSDm / M1, M5</span></div><div><span class="label">Tick data</span><span class="value">Every tick based on real ticks</span></div><div><span class="label">Deposit / leverage</span><span class="value">2,000 USD / 1:500</span></div><div><span class="label">Runs</span><span class="value">One run per month, each starting from a fresh deposit</span></div><div><span class="label">Generated</span><span class="value">2026-10-16 21:09 with tools/backtest/nyao_backtest.py</span></div></div></div></section>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+<section class="band"><div class="frame"><h2 class="section-title"><span class="slashes">//</span> Summary</h2><div class="cells summary"><div><span class="tag">M1</span><span class="big pos">+4.0%</span><span class="muted">Total return (sum of runs)</span><dl class="metrics"><div><dt>Profitable runs</dt><dd>5 / 9</dd></div><div><dt>Best / worst run</dt><dd>+53.7% / -27.0%</dd></div><div><dt>Max drawdown</dt><dd>46.3%</dd></div><div><dt>Profit factor</dt><dd>1.00</dd></div><div><dt>Trades</dt><dd>1,416</dd></div><div><dt>Win rate</dt><dd>36%</dd></div><div><dt>Avg win / loss</dt><dd>$42.84 / -$23.95</dd></div><div><dt>Tick data</dt><dd>100% real ticks</dd></div></dl></div><div><span class="tag">M5</span><span class="big pos">+176.4%</span><span class="muted">Total return (sum of runs)</span><dl class="metrics"><div><dt>Profitable runs</dt><dd>5 / 9</dd></div><div><dt>Best / worst run</dt><dd>+101.7% / -16.1%</dd></div><div><dt>Max drawdown</dt><dd>36.3%</dd></div><div><dt>Profit factor</dt><dd>1.19</dd></div><div><dt>Trades</dt><dd>1,068</dd></div><div><dt>Win rate</dt><dd>44%</dd></div><div><dt>Avg win / loss</dt><dd>$46.56 / -$30.30</dd></div><div><dt>Tick data</dt><dd>100% real ticks</dd></div></dl></div></div></div></section>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+<section class="band"><div class="frame"><h2 class="section-title"><span class="slashes">//</span> Results per Run</h2><div class="table-wrap"><table><thead><tr><th>Run</th><th>M1</th><th>M5</th></tr></thead><tbody><tr><th>2026-01</th><td><span class="ret pos">+53.7%</span><span class="sub">DD 20% · 172 trades</span></td><td><span class="ret pos">+101.7%</span><span class="sub">DD 16% · 152 trades</span></td></tr><tr><th>2026-02</th><td><span class="ret neg">-27.0%</span><span class="sub">DD 46% · 259 trades</span></td><td><span class="ret neg">-14.3%</span><span class="sub">DD 35% · 189 trades</span></td></tr><tr><th>2026-03</th><td><span class="ret pos">+8.7%</span><span class="sub">DD 32% · 278 trades</span></td><td><span class="ret pos">+7.7%</span><span class="sub">DD 33% · 201 trades</span></td></tr><tr><th>2026-04</th><td><span class="ret neg">-23.8%</span><span class="sub">DD 41% · 131 trades</span></td><td><span class="ret neg">-16.1%</span><span class="sub">DD 36% · 84 trades</span></td></tr><tr><th>2026-05</th><td><span class="ret neg">-22.0%</span><span class="sub">DD 33% · 118 trades</span></td><td><span class="ret pos">+2.3%</span><span class="sub">DD 21% · 89 trades</span></td></tr><tr><th>2026-06</th><td><span class="ret pos">+13.2%</span><span class="sub">DD 24% · 165 trades</span></td><td><span class="ret pos">+96.7%</span><span class="sub">DD 20% · 141 trades</span></td></tr><tr><th>2026-07</th><td><span class="ret pos">+5.1%</span><span class="sub">DD 24% · 98 trades</span></td><td><span class="ret neg">-4.3%</span><span class="sub">DD 17% · 65 trades</span></td></tr><tr><th>2026-08</th><td><span class="ret neg">-6.0%</span><span class="sub">DD 22% · 120 trades</span></td><td><span class="ret pos">+4.0%</span><span class="sub">DD 19% · 92 trades</span></td></tr><tr><th>2026-09</th><td><span class="ret pos">+2.1%</span><span class="sub">DD 17% · 75 trades</span></td><td><span class="ret neg">-1.2%</span><span class="sub">DD 23% · 55 trades</span></td></tr></tbody></table></div></div></section>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+<section class="band"><div class="frame"><h2 class="section-title"><span class="slashes">//</span> Balance Graphs</h2><h3 class="tf">M1</h3><div class="cells graphs"><figure><figcaption><b>2026-01</b><span class="pos">+53.7%</span><span class="faint">DD 20% · 172 trades</span></figcaption><img src="graphs/M1_2026-01.png" alt="M1 2026-01 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-02</b><span class="neg">-27.0%</span><span class="faint">DD 46% · 259 trades</span></figcaption><img src="graphs/M1_2026-02.png" alt="M1 2026-02 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-03</b><span class="pos">+8.7%</span><span class="faint">DD 32% · 278 trades</span></figcaption><img src="graphs/M1_2026-03.png" alt="M1 2026-03 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-04</b><span class="neg">-23.8%</span><span class="faint">DD 41% · 131 trades</span></figcaption><img src="graphs/M1_2026-04.png" alt="M1 2026-04 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-05</b><span class="neg">-22.0%</span><span class="faint">DD 33% · 118 trades</span></figcaption><img src="graphs/M1_2026-05.png" alt="M1 2026-05 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-06</b><span class="pos">+13.2%</span><span class="faint">DD 24% · 165 trades</span></figcaption><img src="graphs/M1_2026-06.png" alt="M1 2026-06 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-07</b><span class="pos">+5.1%</span><span class="faint">DD 24% · 98 trades</span></figcaption><img src="graphs/M1_2026-07.png" alt="M1 2026-07 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-08</b><span class="neg">-6.0%</span><span class="faint">DD 22% · 120 trades</span></figcaption><img src="graphs/M1_2026-08.png" alt="M1 2026-08 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-09</b><span class="pos">+2.1%</span><span class="faint">DD 17% · 75 trades</span></figcaption><img src="graphs/M1_2026-09.png" alt="M1 2026-09 balance graph" loading="lazy"></figure></div><h3 class="tf">M5</h3><div class="cells graphs"><figure><figcaption><b>2026-01</b><span class="pos">+101.7%</span><span class="faint">DD 16% · 152 trades</span></figcaption><img src="graphs/M5_2026-01.png" alt="M5 2026-01 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-02</b><span class="neg">-14.3%</span><span class="faint">DD 35% · 189 trades</span></figcaption><img src="graphs/M5_2026-02.png" alt="M5 2026-02 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-03</b><span class="pos">+7.7%</span><span class="faint">DD 33% · 201 trades</span></figcaption><img src="graphs/M5_2026-03.png" alt="M5 2026-03 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-04</b><span class="neg">-16.1%</span><span class="faint">DD 36% · 84 trades</span></figcaption><img src="graphs/M5_2026-04.png" alt="M5 2026-04 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-05</b><span class="pos">+2.3%</span><span class="faint">DD 21% · 89 trades</span></figcaption><img src="graphs/M5_2026-05.png" alt="M5 2026-05 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-06</b><span class="pos">+96.7%</span><span class="faint">DD 20% · 141 trades</span></figcaption><img src="graphs/M5_2026-06.png" alt="M5 2026-06 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-07</b><span class="neg">-4.3%</span><span class="faint">DD 17% · 65 trades</span></figcaption><img src="graphs/M5_2026-07.png" alt="M5 2026-07 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-08</b><span class="pos">+4.0%</span><span class="faint">DD 19% · 92 trades</span></figcaption><img src="graphs/M5_2026-08.png" alt="M5 2026-08 balance graph" loading="lazy"></figure><figure><figcaption><b>2026-09</b><span class="neg">-1.2%</span><span class="faint">DD 23% · 55 trades</span></figcaption><img src="graphs/M5_2026-09.png" alt="M5 2026-09 balance graph" loading="lazy"></figure></div></div></section>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+<section class="band"><div class="frame"><h2 class="section-title"><span class="slashes">//</span> Notes</h2><div class="note"><p>Total return is the sum of the monthly returns: each month starts from the same deposit, so it is not compounded.</p><p>Backtests are not a guarantee of future results. Trading Forex and CFDs involves significant risk; forward-test on a demo account before using real money.</p></div></div></section>
+<div class="band spacer" aria-hidden="true"><div class="frame"></div></div>
+</main>
+<footer class="band site-footer"><div class="bar"><span>Generated with tools/backtest/nyao_backtest.py</span><a href="https://github.com/elrizwiraswara/nyao_scalper_mt5">github.com/elrizwiraswara/nyao_scalper_mt5</a></div></footer>
+</body></html>

@@ -1,0 +1,140 @@
+{
+  "name": "high-risk-2026-real-ticks",
+  "title": "High-risk profile - XAUUSDm M1 vs M5, real ticks Jan-Sep 2026",
+  "ea": "nyao_scalper.mq5",
+  "set": "settings/high-risk.set",
+  "version": "5894cd7",
+  "ea_version": "50.0",
+  "symbol": "XAUUSDm",
+  "periods": [
+    "M1",
+    "M5"
+  ],
+  "windows": [
+    "2026-01",
+    "2026-02",
+    "2026-03",
+    "2026-04",
+    "2026-05",
+    "2026-06",
+    "2026-07",
+    "2026-08",
+    "2026-09"
+  ],
+  "split": "monthly",
+  "model": "real",
+  "deposit": 2000,
+  "currency": "USD",
+  "leverage": 500,
+  "generated": "2026-10-16 21:09",
+  "runs": [
+    {
+      "period": "M1",
+      "window": "2026-01",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-01",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-02",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-02",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-03",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-03",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-04",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-04",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-05",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-05",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-06",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-06",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-07",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-07",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-08",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-08",
+      "status": "done"
+    },
+    {
+      "period": "M1",
+      "window": "2026-09",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M1_2026-09",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-01",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-01",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-02",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-02",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-03",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-03",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-04",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-04",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-05",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-05",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-06",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-06",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-07",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-07",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-08",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-08",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2026-09",
+      "report": "nyao_bt_high-risk-2026-real-ticks_M5_2026-09",
+      "status": "done"
+    }
+  ]
+}

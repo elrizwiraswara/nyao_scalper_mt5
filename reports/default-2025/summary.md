@@ -2,14 +2,14 @@
 
 | Setting | Value |
 |---|---|
-| EA | Nyao Scalper v48.0 (`nyao_scalper.mq5`) |
+| EA | Nyao Scalper v50.0 (`nyao_scalper.mq5`) |
 | Settings | `settings/default.set` |
-| Git commit | 84ebb10 |
+| Git commit | 5894cd7 |
 | Symbol / timeframes | XAUUSDm / M1, M5 |
 | Tick data | Generated from 1-minute bars (no real tick history for this period) |
 | Deposit / leverage | 2,000 USD / 1:500 |
 | Runs | One run per month, each starting from a fresh deposit |
-| Generated | 2026-10-16 10:10 with `tools/backtest/nyao_backtest.py` |
+| Generated | 2026-10-16 21:00 with `tools/backtest/nyao_backtest.py` |
 
 ## Summary
 

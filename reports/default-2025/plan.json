@@ -3,8 +3,8 @@
   "title": "Default profile - XAUUSDm M1 vs M5, Jan-Dec 2025",
   "ea": "nyao_scalper.mq5",
   "set": "settings/default.set",
-  "version": "84ebb10",
-  "ea_version": "48.0",
+  "version": "5894cd7",
+  "ea_version": "50.0",
   "symbol": "XAUUSDm",
   "periods": [
     "M1",
@@ -29,7 +29,7 @@
   "deposit": 2000,
   "currency": "USD",
   "leverage": 500,
-  "generated": "2026-10-16 10:10",
+  "generated": "2026-10-16 21:00",
   "runs": [
     {
       "period": "M1",
