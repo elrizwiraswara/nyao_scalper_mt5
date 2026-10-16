@@ -101,6 +101,9 @@ Chain state is saved to disk (see **Restart-Safe State**), so a restart doesn't 
 ### Dashboard & Alerts
 
 - **On-Chart Dashboard**: Display of Signal Scores, Equity, Drawdown, hedge-chain usage and Statistics (refreshed once per second; hidden in non-visual backtests). Statistics count one trade per closed position (partial closes summed, entry commission included) and show **average win / average loss, expectancy per trade and profit factor** — the numbers that decide profitability, which a high win rate alone can hide.
+  - **Lot**: the lot the next entry would use and what it risks at the stop, or `NONE` with the reason when risk sizing can't fit even the broker's minimum lot (the status then reads _No Entries (Account Too Small)_ and the Experts tab gets a `[RISK SIZING]` warning at start-up and hourly, even with logging off).
+  - **BUY / SELL SCORE**: the live score (closed bars blended with the forming one). Below it, **Entry** is what the next bar's entry decision actually uses: the closed-bar score after the losing-position penalty against the effective minimum, with each boost listed (consecutive candles, drawdown).
+  - **Ready / Blocked**: the first gate that currently stops a new trade that way, e.g. _needs a D1 uptrend_, _score 4.80 below 5.00_, _spread 620 pts > cap 500_, _2 positions open (max 2)_, _loss cooldown_ or _account too small_. Entries are decided once per new bar.
 - **Discord Integration**: Sends alerts to Discord via Webhook for:
   - Trade Open/Close
   - Equity Milestones

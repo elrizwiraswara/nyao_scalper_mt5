@@ -30,8 +30,8 @@
 #include <Controls\Button.mqh>
 #include <Controls\Label.mqh>
 
-// Print wrapper with logging control
-#define LogPrint if(EnableLogging) Print
+// Print wrapper with logging control (quietLog mutes it while the dashboard re-runs the entry checks)
+#define LogPrint if(EnableLogging && !quietLog) Print
 
 enum ENUM_INPUT_TYPE
 {
@@ -311,6 +311,7 @@ input bool EnableLogging = false;                         // Enable EA Logging (
 // +------------------------------------------------------------------+
 // | Global Variables                                                 |
 // +------------------------------------------------------------------+
+bool quietLog = false;                                    // true while the dashboard evaluates entry gates
 // EMBEDDED PASSWORD - Change this to your desired password (leave empty to disable)
 const string EA_PASSWORD = "";
 
@@ -934,6 +935,15 @@ int InitializeEA()
     Print("+-----------------------------------------+");
     Print(EA_TITLE, " Initialized Successfully");
     Print("+-----------------------------------------+");
+
+    // An account too small for RiskPerTradePct can't open anything with a fixed-distance stop: say so now
+    if(RiskSizingApplies())
+    {
+        double slPts = GetSLPoints(BaseLotSize);
+        double lossAtMinLot, riskMoney;
+        if(slPts > 0 && RiskSizedLot(slPts * (1 + CheckpointSkipsFor(slPts)), lossAtMinLot, riskMoney) == 0)
+            WarnRiskBlocksEntries(lossAtMinLot, riskMoney);
+    }
 
     if(EnableDiscordAlerts) CheckDiscordAlert();
     
@@ -1648,171 +1658,111 @@ void CheckForTradingSignal()
     }
 }
 
-// Buy Signal
-double BuySignal()
-{   
-    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    
-    // Check strict conditions (limits & distance) first
-    if(!CheckEntryConditions(POSITION_TYPE_BUY, currentPrice)) return 0;
-
-    // Calculate smoothed signal strength (entry mode: closed candles only in new-bar mode)
-    SignalStrength strength = GetSignalStrength(ORDER_TYPE_BUY, true);
-
-    // DEAD-MARKET BLOCK: last closed candle's ATR collapsed below MinVolRatioToTrade
-    if(strength.deadMarket) return 0;
-
-    double adjustedScore = strength.finalScore;
-    double adjustedThreshold = MinBuySignalScore;
-
-    // CONSECUTIVE CANDLE THRESHOLD ESCALATION
-    // When previous candles opened buy positions, raise the threshold
-    // to prevent chasing moves and opening at the peak
-    if(consecutiveBuyCandles > 0 && ConsecutiveCandleThresholdBoost > 0)
-    {
-        int boostCount = consecutiveBuyCandles;
-        if(MaxConsecutiveCandleBoosts > 0 && boostCount > MaxConsecutiveCandleBoosts)
-            boostCount = MaxConsecutiveCandleBoosts;
-        
-        double candleBoost = boostCount * ConsecutiveCandleThresholdBoost;
-        adjustedThreshold += candleBoost;
-        LogPrint("[CANDLE ESCALATION] Buy threshold boosted by ", DoubleToString(candleBoost, 1),
-                 " (", boostCount, " consecutive trading candles). Threshold: ", 
-                 DoubleToString(adjustedThreshold, 1));
-    }
-
-    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
-    if(EnableSignalDampening)
-    {
-        // A. Score Penalty: reduce score based on losing same-direction positions
-        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_BUY);
-        if(lossState.losingCount > 0)
-        {
-            double penalty = lossState.losingCount * LosingPosScorePenalty;
-            adjustedScore -= penalty;
-            LogPrint("[DAMPENED] Buy score reduced by ", DoubleToString(penalty, 1), 
-                     " (", lossState.losingCount, " losing buys). Raw: ", 
-                     DoubleToString(strength.finalScore, 1), " -> Adjusted: ", 
-                     DoubleToString(adjustedScore, 1));
-        }
-        
-        // B. Drawdown Gate: raise threshold when account in drawdown
-        if(peakEquity > 0)
-        {
-            double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-            double drawdownPct = ((peakEquity - currentEquity) / peakEquity) * 100.0;
-            
-            if(drawdownPct >= DrawdownThresholdPct)
-            {
-                adjustedThreshold += DrawdownScoreBoost;
-                LogPrint("[DRAWDOWN GATE] Equity drawdown ", DoubleToString(drawdownPct, 1), 
-                         "% >= ", DoubleToString(DrawdownThresholdPct, 1), 
-                         "%. Buy threshold raised to ", DoubleToString(adjustedThreshold, 1));
-            }
-        }
-    }
-
-    if (adjustedScore >= adjustedThreshold) 
-    {   
-        LogPrint("BUY SIGNAL RECEIVED (Score: ", DoubleToString(strength.finalScore, 1), 
-                 " | Adjusted: ", DoubleToString(adjustedScore, 1), 
-                 " / Threshold: ", DoubleToString(adjustedThreshold, 1), ")");
-        LogPrint("Details: Body=", DoubleToString(strength.bodySignal, _Digits),
-                 ", AvgBody=", DoubleToString(strength.avgBody, _Digits),
-                 ", Ratio=", DoubleToString(strength.ratio, 2),
-                 ", PenBody=", DoubleToString(strength.penaltyBody, 1),
-                 ", PenWick=", DoubleToString(strength.penaltyWick, 1));
-        LogPrint("Reasoning: ", strength.reasoning);
-        LogPrint("Price: ", currentPrice);
-
-        return adjustedScore;
-    }
-    
-    return 0;
-}
-
-// Sell Signal
-double SellSignal()
+// +------------------------------------------------------------------+
+// | Entry score vs. threshold - what a fresh entry is decided on     |
+// | Score: closed-candle signal strength minus LosingPosScorePenalty |
+// | per losing same-direction position. Threshold: the min score plus |
+// | the consecutive-candle and drawdown boosts. Shared by the entry  |
+// | signals and the dashboard so both show the same numbers.         |
+// +------------------------------------------------------------------+
+struct EntryScore
 {
-    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    
-    // Check strict conditions (limits & distance) first
-    if(!CheckEntryConditions(POSITION_TYPE_SELL, currentPrice)) return 0;
+    SignalStrength strength;                              // closed-candle (entry mode) strength
+    double score;                                         // after the losing-position penalty
+    double threshold;                                     // min score + boosts
+    double penalty;
+    double candleBoost;
+    double ddBoost;
+    double ddPct;
+    int candles;
+    int losing;
+};
 
-    // Calculate smoothed signal strength (entry mode: closed candles only in new-bar mode)
-    SignalStrength strength = GetSignalStrength(ORDER_TYPE_SELL, true);
+void ComputeEntryScore(bool isBuy, EntryScore &e)
+{
+    e.strength = GetSignalStrength(isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, true);
+    e.score = e.strength.finalScore;
+    e.threshold = isBuy ? MinBuySignalScore : MinSellSignalScore;
+    e.penalty = 0; e.candleBoost = 0; e.ddBoost = 0; e.ddPct = 0; e.candles = 0; e.losing = 0;
 
-    // DEAD-MARKET BLOCK: last closed candle's ATR collapsed below MinVolRatioToTrade
-    if(strength.deadMarket) return 0;
-
-    double adjustedScore = strength.finalScore;
-    double adjustedThreshold = MinSellSignalScore;
-
-    // CONSECUTIVE CANDLE THRESHOLD ESCALATION
-    // When previous candles opened sell positions, raise the threshold
-    // to prevent chasing moves and opening at the peak
-    if(consecutiveSellCandles > 0 && ConsecutiveCandleThresholdBoost > 0)
+    // CONSECUTIVE CANDLE THRESHOLD ESCALATION: when the previous candles opened positions this
+    // way, raise the threshold to prevent chasing moves and opening at the peak
+    int consecutive = isBuy ? consecutiveBuyCandles : consecutiveSellCandles;
+    if(consecutive > 0 && ConsecutiveCandleThresholdBoost > 0)
     {
-        int boostCount = consecutiveSellCandles;
-        if(MaxConsecutiveCandleBoosts > 0 && boostCount > MaxConsecutiveCandleBoosts)
-            boostCount = MaxConsecutiveCandleBoosts;
-        
-        double candleBoost = boostCount * ConsecutiveCandleThresholdBoost;
-        adjustedThreshold += candleBoost;
-        LogPrint("[CANDLE ESCALATION] Sell threshold boosted by ", DoubleToString(candleBoost, 1),
-                 " (", boostCount, " consecutive trading candles). Threshold: ", 
-                 DoubleToString(adjustedThreshold, 1));
+        e.candles = (MaxConsecutiveCandleBoosts > 0 && consecutive > MaxConsecutiveCandleBoosts) ? MaxConsecutiveCandleBoosts : consecutive;
+        e.candleBoost = e.candles * ConsecutiveCandleThresholdBoost;
+        e.threshold += e.candleBoost;
     }
 
-    // SIGNAL DAMPENING: Apply score penalty and drawdown gating
+    // SIGNAL DAMPENING: score penalty per losing same-direction position, higher threshold in drawdown
     if(EnableSignalDampening)
     {
-        // A. Score Penalty: reduce score based on losing same-direction positions
-        PositionLossState lossState = GetOpenPositionLossState(POSITION_TYPE_SELL);
+        PositionLossState lossState = GetOpenPositionLossState(isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL);
         if(lossState.losingCount > 0)
         {
-            double penalty = lossState.losingCount * LosingPosScorePenalty;
-            adjustedScore -= penalty;
-            LogPrint("[DAMPENED] Sell score reduced by ", DoubleToString(penalty, 1), 
-                     " (", lossState.losingCount, " losing sells). Raw: ", 
-                     DoubleToString(strength.finalScore, 1), " -> Adjusted: ", 
-                     DoubleToString(adjustedScore, 1));
+            e.losing = lossState.losingCount;
+            e.penalty = lossState.losingCount * LosingPosScorePenalty;
+            e.score -= e.penalty;
         }
-        
-        // B. Drawdown Gate: raise threshold when account in drawdown
         if(peakEquity > 0)
         {
-            double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-            double drawdownPct = ((peakEquity - currentEquity) / peakEquity) * 100.0;
-            
-            if(drawdownPct >= DrawdownThresholdPct)
+            e.ddPct = ((peakEquity - AccountInfoDouble(ACCOUNT_EQUITY)) / peakEquity) * 100.0;
+            if(e.ddPct >= DrawdownThresholdPct)
             {
-                adjustedThreshold += DrawdownScoreBoost;
-                LogPrint("[DRAWDOWN GATE] Equity drawdown ", DoubleToString(drawdownPct, 1), 
-                         "% >= ", DoubleToString(DrawdownThresholdPct, 1), 
-                         "%. Sell threshold raised to ", DoubleToString(adjustedThreshold, 1));
+                e.ddBoost = DrawdownScoreBoost;
+                e.threshold += e.ddBoost;
             }
         }
     }
+}
 
-    if (adjustedScore >= adjustedThreshold)
+// Entry signal for one direction: the adjusted score when it passes the entry conditions and the
+// threshold, else 0
+double DirectionSignal(bool isBuy)
+{
+    double currentPrice = SymbolInfoDouble(_Symbol, isBuy ? SYMBOL_ASK : SYMBOL_BID);
+    string dirName = isBuy ? "Buy" : "Sell";
+
+    // Check strict conditions (limits & distance) first
+    if(!CheckEntryConditions(isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL, currentPrice)) return 0;
+
+    // Smoothed signal strength (entry mode: closed candles only in new-bar mode) and its adjustments
+    EntryScore e;
+    ComputeEntryScore(isBuy, e);
+
+    // DEAD-MARKET BLOCK: last closed candle's ATR collapsed below MinVolRatioToTrade
+    if(e.strength.deadMarket) return 0;
+
+    if(e.candleBoost > 0)
+        LogPrint("[CANDLE ESCALATION] ", dirName, " threshold boosted by ", DoubleToString(e.candleBoost, 1),
+                 " (", e.candles, " consecutive trading candles). Threshold: ", DoubleToString(e.threshold, 1));
+    if(e.penalty > 0)
+        LogPrint("[DAMPENED] ", dirName, " score reduced by ", DoubleToString(e.penalty, 1),
+                 " (", e.losing, " losing ", (isBuy ? "buys" : "sells"), "). Raw: ",
+                 DoubleToString(e.strength.finalScore, 1), " -> Adjusted: ", DoubleToString(e.score, 1));
+    if(e.ddBoost > 0)
+        LogPrint("[DRAWDOWN GATE] Equity drawdown ", DoubleToString(e.ddPct, 1), "% >= ",
+                 DoubleToString(DrawdownThresholdPct, 1), "%. ", dirName, " threshold raised to ", DoubleToString(e.threshold, 1));
+
+    if(e.score >= e.threshold)
     {
-        LogPrint("SELL SIGNAL RECEIVED (Score: ", DoubleToString(strength.finalScore, 1), 
-                 " | Adjusted: ", DoubleToString(adjustedScore, 1), 
-                 " / Threshold: ", DoubleToString(adjustedThreshold, 1), ")");
-        LogPrint("Details: Body=", DoubleToString(strength.bodySignal, _Digits),
-                 ", AvgBody=", DoubleToString(strength.avgBody, _Digits),
-                 ", Ratio=", DoubleToString(strength.ratio, 2),
-                 ", PenBody=", DoubleToString(strength.penaltyBody, 1),
-                 ", PenWick=", DoubleToString(strength.penaltyWick, 1));
-        LogPrint("Reasoning: ", strength.reasoning);
+        LogPrint((isBuy ? "BUY" : "SELL"), " SIGNAL RECEIVED (Score: ", DoubleToString(e.strength.finalScore, 1),
+                 " | Adjusted: ", DoubleToString(e.score, 1), " / Threshold: ", DoubleToString(e.threshold, 1), ")");
+        LogPrint("Details: Body=", DoubleToString(e.strength.bodySignal, _Digits),
+                 ", AvgBody=", DoubleToString(e.strength.avgBody, _Digits),
+                 ", Ratio=", DoubleToString(e.strength.ratio, 2),
+                 ", PenBody=", DoubleToString(e.strength.penaltyBody, 1),
+                 ", PenWick=", DoubleToString(e.strength.penaltyWick, 1));
+        LogPrint("Reasoning: ", e.strength.reasoning);
         LogPrint("Price: ", currentPrice);
-
-        return adjustedScore;
+        return e.score;
     }
-    
     return 0;
 }
+
+double BuySignal()  { return DirectionSignal(true); }
+double SellSignal() { return DirectionSignal(false); }
 
 // +------------------------------------------------------------------+
 // | Unified Entry Conditions (limits, dampening, cooldown, duplicate)|
@@ -1821,6 +1771,13 @@ double SellSignal()
 // | (virtual-SL re-entries intentionally re-enter near the old price)|
 // +------------------------------------------------------------------+
 bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplicate = true)
+{
+    return EntryConditionsBlock(dir, price, checkDuplicate) == "";
+}
+
+// The same checks, returning "" when the direction may enter or else the reason it can't
+// (shown on the dashboard, so a high score with no trade explains itself)
+string EntryConditionsBlock(ENUM_POSITION_TYPE dir, double price, bool checkDuplicate = true)
 {
     datetime currBarTime = iTime(_Symbol, _Period, 0);
     bool isBuy = (dir == POSITION_TYPE_BUY);
@@ -1834,16 +1791,12 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
     {
         int onCandle = (currentBarTime == currBarTime) ? sameOnBar : 0;
         if(onCandle >= MaxTradesPerCandle)
-        {
-            return false;
-        }
+            return StringFormat("already %d %s on this bar (max %d)", onCandle, isBuy ? "buy" : "sell", MaxTradesPerCandle);
     }
 
     // Prevent opposite direction trades on the same candle
     if(oppOnBar > 0)
-    {
-        return false;
-    }
+        return "opposite trade on this bar";
 
     // SIGNAL DAMPENING: Hard block when too many losing same-dir positions are open
     if(EnableSignalDampening)
@@ -1853,7 +1806,7 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
         {
             LogPrint("[DAMPENED] ", dirName, " BLOCKED: ", lossState.losingCount,
                      " losing ", dirName, "s >= max ", MaxLosingPositionsSameDir);
-            return false;
+            return StringFormat("%d losing %ss open (max %d)", lossState.losingCount, isBuy ? "buy" : "sell", MaxLosingPositionsSameDir);
         }
     }
 
@@ -1864,7 +1817,7 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
         {
             LogPrint("[COOLDOWN] ", dirName, " BLOCKED: cooldown active until ",
                      TimeToString(cooldownUntilBarTime));
-            return false;
+            return "loss cooldown until " + TimeToString(cooldownUntilBarTime, TIME_MINUTES);
         }
         else
         {
@@ -1882,7 +1835,7 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
         {
             LogPrint("[RANGE FILTER] ", dirName, " BLOCKED: efficiency ", DoubleToString(er, 2),
                      " < ", DoubleToString(MinEfficiencyToTrade, 2), " over ", RangeFilterPeriod, " bars");
-            return false;
+            return StringFormat("range filter: efficiency %.2f < %.2f", er, MinEfficiencyToTrade);
         }
     }
 
@@ -1890,7 +1843,9 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
     if(!HTFTrendAllows(isBuy))
     {
         LogPrint("[HTF FILTER] ", dirName, " BLOCKED: against ", EnumToString(HTFTimeframe), " EMA", HTFEMAPeriod, " trend");
-        return false;
+        return StringFormat("needs a %s %s (close %.1f%% %s a %s EMA%d)", StringSubstr(EnumToString(HTFTimeframe), 7),
+                            isBuy ? "uptrend" : "downtrend", HTFMinDistancePct, isBuy ? "above" : "below",
+                            isBuy ? "rising" : "falling", HTFEMAPeriod);
     }
 
     // Minimum distance from every open same-direction position (duplicate signal filter)
@@ -1898,10 +1853,11 @@ bool CheckEntryConditions(ENUM_POSITION_TYPE dir, double price, bool checkDuplic
     {
         double dupMult = isBuy ? BuyDuplicateMultiplier : SellDuplicateMultiplier;
         double minDistance = ZonePoints * PointScale() * _Point * dupMult;
-        if(minDistance > 0 && NearestOpenEntryDistance(dir, price) < minDistance) return false;
+        if(minDistance > 0 && NearestOpenEntryDistance(dir, price) < minDistance)
+            return StringFormat("within %s of an open %s", DoubleToString(minDistance, _Digits), isBuy ? "buy" : "sell");
     }
 
-    return true;
+    return "";
 }
 
 // +------------------------------------------------------------------+
@@ -5857,11 +5813,10 @@ bool IsAllowedToOpenPosition(bool ignoreStreakPause = false)
 // | When MaxSpreadPoints > 0 uses a fixed cap, otherwise derives a   |
 // | cap from current ATR (MaxSpreadATRRatio fraction of ATR points)  |
 // +------------------------------------------------------------------+
-bool IsSpreadTooWide()
+// Current spread cap in points (0 = filter off or no usable ATR yet: never blocks)
+double SpreadCapPoints()
 {
-    if(!EnableMaxSpreadFilter) return false;
-
-    double spreadPoints = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+    if(!EnableMaxSpreadFilter) return 0;
 
     double cap = MaxSpreadPoints * PointScale();
     if(cap <= 0)
@@ -5869,12 +5824,20 @@ bool IsSpreadTooWide()
         // Auto mode: cap = fraction of current ATR expressed in points
         double bufATR[];
         ArraySetAsSeries(bufATR, true);
-        if(CopyBuffer(atrSignalHandle, 0, 0, 1, bufATR) < 1) return false; // can't judge, don't block
+        if(CopyBuffer(atrSignalHandle, 0, 0, 1, bufATR) < 1) return 0; // can't judge, don't block
         double atrPoints = (_Point > 0) ? bufATR[0] / _Point : 0;
         cap = atrPoints * MaxSpreadATRRatio;
-        if(cap <= 0) return false; // no usable ATR, don't block
+        if(cap <= 0) return 0; // no usable ATR, don't block
     }
+    return cap;
+}
 
+bool IsSpreadTooWide()
+{
+    double cap = SpreadCapPoints();
+    if(cap <= 0) return false;
+
+    double spreadPoints = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
     if(spreadPoints > cap)
     {
         LogPrint("[SPREAD] Blocked: spread ", DoubleToString(spreadPoints, 0),
@@ -5920,33 +5883,65 @@ ENUM_ORDER_TYPE_FILLING GetFillingMode()
 // | volatility-scaled stops that is how wild sessions are sat out    |
 // | instead of being traded with oversized risk.                     |
 // +------------------------------------------------------------------+
-bool ApplyRiskSizing(double &lot, double slPoints)
+bool RiskSizingApplies()
 {
-    if(RiskPerTradePct <= 0 || slPoints <= 0) return true;
-
-    bool slIndependentOfLot = EnableRiskReward
+    if(RiskPerTradePct <= 0) return false;
+    return EnableRiskReward
         ? (RRRiskMode == RR_RISK_ATR || RRRiskInputType == INPUT_POINTS || RRRiskInputType == INPUT_ATR)
         : (SLInputType == INPUT_ATR || SLInputType == INPUT_POINTS);
-    if(!slIndependentOfLot) return true;
+}
 
+// The lot RiskPerTradePct allows at this SL distance, without side effects: 0 = even the broker's
+// minimum lot loses more, -1 = symbol data not ready (can't judge). lossAtMinLot / riskMoney are
+// what the minimum lot loses at the SL and the allowed loss.
+double RiskSizedLot(double slPoints, double &lossAtMinLot, double &riskMoney)
+{
+    lossAtMinLot = 0; riskMoney = 0;
     double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
     double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-    if(tickValue <= 0 || tickSize <= 0 || _Point <= 0) return true;
+    if(tickValue <= 0 || tickSize <= 0 || _Point <= 0 || slPoints <= 0) return -1;
 
     double moneyPerLotAtSL = slPoints * _Point / tickSize * tickValue;   // loss of 1.0 lot at the SL
-    double riskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * RiskPerTradePct / 100.0;
-    double riskLot = FloorToVolumeStep(riskMoney / moneyPerLotAtSL);
-
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-    double maxLot = MathMin(MaxLotSize, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX));
-    if(riskLot < minLot)
+    riskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * RiskPerTradePct / 100.0;
+    lossAtMinLot = minLot * moneyPerLotAtSL;
+    double riskLot = FloorToVolumeStep(riskMoney / moneyPerLotAtSL);
+    if(riskLot < minLot) return 0;
+    return MathMin(riskLot, MathMin(MaxLotSize, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX)));
+}
+
+// With a fixed-distance stop a too-small account can never trade - that must be visible even
+// with EnableLogging off: printed at start-up and at most once an hour while it lasts
+void WarnRiskBlocksEntries(double lossAtMinLot, double riskMoney)
+{
+    static datetime lastWarn = 0;
+    datetime now = TimeCurrent();
+    if(lastWarn != 0 && now - lastWarn < 3600) return;
+    lastWarn = now;
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    PrintFormat("[RISK SIZING] No new trades: the minimum lot %.2f would lose $%.2f at the stop = %.2f%% of equity, "
+                "but RiskPerTradePct allows %.2f%% ($%.2f). Needs about $%.0f equity (or a cent account), "
+                "or set RiskPerTradePct = 0 to trade a fixed BaseLotSize.",
+                SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), lossAtMinLot, equity > 0 ? 100.0 * lossAtMinLot / equity : 0,
+                RiskPerTradePct, riskMoney, lossAtMinLot / (RiskPerTradePct / 100.0));
+}
+
+bool ApplyRiskSizing(double &lot, double slPoints)
+{
+    if(slPoints <= 0 || !RiskSizingApplies()) return true;
+
+    double lossAtMinLot, riskMoney;
+    double sized = RiskSizedLot(slPoints, lossAtMinLot, riskMoney);
+    if(sized < 0) return true;                                           // can't judge - keep the lot
+    if(sized == 0)
     {
-        LogPrint("[RISK SIZING] Entry skipped: min lot ", minLot, " would risk $",
-                 DoubleToString(minLot * moneyPerLotAtSL, 2), " > ", DoubleToString(RiskPerTradePct, 2),
+        LogPrint("[RISK SIZING] Entry skipped: min lot ", SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), " would risk $",
+                 DoubleToString(lossAtMinLot, 2), " > ", DoubleToString(RiskPerTradePct, 2),
                  "% of equity ($", DoubleToString(riskMoney, 2), ")");
+        WarnRiskBlocksEntries(lossAtMinLot, riskMoney);
         return false;
     }
-    lot = MathMin(riskLot, maxLot);
+    lot = sized;
     return true;
 }
 
@@ -8060,6 +8055,51 @@ void DrawDashboardLabel(string name, string text, int x, int y, int fontSize, co
     ObjectSetString(0, name, OBJPROP_FONT, bold ? "Arial Bold" : "Arial");
 }
 
+// +------------------------------------------------------------------+
+// | Dashboard: what the next bar's entry decision would say          |
+// | The same gates, in the same order, as CheckForTradingSignal ->   |
+// | DirectionSignal -> OpenPosition. "" = this direction is ready.   |
+// +------------------------------------------------------------------+
+string DashboardEntryGate(bool isBuy, EntryScore &e, string riskBlock)
+{
+    if(!(isBuy ? EnableBuyOrders : EnableSellOrders)) return isBuy ? "buys disabled" : "sells disabled";
+    string why = GetEntryBlockReason(true);               // equity stops, pauses, hours, market close
+    if(why != "") return why;
+    double cap = SpreadCapPoints();
+    long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+    if(cap > 0 && spread > cap) return StringFormat("spread %d pts > cap %.0f", (int)spread, cap);
+    why = EntryConditionsBlock(isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL,
+                               SymbolInfoDouble(_Symbol, isBuy ? SYMBOL_ASK : SYMBOL_BID));
+    if(why != "") return why;
+    if(e.strength.deadMarket) return "dead market (ATR below MinVolRatioToTrade)";
+    if(e.score < e.threshold) return StringFormat("score %.2f below %.2f", e.score, e.threshold);
+    if(CountLosingPositions() >= MaxHoldingLossPositions)
+        return StringFormat("%d losing positions held (max %d)", CountLosingPositions(), MaxHoldingLossPositions);
+    if(CountOpenOrders() >= MaxOpenOrders) return StringFormat("%d positions open (max %d)", CountOpenOrders(), MaxOpenOrders);
+    return riskBlock;
+}
+
+string EntryLineText(EntryScore &e)
+{
+    string parts = "";
+    if(e.candleBoost > 0) parts += StringFormat("+%.1f candles", e.candleBoost);
+    if(e.ddBoost > 0)     parts += (parts == "" ? "" : ", ") + StringFormat("+%.1f drawdown", e.ddBoost);
+    if(e.penalty > 0)     parts += (parts == "" ? "" : ", ") + StringFormat("-%.1f losing", e.penalty);
+    return StringFormat("Entry: %.2f / need %.2f", e.score, e.threshold) + (parts == "" ? "" : " (" + parts + ")");
+}
+
+string GateLineText(string gate)
+{
+    if(gate != "") return "> Blocked: " + gate;
+    return streakPaused ? "> Ready: paper trade at the next bar (loss-streak pause)" : "> Ready: enters at the next bar";
+}
+
+color GateLineColor(string gate)
+{
+    if(gate == "") return clrLime;
+    return (StringFind(gate, "score ") == 0) ? clrGray : clrOrange;   // a low score is the normal waiting state
+}
+
 void UpdateDashboard()
 {
     // Nobody can see the chart in a non-visual backtest / optimization - skip the work
@@ -8095,6 +8135,31 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_Title", EA_TITLE, startX, currentY, 11, colorHeader, true);
     currentY += lineHeight + 5;
 
+    // Lot the next entry would use (risk sizing), or why none can be opened
+    string lotText, riskBlock = "";
+    double dashEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    double dashSl = GetSLPoints(BaseLotSize);
+    if(RiskSizingApplies() && dashSl > 0)
+    {
+        double lossAtMinLot, riskMoney;
+        double lot = RiskSizedLot(dashSl * (1 + CheckpointSkipsFor(dashSl)), lossAtMinLot, riskMoney);
+        double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        double pctAtMin = (dashEquity > 0) ? 100.0 * lossAtMinLot / dashEquity : 0;
+        if(lot < 0)
+            lotText = "Lot: waiting for symbol data";
+        else if(lot == 0)
+        {
+            riskBlock = StringFormat("account too small: %.2f lot risks %.1f%% > %.2f%%", minLot, pctAtMin, RiskPerTradePct);
+            lotText = StringFormat("Lot: NONE - %.2f lot risks $%.2f (%.1f%%) > %.2f%%, needs ~$%.0f",
+                                   minLot, lossAtMinLot, pctAtMin, RiskPerTradePct, lossAtMinLot / (RiskPerTradePct / 100.0));
+        }
+        else
+            lotText = StringFormat("Lot: %.2f (risks $%.2f = %.2f%% at the stop)", lot, lossAtMinLot / minLot * lot,
+                                   pctAtMin / minLot * lot);
+    }
+    else
+        lotText = StringFormat("Lot: %.2f (fixed BaseLotSize)", BaseLotSize);
+
     // Status logic (hard stops first, then pauses with their reasons, then soft blocks)
     string status = "Active";
     color statusColor = clrLime;
@@ -8106,6 +8171,7 @@ void UpdateDashboard()
     else if(isNearMarketClose) { status = "No Entries (Market Closing)"; statusColor = clrGray; }
     else if(isLeverageDiffFromInitial) { status = "PAUSED (Leverage Changed)"; statusColor = clrOrange; }
     else if(streakPaused) { status = StringFormat("PAUSED (Loss Streak %d - paper %s)", streakLosses, paperDir > 0 ? "BUY open" : paperDir < 0 ? "SELL open" : "waiting"); statusColor = clrOrange; }
+    else if(riskBlock != "") { status = "No Entries (Account Too Small)"; statusColor = clrOrange; }
 
     DrawDashboardLabel("NyaoDash_Status", "Status: " + status, startX, currentY, textsize, statusColor, true);
     currentY += lineHeight;
@@ -8155,23 +8221,29 @@ void UpdateDashboard()
         ObjectDelete(0, "NyaoDash_Hedge");
     }
 
-    // Signal Strength (Smoothed - Unified)
+    // Signal Strength: the live score, the entry decision (closed bars, losing-position penalty,
+    // boosted threshold) and the first gate that blocks the next entry
     SignalStrength buyStrength = GetSignalStrength(ORDER_TYPE_BUY);
     SignalStrength sellStrength = GetSignalStrength(ORDER_TYPE_SELL);
-    
-    // Raw closed-candle scores for reference
-    double rawBuyScore = ComputeRawScore(ORDER_TYPE_BUY, 1);
-    double rawSellScore = ComputeRawScore(ORDER_TYPE_SELL, 1);
+
+    quietLog = true;                                      // re-running the entry checks must not spam the log
+    EntryScore buyEntry, sellEntry;
+    ComputeEntryScore(true, buyEntry);
+    ComputeEntryScore(false, sellEntry);
+    string buyGate  = DashboardEntryGate(true, buyEntry, riskBlock);
+    string sellGate = DashboardEntryGate(false, sellEntry, riskBlock);
+    quietLog = false;
+
+    // Labels of the former layout
+    ObjectDelete(0, "NyaoDash_ReqBuy");
+    ObjectDelete(0, "NyaoDash_ReqSell");
+    ObjectDelete(0, "NyaoDash_CurrentBuy");
+    ObjectDelete(0, "NyaoDash_CurrentSell");
 
     DrawDashboardLabel("NyaoDash_SigHead", "SIGNAL STRENGTH:", startX, currentY, headersize, colorHeader, true);
     currentY += lineHeight;
 
-    string reqBuyText = StringFormat("Min Buy: %.2f", MinBuySignalScore);
-    DrawDashboardLabel("NyaoDash_ReqBuy", reqBuyText, startX, currentY, detailsSize, colorText);
-    currentY += lineHeight;
-
-    string reqSellText = StringFormat("Min Sell: %.2f", MinSellSignalScore);
-    DrawDashboardLabel("NyaoDash_ReqSell", reqSellText, startX, currentY, detailsSize, colorText);
+    DrawDashboardLabel("NyaoDash_Lot", lotText, startX, currentY, detailsSize, riskBlock != "" ? clrOrange : colorText);
     currentY += lineHeight;
 
     // Buy Row
@@ -8179,10 +8251,12 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_Buy", buyText, startX, currentY, textsize, buyStrength.finalScore > sellStrength.finalScore ? colorBuy : colorText, true);
     currentY += lineHeight;
 
-    string rawBuyText = StringFormat("Raw (Closed): %.2f", rawBuyScore);
-    DrawDashboardLabel("NyaoDash_CurrentBuy", rawBuyText, startX, currentY, detailsSize, colorText);
+    DrawDashboardLabel("NyaoDash_BuyEntry", EntryLineText(buyEntry), startX, currentY, detailsSize, colorText);
     currentY += lineHeight;
-    
+
+    DrawDashboardLabel("NyaoDash_BuyGate", GateLineText(buyGate), startX, currentY, detailsSize, GateLineColor(buyGate));
+    currentY += lineHeight;
+
     string buyDet = StringFormat("%s", buyStrength.reasoning);
     DrawDashboardLabel("NyaoDash_BuyDet", buyDet, startX, currentY, detailsSize, colorText);
     currentY += lineHeight + 2;
@@ -8192,8 +8266,10 @@ void UpdateDashboard()
     DrawDashboardLabel("NyaoDash_Sell", sellText, startX, currentY, textsize, sellStrength.finalScore > buyStrength.finalScore ? colorSell : colorText, true);
     currentY += lineHeight;
 
-    string rawSellText = StringFormat("Raw (Closed): %.2f", rawSellScore);
-    DrawDashboardLabel("NyaoDash_CurrentSell", rawSellText, startX, currentY, detailsSize, colorText);
+    DrawDashboardLabel("NyaoDash_SellEntry", EntryLineText(sellEntry), startX, currentY, detailsSize, colorText);
+    currentY += lineHeight;
+
+    DrawDashboardLabel("NyaoDash_SellGate", GateLineText(sellGate), startX, currentY, detailsSize, GateLineColor(sellGate));
     currentY += lineHeight;
 
     string sellDet = StringFormat("%s",sellStrength.reasoning);
