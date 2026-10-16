@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Scalper v49.0 - DEFAULT PROFILE
+; Nyao Scalper v50.0 - DEFAULT PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; D1-trend entries + checkpoint exit + trailing stop (= the EA's built-in input defaults).
@@ -19,7 +19,7 @@
 ;           $20 behind (100% of it) and never moves back.
 ;   Flip  : a losing trade is closed early once the opposite score reaches 6 (the trend turned).
 ;   Pause : after 4 losses in a row, paper-trade until a paper win, then trade again.
-; Backtest v49.0, $2,000 per month (each month a fresh run), 1.25% risk sizing (= 0.01 lot),
+; Backtest v50.0, $2,000 per month (each month a fresh run), 1.25% risk sizing (= 0.01 lot),
 ; sums of monthly returns:
 ;   Jan-Sep 2026, real ticks (reports/default-2026-real-ticks):
 ;     M5: +83.3%, 6/9 months up, worst month -3.1%, max DD 20.0%, PF 1.20

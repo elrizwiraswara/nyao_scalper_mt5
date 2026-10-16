@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Scalper v49.0 - HIGH-RISK PROFILE
+; Nyao Scalper v50.0 - HIGH-RISK PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; The default profile's rules with twice the risk per trade: higher return, deeper drawdowns.
@@ -9,7 +9,7 @@
 ;           $2,000 (2%), 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more
 ;           than 2.5% and is still traded down to about $400 (MaxRiskPerTradePct 5, as in the default).
 ;   MaxLotSize 0.10 (default 0.05): lets a $100 cent account trade 0.10 lot (2%).
-; Backtest v49.0, $2,000 per month (each month a fresh run), sums of monthly returns:
+; Backtest v50.0, $2,000 per month (each month a fresh run), sums of monthly returns:
 ;   Jan-Sep 2026, real ticks (reports/high-risk-2026-real-ticks):
 ;     M5: +176.4%, 5/9 months up, worst month -16.1%, max DD 36.3%, PF 1.19
 ;     M1: +4.0%, 5/9 months up, worst month -27.0%, max DD 46.3%, PF 1.00
