@@ -73,6 +73,12 @@ enum ENUM_SCORE_MODEL
     SCORE_TREND                                          // Multi-Hour Trend Strength
 };
 
+enum ENUM_DRAWDOWN_SCOPE
+{
+    DD_SCOPE_ACCOUNT,                                    // Whole Account Equity
+    DD_SCOPE_OWN                                         // This EA's Own Trades (several symbols on one account)
+};
+
 input group "+-----------------------------------------+"
 input group " Nyao Scalper v50.0"
 input group " © Copyright Nyao Scalper by Elriz Wiraswara"
@@ -169,6 +175,7 @@ input int MaxLosingPositionsSameDir = 2;                  // Max Losing Position
 input double LosingPosScorePenalty = 1.5;                 // Score Penalty Per Losing Same-Direction Position
 input double DrawdownThresholdPct = 3.0;                  // Equity Drawdown % to Raise Signal Threshold
 input double DrawdownScoreBoost = 2.0;                    // Extra Score Required During Drawdown
+input ENUM_DRAWDOWN_SCOPE DrawdownScope = DD_SCOPE_ACCOUNT; // Drawdown Measured On (This EA = another symbol's losses don't count)
 input int ConsecutiveLossesBeforeCooldown = 3;            // Consecutive Losses Before Cooldown Activates
 input int ConsecutiveLossCooldownBars = 3;                // Cooldown Duration (Bars) After Threshold Reached
 input int LossStreakPauseCount = 4;                       // Pause After N Losses in a Row, Paper-Trade Until a Paper Win (0 = Off)
@@ -325,6 +332,8 @@ bool passwordDialogActive = false;
 
 double initialBalance = 0;                                // Initial Account Balance     
 double peakEquity = 0;                                    // Peak Equity Recorded
+double ownClosedPL = 0;                                   // DrawdownScope = This EA: P/L of this EA's closed deals
+double ownPeakPL = 0;                                     // ... and its best closed + floating P/L so far
 double lastPeakEquity = 0;                                // Last recorded peak equity for drawdown calculations
 bool targetEquityReached = false;                         // Flags for target/minimum equity reached
 bool minimumEquityReached = false;                        // Flags for target/minimum equity reached
@@ -801,6 +810,7 @@ int InitializeEA()
     initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     lastPeakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    if(DrawdownScope == DD_SCOPE_OWN) InitOwnPL();
     targetEquityReached = false;
     minimumEquityReached = false;
     minEquityTriggersExceeded = false;
@@ -1318,6 +1328,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
     // Statistics are cached; recompute on the next dashboard / report pass
     tradeStatsDirty = true;
+    ownClosedPL += DealNetPL(dealTicket);
 
     // NEW POSITION OPENED
     // Registers fills here so pending-limit entries get tracked. Market entries are
@@ -1519,6 +1530,40 @@ double GetBasketFloatingPL()
     return total;
 }
 
+// Net money a deal added to the account: profit, swap, commission and fee
+double DealNetPL(ulong deal)
+{
+    return HistoryDealGetDouble(deal, DEAL_PROFIT) + HistoryDealGetDouble(deal, DEAL_SWAP)
+         + HistoryDealGetDouble(deal, DEAL_COMMISSION) + HistoryDealGetDouble(deal, DEAL_FEE);
+}
+
+// DrawdownScope = This EA: rebuild this EA's closed P/L and its best level from the deal history,
+// so a restart keeps a running drawdown (floating peaks before the restart are not known)
+void InitOwnPL()
+{
+    ownClosedPL = 0; ownPeakPL = 0;
+    if(!HistorySelect(0, TimeCurrent())) return;
+    int n = HistoryDealsTotal();
+    for(int i = 0; i < n; i++)
+    {
+        ulong deal = HistoryDealGetTicket(i);
+        if(deal == 0 || HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol) continue;
+        if(HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
+        ownClosedPL += DealNetPL(deal);
+        ownPeakPL = MathMax(ownPeakPL, ownClosedPL);
+    }
+}
+
+// Drawdown of this EA's own trades in % - the same formula as (peak - equity) / peak, which it equals
+// when this EA trades the account alone; other symbols' profits and losses don't count
+double OwnDrawdownPct()
+{
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    double dd = ownPeakPL - (ownClosedPL + GetTotalFloatingPL());
+    if(dd <= 0 || equity <= 0) return 0;
+    return dd / (equity + dd) * 100.0;
+}
+
 // +------------------------------------------------------------------+
 // | Basket Stop - Close all when aggregate floating loss exceeds cap |
 // | Per-position management protects single trades; this is a hard   |
@@ -1711,9 +1756,10 @@ void ComputeEntryScore(bool isBuy, EntryScore &e)
             e.penalty = lossState.losingCount * LosingPosScorePenalty;
             e.score -= e.penalty;
         }
-        if(peakEquity > 0)
+        if(DrawdownScope == DD_SCOPE_OWN || peakEquity > 0)
         {
-            e.ddPct = ((peakEquity - AccountInfoDouble(ACCOUNT_EQUITY)) / peakEquity) * 100.0;
+            e.ddPct = (DrawdownScope == DD_SCOPE_OWN) ? OwnDrawdownPct()
+                                                       : ((peakEquity - AccountInfoDouble(ACCOUNT_EQUITY)) / peakEquity) * 100.0;
             if(e.ddPct >= DrawdownThresholdPct)
             {
                 e.ddBoost = DrawdownScoreBoost;
@@ -6676,6 +6722,9 @@ int StartBasketPause()
 // +------------------------------------------------------------------+
 void CheckPeakEquity()
 {
+    if(DrawdownScope == DD_SCOPE_OWN)
+        ownPeakPL = MathMax(ownPeakPL, ownClosedPL + GetTotalFloatingPL());
+
     // Right after a balance change the deposit may not be applied to the baselines yet: wait a
     // few seconds so it can't become a false new peak (and then a false drawdown)
     if(TimeCurrent() - balanceChangedAt < 5) return;

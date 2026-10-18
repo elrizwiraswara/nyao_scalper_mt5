@@ -1,0 +1,237 @@
+; +-----------------------------------------+
+; Nyao Scalper v50.0 - USDJPY PROFILE
+; © Copyright Nyao Scalper by Elriz Wiraswara
+; +-----------------------------------------+
+; The default gold rules on USDJPY (USDJPYm, 3 decimals), meant to run NEXT TO gold on the same account.
+; EXPERIMENTAL - backtested only; demo forward-test before using real money. Attach it to an M5 chart.
+; Not tuned: every distance is gold's, scaled by USDJPY's daily volatility (median D1 ATR, 2022-2026):
+;   Stop / checkpoint : 786 points = 0.786 yen (gold: $20), entry spacing 393 points (half of it).
+;   D1 trend filter   : close at least 0.309% beyond the EMA50 (gold: 0.5%).
+;   Spread cap        : 20 points (2 pips).
+;   PointInputDigits=0 (points are USDJPY's own), MaxLotSize 0.20 (about $100 at the stop, like gold's 0.05).
+;   DrawdownScope = This EA's Own Trades: gold's losses don't raise this chart's entry score (and back).
+; Backtest v50.0, M5, $2,000 per month (each month a fresh run), 1.25% risk sizing, sums of monthly returns:
+;   2022 +54.6% / 2023 +0.8% / 2024 +43.8% / 2025 -9.7% / Jan-Sep 2026 -7.8%
+;   57 months: +81.6%, 26/57 months up, worst month -6.9%; monthly correlation with the gold EA -0.18.
+;   USDJPY makes its money in its own big trends (2022, 2024) - often when gold goes sideways.
+; Gold (default.set) + this profile on one account, both at 1.25% risk (sum of the monthly runs):
+;   +211.3% vs gold alone +129.7%, drawdown across months 30.4% vs 28.2%, 2022 +42.9% vs -11.6%.
+; Requirements / warnings:
+;   - Same hedging account as gold; on the gold chart set DrawdownScope = This EA's Own Trades too.
+;   - With both running, up to 4 positions and about 5% of equity can be at risk at the same time.
+;   - Alone, USDJPY is a weak earner (lost in 2025 and 2026): use it as gold's partner, not instead.
+; +-----------------------------------------+
+; 📊 Indicator Settings
+DirectionalBodyLookback=10
+EMAFastPeriod=5
+EMASlowPeriod=12
+SlopeLookback=3
+RSIPeriod=8
+ATRPeriod=8
+ATRAvgLookback=10
+MinVolRatioToTrade=0.0
+ImpulseLookback=3
+ImpulseBoostWeight=1.0
+SignalSmoothingCandles=2
+CurrentCandleBlend=0.40
+VelocityWindow=2.0
+RSIOverbought=80
+RSIOversold=20
+RSIMomentumBuy=60
+RSIMomentumSell=40
+EnableHTFTrendFilter=true
+HTFTimeframe=16408
+HTFEMAPeriod=50
+HTFMinDistancePct=0.309
+HTFMinSlopePct=0.0
+HTFSlopeBars=5
+; ⚖️ Score Weight Settings
+ScoreModel=1
+TrendRangeBars=200
+TrendEMAPeriod=200
+TrendERBars=100
+TrendROCBars=192
+TrendATRPeriod=14
+TrendWeight=1.5
+SlopeWeight=1.5
+MomentumBaseWeight=1.0
+MomentumTriggerWeight=0.5
+BodyMomentumWeight=1.5
+DirectionalBodyMomentum=true
+RegimeScoreMode=0
+ERPeriod=10
+ERHighThreshold=0.50
+ERMedThreshold=0.30
+ChopScoreHigh=2.0
+ChopScoreMed=1.0
+ChopScoreLow=0.0
+VolatilityScoreHigh=1.0
+VolatilityScoreLow=0.0
+PeakScoreWeight=1.0
+WickRejectionWeight=1.0
+MinBodyRatio=1.5
+; 📝 Order & Position Settings
+PointInputDigits=0
+EnableBuyOrders=true
+EnableSellOrders=true
+EnableNewBarEntryOnly=true
+MinEfficiencyToTrade=0.0
+RangeFilterPeriod=20
+EnableMaxSpreadFilter=true
+MaxSpreadPoints=20
+MaxSpreadATRRatio=0.25
+BaseLotSize=0.01
+MaxOpenOrders=2
+MaxTradesPerCandle=1
+ConsecutiveCandleThresholdBoost=1.0
+MaxConsecutiveCandleBoosts=3
+ZonePoints=393.0
+BuyDuplicateMultiplier=1.5
+SellDuplicateMultiplier=1.5
+MinBreakEvenProfit=0.5
+ProfitThresholdMultiplier=1.5
+LossThresholdMultiplier=2.0
+MinBuySignalScore=5.0
+MinSellSignalScore=5.0
+; 🎯 Limit Entry Settings
+EnableLimitEntry=false
+LimitEntryAnchor=0
+LimitEntryATRFraction=0.25
+LimitEntryExpiryBars=1
+LimitEntryCancelOnFlip=true
+; 🛡️ Signal Dampening Settings
+EnableSignalDampening=true
+MaxLosingPositionsSameDir=2
+LosingPosScorePenalty=1.5
+DrawdownThresholdPct=3.0
+DrawdownScoreBoost=2.0
+DrawdownScope=1
+ConsecutiveLossesBeforeCooldown=3
+ConsecutiveLossCooldownBars=3
+LossStreakPauseCount=4
+; 🩺 Loss Management Settings
+EnableLossManagement=false
+MaxHoldingLossPositions=2
+MinHealthScore=0.40
+MaxAdverseATR=1.5
+HealthTrendWeight=0.40
+HealthRSIWeight=0.25
+HealthATRWeight=0.25
+HealthSwingWeight=0.10
+HealthRSIBuyMin=40.0
+HealthRSISellMax=60.0
+HealthSwingLookback=20
+HealthGraceBars=2
+EnablePartialClose=true
+PartialClose75Pct=0.25
+PartialClose50Pct=0.50
+PartialClose25Pct=1.00
+EnableHealthSLTightening=true
+SLTightenATRMultiplier=2.0
+SLTightenMinHealthPct=0.50
+EnableBreakEvenOnSpread=false
+BreakEvenSpreadMultiplier=1.5
+BreakEvenTriggerATR=0.0
+EnableVirtualSLReentry=true
+ReentryRespectsNewBarGate=false
+ReentryMinSignalPct=0.75
+EnableProfitOffsetSL=true
+ConsecutiveWinsRequired=3
+MinOffsetProfit=1.0
+; 🔀 Hedge Chain (Rolling Martingale Recovery) Settings
+EnableHedgeChain=false
+HedgeTriggerATR=1.5
+HedgeRequireSignal=true
+HedgeMinSignalScore=6.5
+HedgeAutoLot=true
+HedgeRecoveryATR=1.0
+HedgeLotMultiplier=2.0
+HedgeMaxLot=0.10
+HedgeMaxTotalLots=0.20
+HedgeMaxActiveChains=1
+HedgeRecoveryPct=100.0
+HedgeRollMinProfit=0.0
+HedgeCycleLevels=2
+EnableHedgeCycleReset=true
+HedgeCyclePartialPct=50.0
+HedgeMaxCycles=3
+HedgeMaxChainLossUSD=0.0
+HedgeMaxChainLossPct=5.0
+HedgeMaxChainLossSL=1.5
+HedgeClearRootSL=true
+HedgeTrailATR=1.0
+; 🧮 Dynamic Lot Sizing Settings
+RiskPerTradePct=1.25
+MaxRiskPerTradePct=5.0
+EnableDynamicLots=false
+EquityDropPercent=5.0
+MaxEquityDropLotSteps=2
+MinSignalStrengthForLot=8.0
+LotStepSize=0.01
+MaxLotSize=0.20
+; 🏦 Equity Settings
+EnableBasketStop=true
+MaxBasketLossPct=8.0
+MaxTotalLossPct=12.0
+MinEquityPercent=70.0
+MaxDrawdownFromPeak=0.0
+PauseMinutes=5
+PauseMinutesMultiplier=1.5
+MaxPauseMinutes=120
+MaxMinEquityTriggers=0
+ResetOnNewPeak=true
+TargetEquity=0.0
+MinimumEquity=20.0
+; 📈 Take Profit Settings
+EnableTakeProfit=true
+TPInputType=2
+TPValue=786
+; 📉 Stop Loss Settings
+EnableStopLoss=true
+SLInputType=2
+SLValue=786
+; ⚖️ Risk:Reward Settings
+EnableRiskReward=false
+RRRiskMode=1
+RRRiskInputType=2
+RRRiskValue=200.0
+RRAtrMultiplier=1.5
+RiskRewardRatio=1.5
+; 🏁 Checkpoint Exit Settings
+EnableCheckpointExit=true
+CheckpointHoldMode=1
+CheckpointLockPct=50.0
+CheckpointMaxSkips=0
+TrendFlipExitScore=6.0
+CheckpointTrailPct=100
+CheckpointTrailStartPct=50
+CheckpointBreakEvenPct=0.0
+; 💸 Trailing TP/SL Settings
+EnableTrailing=false
+TrailingEnableBreakEvenLock=true
+TrailingSLOnProfitableOnly=true
+EnableAdaptiveTP=true
+EnableAdaptiveSL=true
+TSInputType=0
+TrailingDistanceValue=0.20
+TrailingValueMultiplier=0.20
+TrailStartATR=0.0
+; 🤖 Robot Settings
+MagicNumber=6926268
+EnableDiscordAlerts=false
+DiscordWebhookURL=
+EnableTradingHours=false
+TradingStartTime=00:00
+TradingEndTime=23:59
+EnableReports=true
+SendReportEveryHour=1
+EnableMarketCloseFilter=true
+MinutesBeforeClose=30
+EnableNewsFilter=true
+NewsMinutesBefore=30
+NewsMinutesAfter=30
+EnableLeveragePause=true
+CloseAllOnLeverageChange=true
+EnablePersistState=true
+ResetSavedState=false
+EnableLogging=false

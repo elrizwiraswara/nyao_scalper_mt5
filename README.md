@@ -44,7 +44,7 @@ The EA scores buys and sells from 0.0 to 10.0 on every tick. `ScoreModel` choose
 - **Basket Stop**: Portfolio-level backstop. Closes **all non-chain** positions and pauses when their floating loss exceeds a % of equity (`MaxBasketLossPct`) — protects against compounding drawdown from stacked positions, independent of per-position stops.
 - **Total Loss Hard Stop**: `MaxTotalLossPct` closes **everything, including hedge chains**, and pauses when the total floating loss crosses the limit. This is the one cap that bounds every position the EA holds.
 - **Max-Spread Filter**: Blocks new entries when the spread is too wide (fixed `MaxSpreadPoints`, or auto-derived from ATR via `MaxSpreadATRRatio`). Critical for cost control on M1 gold.
-- **Signal Dampening**: Position-aware system that penalizes signal scores when holding losing positions and raises entry thresholds during drawdown periods.
+- **Signal Dampening**: Position-aware system that penalizes signal scores when holding losing positions and raises entry thresholds during drawdown periods. The drawdown is the whole account's by default; `DrawdownScope = This EA's Own Trades` measures only the chart's own trades (for several symbols on one account).
 - **Loss-Streak Pause** _(`LossStreakPauseCount`, default 4, 0 = off)_: losing trades cluster — after a loss the next trade wins noticeably less often, i.e. the market is temporarily not suited to the signal. After N losses in a row the EA stops opening real trades and **paper-trades** every signal instead (same entry price, stop and first checkpoint/TP). Real trading resumes on the first paper win, or when a still-open real position closes in profit.
 - **News Filter**: Automatically pauses new entries before and after high-impact news events. News, basket-stop and drawdown pauses each run on their own timer, so one can't cancel or shorten another.
 - **Market-Close Filter**: Stops opening positions `MinutesBeforeClose` minutes before the symbol's quote session ends (daily break or weekend). Back-to-back sessions (e.g. 24:00 → 00:00) count as one continuous session.
@@ -236,7 +236,7 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 
 ## Settings Profile
 
-Two profiles are bundled: `settings/default.set` and `settings/high-risk.set` (see [High-Risk Profile](#high-risk-profile)). `default.set` holds the same values as the EA's built-in input defaults, so attaching the EA without loading anything gives the same setup. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
+Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (see [High-Risk Profile](#high-risk-profile)) and `settings/usdjpy.set`, which runs next to gold on the same account (see [Gold + USDJPY](#gold--usdjpy-on-one-account)). `default.set` holds the same values as the EA's built-in input defaults, so attaching the EA without loading anything gives the same setup. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
 
 | default | |
 |---|---|
@@ -261,6 +261,25 @@ Two profiles are bundled: `settings/default.set` and `settings/high-risk.set` (s
 Monthly reports with every balance graph, M1 and M5: [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +176.4%, M1 +4.0%) and [`reports/high-risk-2025`](reports/high-risk-2025/summary.md) (M5 +97.4%, M1 +78.3%); the default profile's are [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) and [`reports/default-2025`](reports/default-2025/summary.md).
 
 Doubling the risk doubles the size of the edge, not the edge itself: the return per unit of drawdown stays the same, and the profile still loses when gold moves sideways. Higher risk (3.75% and 5%) returned more but with 52-64% drawdowns. A frequent-trading M1 variant (entries during the bar, up to 4 positions $1.50 apart, a faster trend score) was tested and rejected: at 2.5% risk it lost up to 60% in a single month.
+
+### Gold + USDJPY on One Account
+
+The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold moves sideways (their prices move opposite: monthly correlation -0.36 since 2022). `settings/usdjpy.set` is the default profile with every distance scaled by USDJPY's daily volatility, nothing tuned: a 786-point (0.786 yen) stop and checkpoint, 393-point entry spacing, a 0.309% D1 trend distance, a 2-pip spread cap, `PointInputDigits` 0 and `MaxLotSize` 0.20 (about $100 at the stop, like gold's 0.05 lot).
+
+| M5, $2,000 per month, 1.25% risk each | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Drawdown across months |
+|---|---|---|---|---|---|---|---|---|---|
+| Gold (`default.set`) | -11.6% | -14.0% | +6.0% | +66.0% | +83.3% | +129.7% | 27/57 | -5.7% | 28.2% |
+| USDJPY (`usdjpy.set`) | +54.6% | +0.8% | +43.8% | -9.7% | -7.8% | +81.6% | 26/57 | -6.9% | 23.1% |
+| **Both on one account** | +42.9% | -13.2% | +49.8% | +56.2% | +75.5% | **+211.3%** | 32/57 | -6.9% | **30.4%** |
+
+"Both" is the sum of the two monthly runs (the tester runs one EA at a time). The gold row is a later re-run of the same profile and differs from the table above by up to 0.2 points per year. To run it:
+
+1. One **hedging** account, two M5 charts: XAUUSDm with `default.set`, USDJPYm with `usdjpy.set`.
+2. On the gold chart set **`DrawdownScope` = This EA's Own Trades** (`usdjpy.set` already has it). Otherwise one symbol's losing streak raises the other's entry score, which the backtest above did not do.
+3. Each EA only touches its own symbol's positions, so both can keep the same `MagicNumber`. The per-trade, basket and total-loss stops count only the chart's own trades; the account-wide checks (`MinEquityPercent` drawdown pause, `MinimumEquity`, `TargetEquity`, leverage pause) watch the whole account, and each EA then closes only its own positions.
+4. Expect up to 4 positions and about 5% of equity at risk at the same time.
+
+Alone, USDJPY is a weak earner (it lost in 2025 and 2026); it is a partner for gold, not a replacement. Using the opposite movement as a filter instead (gold buys only while USDJPY falls, and back) was tested and rejected: it cut gold to +86-112% and USDJPY to +12-14%, because the two also trend together at times (2024). The same scaled test on EURUSD, GBPUSD, AUDUSD, silver and platinum found no useful partner (EURUSD -49%, AUDUSD -145%, silver -185%; GBPUSD +11% added nothing); US stock indices were not tested.
 
 > **Brokers with other quote decimals**: point values are written for a 3-digit gold quote (0.001), and `PointInputDigits` (default 3) rescales them to the symbol's own decimals so every distance keeps the same price meaning. Where gold is quoted with 2 decimals, 20000 points become 2000, still a $20 move, instead of a $200 stop with 10× the risk. This covers `SLValue`, `TPValue`, `TrailingDistanceValue` and `RRRiskValue` when their type is Points, plus `ZonePoints` and `MaxSpreadPoints`. The EA prints a `[POINTS]` line at start-up when it rescales. Set `PointInputDigits = 0` to use point values exactly as typed (for example on forex, where your own values are written for that symbol).
 

@@ -122,6 +122,7 @@ MaxLosingPositionsSameDir=2
 LosingPosScorePenalty=1.5
 DrawdownThresholdPct=3.0
 DrawdownScoreBoost=2.0
+DrawdownScope=0
 ConsecutiveLossesBeforeCooldown=3
 ConsecutiveLossCooldownBars=3
 LossStreakPauseCount=4
