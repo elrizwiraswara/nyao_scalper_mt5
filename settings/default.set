@@ -21,18 +21,17 @@
 ;           profit, so a trade that got that far can no longer end as a loss (CheckpointBreakEvenPct).
 ;   Flip  : a losing trade is closed early once the opposite score reaches 6 (the trend turned).
 ;   Pause : after 4 losses in a row, paper-trade until a paper win, then trade again.
-; Backtest v50.0, $2,000 per month (each month a fresh run), 1.25% risk sizing (= 0.01 lot),
-; sums of monthly returns:
-;   Jan-Sep 2026, real ticks (reports/default-2026-real-ticks):
-;     M5: +83.3%, 6/9 months up, worst month -3.1%, max DD 20.0%, PF 1.20
-;         (Jan-Jun +85.8%, Jul-Sep -2.5%)
-;     M1: +19.5%, 5/9 months up, worst month -17.8%, max DD 32.3%, PF 1.04
-;   2025, ticks generated from 1-minute bars (reports/default-2025):
-;     M5: +66.2%, 10/12 months up, worst month -2.2%, max DD 11.7%, PF 1.38
-;     M1: +25.2%, 7/12 months up, worst month -3.9%, max DD 14.1%, PF 1.12
-;   2022 / 2023 / 2024 on M5, generated ticks: -11.6% / -13.9% / +6.2%.
+; Backtest v52.0, Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run),
+; 1.25% risk sizing (= 0.01 lot), sums of monthly returns (reports/default-2026-real-ticks):
+;     M5: +93.8%, 5/9 months up, worst month -2.7%, max DD 19.2%, PF 1.23
+;         (Jan-Jun +100.0%, Jul-Sep -6.2%)
+;     M1: +24.0%, 5/9 months up, worst month -13.5%, max DD 31.4%, PF 1.05
+;   The +$15 lock added about 10 points on M5 vs v51.0 (+83.3%) with a smaller drawdown
+;   (20.0% -> 19.2%); it gained in the trend months and gave a little back in Jul-Sep.
+;   Before the lock (v51.0 rules, M5, ticks generated from 1-minute bars, not real ticks):
+;   2022 -11.6% / 2023 -13.9% / 2024 +6.2% / 2025 +66.2%.
 ;   The profile makes its money when gold trends hard (2025-2026) and loses in sideways years.
-;   It was designed on data that includes 2025-2026, so those years are not a blind test.
+;   It was designed on data that includes 2026, so that year is not a blind test.
 ; Requirements / warnings:
 ;   - Account: $2,000+ standard recommended, or $100+ cent (balance in cents). On a standard
 ;     account below about $1,600 the 0.01 minimum lot risks more than 1.25%: it is still traded
