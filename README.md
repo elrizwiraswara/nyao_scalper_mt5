@@ -205,7 +205,7 @@ With `EnableCheckpointExit` the take-profit is **not sent to the broker** — it
 - **No longer valid → close** at the checkpoint.
 - **What "valid" means** (`CheckpointHoldMode`): the higher-timeframe trend still agrees (uses the `EnableHTFTrendFilter` settings — turn it on), the signal score still points the same way, or both.
 - **Trailing stop** (`CheckpointTrailPct`, `CheckpointTrailStartPct`; 0 = off): both are a **% of the checkpoint distance** (the TP distance), so they follow it automatically if you change it. Once the trade is `CheckpointTrailStartPct`% of that distance in profit, the SL follows the price `CheckpointTrailPct`% of it behind and never moves back. With a start of 0, trailing begins after the first held checkpoint. The checkpoint lock still applies, and whichever stop is tighter wins. The default profile uses 100% / 50%: with its $20 checkpoint, the SL trails $20 behind the price from +$10.
-- **Break-even lock** (`CheckpointBreakEvenPct`, default 75 = +$15 of the $20 checkpoint; 0 = off): once the trade is this % of the checkpoint distance in profit, the SL moves to the **smallest possible profit**: one tick beyond the entry plus commission and any negative swap. On a fast market the stop can still fill a little below that level.
+- **Break-even lock** (`CheckpointBreakEvenPct`, default 75 = +$15 of the $20 checkpoint; 0 = off): once the trade is this % of the checkpoint distance in profit, the SL moves to the **smallest possible profit**: one tick beyond the entry plus commission and any negative swap. On a fast market the stop can still fill a little below that level. Tested on Jan-Sep 2026 real ticks (M5, monthly runs): the +$15 lock raised the default from +83.3% to +93.8% with a slightly smaller drawdown (19.2% vs 20.0%); a +$5 lock cut the profit by more than half, because most trades were closed at about $0 before they could run.
 - **All checkpoint settings at a glance:**
   - distance: `TPInputType` / `TPValue`
   - what keeps a trade: `CheckpointHoldMode`
@@ -253,12 +253,16 @@ Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (se
 
 `settings/high-risk.set` uses the default rules with twice the risk per trade. Only two inputs differ: `RiskPerTradePct` 2.5 (0.02 lot on $2,000, dropping to 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more than 2.5% and is traded down to about $400, the same 5% cap as the default) and `MaxLotSize` 0.10 (so a $100 cent account can trade 0.10 lot). Use it on **M5**.
 
+Jan-Sep 2026, real ticks, v52.0 (with the +$15 break-even lock), M5, $2,000 per month: `default.set` **+93.8%** (worst month -2.7%, max DD 19.2%), `high-risk.set` **+187.5%** (worst month -14.4%, max DD 35.5%).
+
+The longer history below was measured before the +$15 lock (v51.0 rules); 2022-2025 use ticks generated from 1-minute bars, not real ticks:
+
 | M5, $2,000 per month | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Max DD |
 |---|---|---|---|---|---|---|---|---|---|
 | `default.set` (1.25%) | -11.6% | -13.9% | +6.2% | +66.2% | +83.3% | +130.2% | 27/57 | -5.7% | 20.0% |
 | `high-risk.set` (2.5%) | -15.1% | -7.9% | -4.7% | +97.4% | +176.4% | **+246.1%** | 30/57 | **-16.4%** | **36.3%** |
 
-Monthly reports with every balance graph, M1 and M5: [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +176.4%, M1 +4.0%) and [`reports/high-risk-2025`](reports/high-risk-2025/summary.md) (M5 +97.4%, M1 +78.3%); the default profile's are [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) and [`reports/default-2025`](reports/default-2025/summary.md).
+Monthly reports with every balance graph, M1 and M5, real ticks Jan-Sep 2026 (v52.0): [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) (M5 +93.8%, M1 +24.0%) and [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +187.5%, M1 +20.8%).
 
 Doubling the risk doubles the size of the edge, not the edge itself: the return per unit of drawdown stays the same, and the profile still loses when gold moves sideways. Higher risk (3.75% and 5%) returned more but with 52-64% drawdowns. A frequent-trading M1 variant (entries during the bar, up to 4 positions $1.50 apart, a faster trend score) was tested and rejected: at 2.5% risk it lost up to 60% in a single month.
 
@@ -272,7 +276,7 @@ The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold 
 | USDJPY (`usdjpy.set`) | +54.6% | +0.8% | +43.8% | -9.7% | -7.8% | +81.6% | 26/57 | -6.9% | 23.1% |
 | **Both on one account** | +42.9% | -13.2% | +49.8% | +56.2% | +75.5% | **+211.3%** | 32/57 | -6.9% | **30.4%** |
 
-"Both" is the sum of the two monthly runs (the tester runs one EA at a time). The gold row is a later re-run of the same profile and differs from the table above by up to 0.2 points per year. To run it:
+"Both" is the sum of the two monthly runs (the tester runs one EA at a time), measured with the v51.0 gold rules before the +$15 lock. The gold row is a later re-run of the same profile and differs from the table above by up to 0.2 points per year. To run it:
 
 1. One **hedging** account, two M5 charts: XAUUSDm with `default.set`, USDJPYm with `usdjpy.set`.
 2. On the gold chart set **`DrawdownScope` = This EA's Own Trades** (`usdjpy.set` already has it). Otherwise one symbol's losing streak raises the other's entry score, which the backtest above did not do.

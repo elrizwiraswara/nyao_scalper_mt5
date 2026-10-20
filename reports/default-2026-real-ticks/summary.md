@@ -2,14 +2,14 @@
 
 | Setting | Value |
 |---|---|
-| EA | Nyao Scalper v50.0 (`nyao_scalper.mq5`) |
+| EA | Nyao Scalper v52.0 (`nyao_scalper.mq5`) |
 | Settings | `settings/default.set` |
-| Git commit | 5894cd7 |
+| Git commit | d30e425 |
 | Symbol / timeframes | XAUUSDm / M1, M5 |
 | Tick data | Every tick based on real ticks |
 | Deposit / leverage | 2,000 USD / 1:500 |
 | Runs | One run per month, each starting from a fresh deposit |
-| Generated | 2026-10-16 20:53 with `tools/backtest/nyao_backtest.py` |
+| Generated | 2026-10-20 08:50 with `tools/backtest/nyao_backtest.py` |
 
 ## Summary
 
@@ -17,97 +17,97 @@ Total return is the sum of the monthly returns (each month starts from the same 
 
 | Timeframe | Total return | Profitable | Best / worst run | Max drawdown | Trades | Win rate | Avg win / loss | Profit factor | Tick data |
 |---|---|---|---|---|---|---|---|---|---|
-| M1 | +19.5% | 5/9 | +27.9% / -17.8% | 32.3% | 1,484 | 36% | $21.04 / -$11.21 | 1.04 | 100% real ticks |
-| M5 | +83.3% | 6/9 | +39.9% / -3.1% | 20.0% | 1,112 | 44% | $20.71 / -$13.42 | 1.20 | 100% real ticks |
+| M1 | +24.0% | 5/9 | +25.9% / -13.5% | 31.4% | 1,494 | 35% | $20.93 / -$10.75 | 1.05 | 100% real ticks |
+| M5 | +93.8% | 5/9 | +47.6% / -2.7% | 19.2% | 1,122 | 44% | $20.39 / -$12.84 | 1.23 | 100% real ticks |
 
 ## Results per run
 
 | Run | M1 | M5 |
 |---|---|---|
-| 2026-01 | +27.9% (DD 9%, 181 trades) | +39.9% (DD 9%, 166 trades) |
-| 2026-02 | -17.8% (DD 32%, 259 trades) | +1.4% (DD 19%, 202 trades) |
-| 2026-03 | +10.9% (DD 16%, 279 trades) | +9.9% (DD 19%, 198 trades) |
-| 2026-04 | -11.8% (DD 27%, 130 trades) | -2.8% (DD 20%, 84 trades) |
-| 2026-05 | -9.5% (DD 18%, 120 trades) | +1.6% (DD 13%, 90 trades) |
-| 2026-06 | +20.4% (DD 10%, 192 trades) | +35.8% (DD 8%, 153 trades) |
-| 2026-07 | +0.9% (DD 15%, 107 trades) | -3.1% (DD 10%, 66 trades) |
-| 2026-08 | -5.4% (DD 14%, 135 trades) | +2.7% (DD 11%, 96 trades) |
-| 2026-09 | +3.7% (DD 8%, 81 trades) | -2.0% (DD 12%, 57 trades) |
+| 2026-01 | +25.9% (DD 9%, 185 trades) | +47.6% (DD 9%, 176 trades) |
+| 2026-02 | -13.5% (DD 31%, 262 trades) | +5.8% (DD 16%, 202 trades) |
+| 2026-03 | +10.8% (DD 15%, 281 trades) | +11.4% (DD 18%, 199 trades) |
+| 2026-04 | -10.3% (DD 26%, 131 trades) | -2.0% (DD 19%, 87 trades) |
+| 2026-05 | -7.1% (DD 16%, 118 trades) | +2.8% (DD 13%, 91 trades) |
+| 2026-06 | +18.4% (DD 10%, 189 trades) | +34.4% (DD 8%, 147 trades) |
+| 2026-07 | +1.3% (DD 14%, 109 trades) | -1.7% (DD 8%, 67 trades) |
+| 2026-08 | -5.3% (DD 14%, 136 trades) | -2.7% (DD 10%, 96 trades) |
+| 2026-09 | +3.8% (DD 8%, 83 trades) | -1.7% (DD 12%, 57 trades) |
 
 ## Balance graphs
 
 ### M1
 
-**2026-01** +27.9%
+**2026-01** +25.9%
 
 ![M1 2026-01](graphs/M1_2026-01.png)
 
-**2026-02** -17.8%
+**2026-02** -13.5%
 
 ![M1 2026-02](graphs/M1_2026-02.png)
 
-**2026-03** +10.9%
+**2026-03** +10.8%
 
 ![M1 2026-03](graphs/M1_2026-03.png)
 
-**2026-04** -11.8%
+**2026-04** -10.3%
 
 ![M1 2026-04](graphs/M1_2026-04.png)
 
-**2026-05** -9.5%
+**2026-05** -7.1%
 
 ![M1 2026-05](graphs/M1_2026-05.png)
 
-**2026-06** +20.4%
+**2026-06** +18.4%
 
 ![M1 2026-06](graphs/M1_2026-06.png)
 
-**2026-07** +0.9%
+**2026-07** +1.3%
 
 ![M1 2026-07](graphs/M1_2026-07.png)
 
-**2026-08** -5.4%
+**2026-08** -5.3%
 
 ![M1 2026-08](graphs/M1_2026-08.png)
 
-**2026-09** +3.7%
+**2026-09** +3.8%
 
 ![M1 2026-09](graphs/M1_2026-09.png)
 
 ### M5
 
-**2026-01** +39.9%
+**2026-01** +47.6%
 
 ![M5 2026-01](graphs/M5_2026-01.png)
 
-**2026-02** +1.4%
+**2026-02** +5.8%
 
 ![M5 2026-02](graphs/M5_2026-02.png)
 
-**2026-03** +9.9%
+**2026-03** +11.4%
 
 ![M5 2026-03](graphs/M5_2026-03.png)
 
-**2026-04** -2.8%
+**2026-04** -2.0%
 
 ![M5 2026-04](graphs/M5_2026-04.png)
 
-**2026-05** +1.6%
+**2026-05** +2.8%
 
 ![M5 2026-05](graphs/M5_2026-05.png)
 
-**2026-06** +35.8%
+**2026-06** +34.4%
 
 ![M5 2026-06](graphs/M5_2026-06.png)
 
-**2026-07** -3.1%
+**2026-07** -1.7%
 
 ![M5 2026-07](graphs/M5_2026-07.png)
 
-**2026-08** +2.7%
+**2026-08** -2.7%
 
 ![M5 2026-08](graphs/M5_2026-08.png)
 
-**2026-09** -2.0%
+**2026-09** -1.7%
 
 ![M5 2026-09](graphs/M5_2026-09.png)

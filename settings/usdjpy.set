@@ -14,7 +14,8 @@
 ;   2022 +54.6% / 2023 +0.8% / 2024 +43.8% / 2025 -9.7% / Jan-Sep 2026 -7.8%
 ;   57 months: +81.6%, 26/57 months up, worst month -6.9%; monthly correlation with the gold EA -0.18.
 ;   USDJPY makes its money in its own big trends (2022, 2024) - often when gold goes sideways.
-; Gold (default.set) + this profile on one account, both at 1.25% risk (sum of the monthly runs):
+; Gold (default.set, v51.0 rules before the +$15 lock) + this profile on one account, both at 1.25%
+; risk (sum of the monthly runs):
 ;   +211.3% vs gold alone +129.7%, drawdown across months 30.4% vs 28.2%, 2022 +42.9% vs -11.6%.
 ; Requirements / warnings:
 ;   - Same hedging account as gold; on the gold chart set DrawdownScope = This EA's Own Trades too.
