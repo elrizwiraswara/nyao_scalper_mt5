@@ -17,6 +17,8 @@
 ;           next checkpoint $20 further; otherwise close.
 ;   Trail : once +$10 in profit (50% of the checkpoint distance), the SL follows the price
 ;           $20 behind (100% of it) and never moves back.
+;   Lock  : once +$15 in profit (75% of the checkpoint distance), the SL moves to the smallest
+;           profit, so a trade that got that far can no longer end as a loss (CheckpointBreakEvenPct).
 ;   Flip  : a losing trade is closed early once the opposite score reaches 6 (the trend turned).
 ;   Pause : after 4 losses in a row, paper-trade until a paper win, then trade again.
 ; Backtest v50.0, $2,000 per month (each month a fresh run), 1.25% risk sizing (= 0.01 lot),
@@ -222,7 +224,7 @@ CheckpointMaxSkips=0
 TrendFlipExitScore=6.0
 CheckpointTrailPct=100
 CheckpointTrailStartPct=50
-CheckpointBreakEvenPct=0.0
+CheckpointBreakEvenPct=75.0
 ; 💸 Trailing TP/SL Settings
 EnableTrailing=false
 TrailingEnableBreakEvenLock=true

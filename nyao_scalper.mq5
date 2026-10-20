@@ -283,7 +283,7 @@ input int CheckpointMaxSkips = 0;                         // Loss Side: Times th
 input double TrendFlipExitScore = 6.0;                    // Loss Side: Close a Losing Trade When the Opposite Score Reaches This (0 = Off)
 input double CheckpointTrailPct = 100.0;                  // Trailing Stop Distance Behind the Price, % of the Checkpoint Distance (0 = Off)
 input double CheckpointTrailStartPct = 50.0;              // Start Trailing at This Profit, % of the Checkpoint Distance (0 = After the 1st Held Checkpoint)
-input double CheckpointBreakEvenPct = 0.0;                // Lock the Smallest Profit Once Profit Reaches This % of the Checkpoint Distance (0 = Off)
+input double CheckpointBreakEvenPct = 75.0;               // Lock the Smallest Profit Once Profit Reaches This % of the Checkpoint Distance (0 = Off)
 
 input group "💸 Trailing TP/SL Settings"
 input bool EnableTrailing = false;                        // Enable Trailing TP/SL

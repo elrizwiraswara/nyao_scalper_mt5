@@ -205,7 +205,7 @@ With `EnableCheckpointExit` the take-profit is **not sent to the broker** — it
 - **No longer valid → close** at the checkpoint.
 - **What "valid" means** (`CheckpointHoldMode`): the higher-timeframe trend still agrees (uses the `EnableHTFTrendFilter` settings — turn it on), the signal score still points the same way, or both.
 - **Trailing stop** (`CheckpointTrailPct`, `CheckpointTrailStartPct`; 0 = off): both are a **% of the checkpoint distance** (the TP distance), so they follow it automatically if you change it. Once the trade is `CheckpointTrailStartPct`% of that distance in profit, the SL follows the price `CheckpointTrailPct`% of it behind and never moves back. With a start of 0, trailing begins after the first held checkpoint. The checkpoint lock still applies, and whichever stop is tighter wins. The default profile uses 100% / 50%: with its $20 checkpoint, the SL trails $20 behind the price from +$10.
-- **Break-even lock** (`CheckpointBreakEvenPct`, default 0 = off): once the trade is this % of the checkpoint distance in profit, the SL moves to the **smallest possible profit**: one tick beyond the entry plus commission and any negative swap. On a fast market the stop can still fill a little below that level.
+- **Break-even lock** (`CheckpointBreakEvenPct`, default 75 = +$15 of the $20 checkpoint; 0 = off): once the trade is this % of the checkpoint distance in profit, the SL moves to the **smallest possible profit**: one tick beyond the entry plus commission and any negative swap. On a fast market the stop can still fill a little below that level.
 - **All checkpoint settings at a glance:**
   - distance: `TPInputType` / `TPValue`
   - what keeps a trade: `CheckpointHoldMode`
@@ -244,7 +244,7 @@ Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (se
 | Entries | Trend score ≥ 5 (the multi-hour trend agrees), only in the D1 trend direction (close at least 0.5% beyond a rising / falling EMA50) |
 | Stop | Fixed $20 move (20000 points on 3-digit quotes) |
 | Lot size | Largest lot that loses at most 1.25% at the stop (`RiskPerTradePct`), capped at 0.05: 0.01 lot on $2,000, 0.05 lot on a $100 cent account |
-| Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
+| Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; break-even lock at +$15, so a trade that got that far can't end as a loss; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
 | Hedge chain | Off |
 | Account | **Standard account: $2,000 or more recommended** (0.01 lot risks $20, about 1%). Below about $1,600 the 0.01 minimum lot risks more than 1.25%: the EA still trades it down to about $400 (up to 5% per trade, `MaxRiskPerTradePct`, shown in orange on the dashboard) and opens nothing below that. **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%) |
