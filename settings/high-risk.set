@@ -10,9 +10,9 @@
 ;           than 2.5% and is still traded down to about $400 (MaxRiskPerTradePct 5, as in the default).
 ;   MaxLotSize 0.10 (default 0.05): lets a $100 cent account trade 0.10 lot (2%).
 ;   (Same exits as the default, including the +$15 break-even lock.)
-; Backtest v52.0, Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run),
+; Backtest v53.0, Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run),
 ; sums of monthly returns (reports/high-risk-2026-real-ticks):
-;     M5: +187.5%, 4/9 months up, worst month -14.4%, max DD 35.5%, PF 1.21
+;     M5: +187.6%, 4/9 months up, worst month -14.4%, max DD 35.5%, PF 1.21
 ;     M1: +20.8%, 5/9 months up, worst month -24.7%, max DD 47.4%, PF 1.02
 ;   Before the +$15 lock (v51.0 rules, M5; 2022-2025 ticks generated from 1-minute bars):
 ;   2022 -15.1% / 2023 -7.9% / 2024 -4.7% / 2025 +97.4% / Jan-Sep 2026 +176.4%;

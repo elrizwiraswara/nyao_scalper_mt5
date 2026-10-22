@@ -253,7 +253,7 @@ Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (se
 
 `settings/high-risk.set` uses the default rules with twice the risk per trade. Only two inputs differ: `RiskPerTradePct` 2.5 (0.02 lot on $2,000, dropping to 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more than 2.5% and is traded down to about $400, the same 5% cap as the default) and `MaxLotSize` 0.10 (so a $100 cent account can trade 0.10 lot). Use it on **M5**.
 
-Jan-Sep 2026, real ticks, v52.0 (with the +$15 break-even lock), M5, $2,000 per month: `default.set` **+93.8%** (worst month -2.7%, max DD 19.2%), `high-risk.set` **+187.5%** (worst month -14.4%, max DD 35.5%).
+Jan-Sep 2026, real ticks, v53.0 (with the +$15 break-even lock), M5, $2,000 per month: `default.set` **+93.8%** (worst month -2.7%, max DD 19.2%), `high-risk.set` **+187.6%** (worst month -14.4%, max DD 35.5%).
 
 The longer history below was measured before the +$15 lock (v51.0 rules); 2022-2025 use ticks generated from 1-minute bars, not real ticks:
 
@@ -262,7 +262,7 @@ The longer history below was measured before the +$15 lock (v51.0 rules); 2022-2
 | `default.set` (1.25%) | -11.6% | -13.9% | +6.2% | +66.2% | +83.3% | +130.2% | 27/57 | -5.7% | 20.0% |
 | `high-risk.set` (2.5%) | -15.1% | -7.9% | -4.7% | +97.4% | +176.4% | **+246.1%** | 30/57 | **-16.4%** | **36.3%** |
 
-Monthly reports with every balance graph, M1 and M5, real ticks Jan-Sep 2026 (v52.0): [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) (M5 +93.8%, M1 +24.0%) and [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +187.5%, M1 +20.8%).
+Monthly reports with every run's balance & equity graph, M1 and M5, real ticks Jan-Sep 2026 (v53.0): [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) (M5 +93.8%, M1 +24.0%) and [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +187.6%, M1 +20.8%).
 
 Doubling the risk doubles the size of the edge, not the edge itself: the return per unit of drawdown stays the same, and the profile still loses when gold moves sideways. Higher risk (3.75% and 5%) returned more but with 52-64% drawdowns. A frequent-trading M1 variant (entries during the bar, up to 4 positions $1.50 apart, a faster trend score) was tested and rejected: at 2.5% risk it lost up to 60% in a single month.
 
