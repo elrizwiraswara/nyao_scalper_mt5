@@ -1,4 +1,4 @@
-# Nyao Scalper v52.0
+# Nyao Scalper v53.0
 
 ![Nyao Scalper MT5: a trade from a 7.3 signal score with stop loss, break-even, partial close, trailing stop and exit](assets/cover.png)
 
