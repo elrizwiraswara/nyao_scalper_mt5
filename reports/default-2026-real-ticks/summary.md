@@ -2,14 +2,14 @@
 
 | Setting | Value |
 |---|---|
-| EA | Nyao Scalper v52.0 (`nyao_scalper.mq5`) |
+| EA | Nyao Scalper v53.0 (`nyao_scalper.mq5`) |
 | Settings | `settings/default.set` |
-| Git commit | d30e425 |
+| Git commit | 882a821 |
 | Symbol / timeframes | XAUUSDm / M1, M5 |
 | Tick data | Every tick based on real ticks |
 | Deposit / leverage | 2,000 USD / 1:500 |
 | Runs | One run per month, each starting from a fresh deposit |
-| Generated | 2026-10-20 08:50 with `tools/backtest/nyao_backtest.py` |
+| Generated | 2026-10-22 19:25 with `tools/backtest/nyao_backtest.py` |
 
 ## Summary
 
@@ -34,80 +34,80 @@ Total return is the sum of the monthly returns (each month starts from the same 
 | 2026-08 | -5.3% (DD 14%, 136 trades) | -2.7% (DD 10%, 96 trades) |
 | 2026-09 | +3.8% (DD 8%, 83 trades) | -1.7% (DD 12%, 57 trades) |
 
-## Balance graphs
+## Balance & equity graphs
 
 ### M1
 
 **2026-01** +25.9%
 
-![M1 2026-01](graphs/M1_2026-01.png)
+![M1 2026-01](graphs/M1_2026-01_equity.svg)
 
 **2026-02** -13.5%
 
-![M1 2026-02](graphs/M1_2026-02.png)
+![M1 2026-02](graphs/M1_2026-02_equity.svg)
 
 **2026-03** +10.8%
 
-![M1 2026-03](graphs/M1_2026-03.png)
+![M1 2026-03](graphs/M1_2026-03_equity.svg)
 
 **2026-04** -10.3%
 
-![M1 2026-04](graphs/M1_2026-04.png)
+![M1 2026-04](graphs/M1_2026-04_equity.svg)
 
 **2026-05** -7.1%
 
-![M1 2026-05](graphs/M1_2026-05.png)
+![M1 2026-05](graphs/M1_2026-05_equity.svg)
 
 **2026-06** +18.4%
 
-![M1 2026-06](graphs/M1_2026-06.png)
+![M1 2026-06](graphs/M1_2026-06_equity.svg)
 
 **2026-07** +1.3%
 
-![M1 2026-07](graphs/M1_2026-07.png)
+![M1 2026-07](graphs/M1_2026-07_equity.svg)
 
 **2026-08** -5.3%
 
-![M1 2026-08](graphs/M1_2026-08.png)
+![M1 2026-08](graphs/M1_2026-08_equity.svg)
 
 **2026-09** +3.8%
 
-![M1 2026-09](graphs/M1_2026-09.png)
+![M1 2026-09](graphs/M1_2026-09_equity.svg)
 
 ### M5
 
 **2026-01** +47.6%
 
-![M5 2026-01](graphs/M5_2026-01.png)
+![M5 2026-01](graphs/M5_2026-01_equity.svg)
 
 **2026-02** +5.8%
 
-![M5 2026-02](graphs/M5_2026-02.png)
+![M5 2026-02](graphs/M5_2026-02_equity.svg)
 
 **2026-03** +11.4%
 
-![M5 2026-03](graphs/M5_2026-03.png)
+![M5 2026-03](graphs/M5_2026-03_equity.svg)
 
 **2026-04** -2.0%
 
-![M5 2026-04](graphs/M5_2026-04.png)
+![M5 2026-04](graphs/M5_2026-04_equity.svg)
 
 **2026-05** +2.8%
 
-![M5 2026-05](graphs/M5_2026-05.png)
+![M5 2026-05](graphs/M5_2026-05_equity.svg)
 
 **2026-06** +34.4%
 
-![M5 2026-06](graphs/M5_2026-06.png)
+![M5 2026-06](graphs/M5_2026-06_equity.svg)
 
 **2026-07** -1.7%
 
-![M5 2026-07](graphs/M5_2026-07.png)
+![M5 2026-07](graphs/M5_2026-07_equity.svg)
 
 **2026-08** -2.7%
 
-![M5 2026-08](graphs/M5_2026-08.png)
+![M5 2026-08](graphs/M5_2026-08_equity.svg)
 
 **2026-09** -1.7%
 
-![M5 2026-09](graphs/M5_2026-09.png)
+![M5 2026-09](graphs/M5_2026-09_equity.svg)
