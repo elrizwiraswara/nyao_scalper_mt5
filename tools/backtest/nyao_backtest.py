@@ -6,7 +6,8 @@
 
 `run` compiles the EA from this repo into the terminal (MQL5/Experts/NyaoBacktest), installs the .set file,
 closes the terminal, runs one Strategy Tester pass per timeframe x month (fresh deposit each), reopens the
-terminal and writes reports/<name>/ (summary.md, index.html, results.csv, graphs/). `report` rebuilds that
+terminal and writes reports/<name>/ (summary.md, index.html, results.csv, graphs/, and equity/: the EA's hourly
+balance & equity log per run, drawn as that run's graph). `report` rebuilds that
 folder from the terminal's existing tester reports. Windows only; Python 3.8+ standard library only.
 """
 import argparse
@@ -325,6 +326,7 @@ def cmd_run(a):
     try:
         for i, r in enumerate(runs, 1):
             clear_report(data_dir, r['report'])
+            (common_files() / EQUITY_LOG).unlink(missing_ok=True)
             set_tester_tab_graph(data_dir)
             start = time.time()
             r['status'] = 'interrupted'                                  # until this run finishes
@@ -341,6 +343,8 @@ def cmd_run(a):
             if status == 'done' and not (htm.is_file() and htm.stat().st_mtime >= start - 2):   # missing or not rewritten
                 status = 'no report'
             r['status'] = status
+            if status == 'done':
+                save_equity(common_files() / EQUITY_LOG, out / 'equity' / f'{r["period"]}_{safe(r["window"])}.csv')
             print(f'[{i}/{len(runs)}] {r["period"]} {r["window"]}: {status} in {time.time() - start:.0f}s', flush=True)
     finally:
         if proc is not None and proc.poll() is None:                    # stopped mid-run: end the tester first
@@ -349,6 +353,100 @@ def cmd_run(a):
         if was_running and not a.no_reopen:
             reopen_terminal(terminal)
     build_report(plan, data_dir, keep_raw=a.keep_raw)
+
+
+# --------------------------------------------------------------------------- balance & equity log
+EQUITY_LOG = 'nyao_equity.csv'      # written by the EA in the Strategy Tester (input TesterEquityLog, on by default)
+
+
+def common_files():
+    """The terminals' shared Common/Files folder (FILE_COMMON writes from the tester land here)."""
+    return Path(os.environ.get('APPDATA', '')) / 'MetaQuotes' / 'Terminal' / 'Common' / 'Files'
+
+
+def save_equity(src, dest):
+    """The EA's 5-minute balance/equity log -> one row per hour (last balance and equity, lowest equity in the hour)."""
+    if not src.is_file():
+        return False
+    hours = {}
+    with open(src, newline='', encoding='utf-8', errors='ignore') as f:
+        for row in csv.DictReader(f):
+            try:
+                t = dt.datetime.strptime(row['time'], '%Y.%m.%d %H:%M')
+                b, eq, lo = float(row['balance']), float(row['equity']), float(row['min_equity'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            h = t.replace(minute=0)
+            hours[h] = (b, eq, min(hours[h][2], lo) if h in hours else lo)
+    src.unlink(missing_ok=True)
+    if not hours:
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, 'w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(['time', 'balance', 'equity', 'min_equity'])
+        for h in sorted(hours):
+            b, eq, lo = hours[h]
+            w.writerow([h.strftime('%Y-%m-%d %H:%M'), f'{b:.2f}', f'{eq:.2f}', f'{lo:.2f}'])
+    return True
+
+
+def read_equity(path):
+    with open(path, newline='', encoding='utf-8') as f:
+        return [(dt.datetime.strptime(r['time'], '%Y-%m-%d %H:%M'), float(r['balance']), float(r['equity']), float(r['min_equity']))
+                for r in csv.DictReader(f)]
+
+
+def equity_svg(rows, width=640, height=230):
+    """Standalone SVG on a white card (like the tester's own graphs): balance, equity and the lowest equity.
+    The x-axis counts trading hours, so weekends and other closed hours take no space (as on MT5 charts)."""
+    L, R, T, B = 58, 12, 32, 26
+    n = len(rows)
+    lo = min(min(r[3] for r in rows), min(r[1] for r in rows))
+    hi = max(max(r[1] for r in rows), max(r[2] for r in rows))
+    pad = (hi - lo) * 0.06 or max(hi * 0.01, 1.0)
+    lo, hi = lo - pad, hi + pad
+    X = lambda i: L + (i / (n - 1) if n > 1 else 0.5) * (width - L - R)
+    Y = lambda v: T + (hi - v) / (hi - lo) * (height - T - B)
+    line = lambda k: ' '.join(f'{X(i):.1f},{Y(r[k]):.1f}' for i, r in enumerate(rows))
+    band = line(3) + ' ' + ' '.join(f'{X(i):.1f},{Y(rows[i][2]):.1f}' for i in range(n - 1, -1, -1))
+    raw_step = (hi - lo) / 4
+    mag = 10 ** (len(str(int(max(raw_step, 1)))) - 1)
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw_step)
+    grid, v = '', (int(lo // step) + 1) * step
+    while v < hi:
+        grid += (f'<line x1="{L}" x2="{width - R}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="#ebeae6"/>'
+                 f'<text x="{L - 6}" y="{Y(v) + 5:.1f}" text-anchor="end">{v:,.0f}</text>')
+        v += step
+    t0, t1 = rows[0][0], rows[-1][0]
+    marks = []                                                     # (row index, label) at the first hour of each label day
+    if (t1.date() - t0.date()).days > 62:
+        seen = set()
+        for i, r in enumerate(rows):
+            key = (r[0].year, r[0].month)
+            if key not in seen:
+                seen.add(key)
+                if i > 0:
+                    marks.append((i, r[0].strftime('%b')))
+    else:
+        days = sorted({r[0].date() for r in rows})
+        every = max(1, round(len(days) / 5))
+        first = {}
+        for i, r in enumerate(rows):
+            first.setdefault(r[0].date(), i)
+        marks = [(first[d], f'{d:%b} {d.day}') for d in days[1::every]]
+    xlab = ''.join(f'<line x1="{X(i):.1f}" x2="{X(i):.1f}" y1="{T}" y2="{height - B}" stroke="#f2f1ee"/>'
+                   f'<text x="{X(i):.1f}" y="{height - 7}" text-anchor="middle">{lab}</text>' for i, lab in marks)
+    legend = ''.join(f'<rect x="{x}" y="{12 - h / 2}" width="16" height="{h}" rx="1.5" fill="{c}" opacity="{o}"/><text x="{x + 21}" y="17">{lab}</text>'
+                     for x, h, c, o, lab in ((L, 3, '#2a78d6', 1, 'Balance'), (L + 92, 3, '#1baf7a', 1, 'Equity'),
+                                             (L + 174, 10, '#1baf7a', 0.3, 'Lowest equity (hour)')))
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+            f'font-family="system-ui,Segoe UI,sans-serif" font-size="13" fill="#52514e">'
+            f'<rect width="{width}" height="{height}" fill="#ffffff"/>{grid}{xlab}'
+            f'<polygon points="{band}" fill="#1baf7a" opacity="0.22"/>'
+            f'<polyline points="{line(2)}" fill="none" stroke="#1baf7a" stroke-width="1.8" stroke-linejoin="round"/>'
+            f'<polyline points="{line(1)}" fill="none" stroke="#2a78d6" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'{legend}</svg>')
 
 
 # --------------------------------------------------------------------------- report
@@ -408,7 +506,15 @@ def build_report(plan, data_dir, keep_raw=False):
             raw = out / 'raw'; raw.mkdir(exist_ok=True)
             for f in report_files(data_dir, r['report']):
                 shutil.copy2(f, raw / f.name)
-        rows.append(dict(r, missing=False, pct=m['net'] / dep * 100, graph=graph if png.is_file() else '', **m))
+        eq_csv = out / 'equity' / f'{r["period"]}_{safe(r["window"])}.csv'    # the EA's balance & equity log
+        eq_graph = ''
+        if eq_csv.is_file():
+            eq_rows = read_equity(eq_csv)
+            if eq_rows:
+                eq_graph = f'graphs/{r["period"]}_{safe(r["window"])}_equity.svg'
+                (out / eq_graph).write_text(equity_svg(eq_rows), encoding='utf-8')
+        rows.append(dict(r, missing=False, pct=m['net'] / dep * 100, graph=eq_graph or (graph if png.is_file() else ''),
+                         equity_graph=bool(eq_graph), **m))
 
     with open(out / 'results.csv', 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
@@ -498,7 +604,7 @@ def render_markdown(plan, rows, summary):
     md += ['| ' + ' | '.join(summary_values(p, s)) + ' |' for p, s in summary.items()]
     md += ['', '## Results per run', '', '| Run | ' + ' | '.join(plan['periods']) + ' |', '|---|' + '---|' * len(plan['periods'])]
     md += [f'| {w} | ' + ' | '.join(cell_text(by.get((p, w))) for p in plan['periods']) + ' |' for w in plan['windows']]
-    md += ['', '## Balance graphs', '']
+    md += ['', '## Balance & equity graphs' if any(r.get('equity_graph') for r in rows) else '## Balance graphs', '']
     for p in plan['periods']:
         md += [f'### {p}', '']
         for w in plan['windows']:
@@ -635,7 +741,7 @@ def render_html(plan, rows, summary):
     for p in plan['periods']:
         figs = ''.join(f'<figure><figcaption><b>{e(w)}</b><span class="{sign_cls(r["pct"])}">{fmt_pct(r["pct"])}</span>'
                        f'<span class="faint">DD {r["dd_pct"]:.0f}% · {r["trades"]} trades</span></figcaption>'
-                       f'<img src="{e(r["graph"])}" alt="{e(p)} {e(w)} balance graph" loading="lazy"></figure>'
+                       f'<img src="{e(r["graph"])}" alt="{e(p)} {e(w)} {"balance & equity" if r.get("equity_graph") else "balance"} graph" loading="lazy"></figure>'
                        for w in windows if (r := by.get((p, w))) and not r['missing'] and r['graph'])
         if figs:
             graphs += f'<h3 class="tf">{e(p)}</h3><div class="cells graphs">{figs}</div>'
@@ -666,7 +772,7 @@ def render_html(plan, rows, summary):
 {spacer}
 {band(table, 'Results per Run')}
 {spacer}
-{band(graphs, 'Balance Graphs')}
+{band(graphs, 'Balance & Equity Graphs' if any(r.get('equity_graph') for r in rows) else 'Balance Graphs')}
 {spacer}
 {band(note, 'Notes')}
 {spacer}

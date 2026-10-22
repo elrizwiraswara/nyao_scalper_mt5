@@ -374,9 +374,11 @@ python tools/backtest/nyao_backtest.py report --name default-2026-real-ticks
 4. Runs one test per timeframe × month at below-normal priority on half the CPU cores. The tester window opens on its **Graph** tab.
 5. Reopens MetaTrader 5.
 6. Writes the report:
-   - `summary.md`: tables and the balance graph of every run (renders on GitHub)
+   - `summary.md`: tables and the balance & equity graph of every run (renders on GitHub)
    - `index.html`: the same, for the browser
-   - `results.csv`, `graphs/` and `plan.json`
+   - `results.csv`, `graphs/`, `equity/` (each run's balance, equity and lowest equity per hour) and `plan.json`
+
+The balance & equity graphs come from the EA's **TesterEquityLog** input (on by default). In the Strategy Tester only, it saves the balance, the equity and the lowest equity of every 5-minute bar; on a live or demo chart it does nothing. Runs made with it off fall back to the tester's own balance-only graph.
 
 | Option | Default | Meaning |
 |---|---|---|
