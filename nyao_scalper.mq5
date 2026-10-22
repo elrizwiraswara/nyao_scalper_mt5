@@ -315,6 +315,7 @@ input bool CloseAllOnLeverageChange = true;               // Also Close All Posi
 input bool EnablePersistState = true;                     // Save/Restore Position & Chain State Across Restarts
 input bool ResetSavedState = false;                       // Discard Saved State on Next Start (set back to false after)
 input bool EnableLogging = false;                         // Enable EA Logging (May cause lag)
+input bool TesterEquityLog = true;                        // Backtest Only: Save Balance & Equity Every 5 Minutes (for reports)
 
 // +------------------------------------------------------------------+
 // | Global Variables                                                 |
@@ -970,8 +971,61 @@ int InitializeEA()
 // +------------------------------------------------------------------+
 // | Expert Deinitialization Function                                 |
 // +------------------------------------------------------------------+
+// +------------------------------------------------------------------+
+// | Backtest equity log (TesterEquityLog, Strategy Tester only)      |
+// | Writes nyao_equity.csv to the terminals' Common/Files folder:    |
+// | one line per 5-minute bar with the balance and equity at its end |
+// | and the lowest equity reached inside it (every tick counts). The |
+// | backtest tool turns it into the balance & equity charts of its   |
+// | reports. Never writes on a live or demo chart; no effect on      |
+// | trading.                                                         |
+// +------------------------------------------------------------------+
+int equityLogHandle = INVALID_HANDLE;
+bool equityLogTried = false;
+datetime equityLogBar = 0;
+double equityLogMin = 0;
+
+void EquityLogWrite(double minEq, double eq)
+{
+    FileWriteString(equityLogHandle, StringFormat("%s,%.2f,%.2f,%.2f\r\n", TimeToString(equityLogBar, TIME_DATE | TIME_MINUTES),
+                    AccountInfoDouble(ACCOUNT_BALANCE), eq, minEq));
+}
+
+void EquityLogTick()
+{
+    if(!equityLogTried)
+    {
+        equityLogTried = true;
+        if(!TesterEquityLog || !MQLInfoInteger(MQL_TESTER)) return;
+        equityLogHandle = FileOpen("nyao_equity.csv", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+        if(equityLogHandle != INVALID_HANDLE) FileWriteString(equityLogHandle, "time,balance,equity,min_equity\r\n");
+    }
+    if(equityLogHandle == INVALID_HANDLE) return;
+    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+    datetime bar = iTime(_Symbol, PERIOD_M5, 0);
+    if(bar == 0) return;
+    if(equityLogBar == 0) { equityLogBar = bar; equityLogMin = eq; }
+    if(bar != equityLogBar)
+    {
+        EquityLogWrite(MathMin(equityLogMin, eq), eq);
+        equityLogBar = bar;
+        equityLogMin = eq;
+    }
+    else if(eq < equityLogMin) equityLogMin = eq;
+}
+
+void EquityLogStop()
+{
+    if(equityLogHandle == INVALID_HANDLE) return;
+    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+    if(equityLogBar != 0) EquityLogWrite(MathMin(equityLogMin, eq), eq);
+    FileClose(equityLogHandle);
+    equityLogHandle = INVALID_HANDLE;
+}
+
 void OnDeinit(const int reason)
 {   
+    EquityLogStop();
     // Cleanup password dialog if active
     if(passwordDialogActive)
     {
@@ -1025,6 +1079,7 @@ void OnDeinit(const int reason)
 // +------------------------------------------------------------------+
 void OnTick()
 {
+    EquityLogTick();                                       // backtest balance & equity log (tester only)
     if(initDeferred) TryDeferredInit();
 
     // Block trading until password is verified (and initialization actually succeeded)

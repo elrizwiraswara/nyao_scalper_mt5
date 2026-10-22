@@ -253,3 +253,4 @@ CloseAllOnLeverageChange=true
 EnablePersistState=true
 ResetSavedState=false
 EnableLogging=false
+TesterEquityLog=true
