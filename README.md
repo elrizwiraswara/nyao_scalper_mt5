@@ -6,7 +6,7 @@
 
 > **Disclaimer:** This Expert Advisor is an experimental project for educational purposes. Trading Forex/CFDs involves significant risk. Past performance is not indicative of future results. Use at your own risk.
 
-Nyao Scalper is an automated trading EA designed for scalping on lower timeframes (M1, M5). It uses a **weighted signal scoring system** that aggregates data from multiple technical factors (Trend, Momentum, Volatility, Price Action) into a single confidence score (0.0 - 10.0).
+Nyao Scalper is an automated trading EA designed for scalping on lower timeframes (M1, M5). It scores how strongly price has trended over the last several hours (range position, EMA distance, directional efficiency and net move) into a single score from 0.0 to 10.0, and trades in the direction of the daily trend.
 
 It includes position management, adaptive trailing stops, and lot sizing based on equity performance and signal quality.
 
@@ -14,26 +14,17 @@ It includes position management, adaptive trailing stops, and lot sizing based o
 
 ### Signal Scoring
 
-The EA scores buys and sells from 0.0 to 10.0 on every tick. `ScoreModel` chooses how (see [Strategy Logic](#strategy-logic)):
+The EA scores buys and sells from 0.0 to 10.0 on every tick (see [Strategy Logic](#strategy-logic)):
 
-- **Trend score** _(default)_: how strongly price has trended over the last several hours: its position in the recent high-low range, its distance from a slow EMA, how efficiently it moved and its net move. Every part is continuous and directional, so the score changes smoothly and buy + sell always add up to 10.
-- **Legacy score** (short-term confluence):
-  - **Trend**: Fast/Slow EMA crossover and slope alignment.
-  - **Momentum**: RSI "sweet spots" (trending ranges), breakouts, and candle body momentum. With `DirectionalBodyMomentum` (default on), a large candle only adds body and impulse points to the side it moved toward: a big bearish candle no longer raises the buy score.
-  - **Impulse**: Detects price acceleration and directional continuity (consecutive candles).
-  - **Volatility**: ATR-based analysis to detect chopping vs. trending markets.
-  - **Price Action**: Penalizes signals with large opposing wicks (rejection) and rewards breakouts from local peaks.
+- **Trend score**: how strongly price has trended over the last several hours: its position in the recent high-low range, its distance from a slow EMA, how efficiently it moved and its net move. Every part is continuous and directional, so the score changes smoothly and buy + sell always add up to 10.
 - **Velocity** _(informational)_: Tracks the _change_ in signal score between bars and shows it on the dashboard. It is not used for any trading decision.
 - **Blended Weighted Average Signal Smoothing**: Combining recent closed candle signals with a configurable dampened current candle contribution for improved responsiveness while maintaining signal stability.
-- **Multi-Bar EMA Slope**: Trend slope is measured over `SlopeLookback` bars instead of a single bar, reducing M1 whipsaw.
 - **Dead-Market Filter** _(off in the default profile: `MinVolRatioToTrade = 0`)_: When the last closed candle's ATR collapses relative to its average (`ATR/AvgATR < MinVolRatioToTrade`), new entries, re-entries and pending limits are blocked — the EA does not scalp a market too quiet to overcome costs. (Open positions are still managed normally.)
-- **New-Bar Entry Evaluation** _(default on)_: With `EnableNewBarEntryOnly`, entries are evaluated once per closed bar on **closed candles only** (the forming candle is ignored for the entry decision, because on the first tick of a bar it is still empty). Position management still runs every tick. This removes intrabar signal repaint and makes backtests representative of live behavior.
+- **New-Bar Entry Evaluation** _(default on)_: With `EnableNewBarEntryOnly`, entries are evaluated once per closed bar on **closed candles only** (the forming candle is ignored for the entry decision, because on the first tick of a bar it holds just that one tick). Position management still runs every tick. This removes intrabar signal repaint and makes backtests representative of live behavior.
 - **Per-Tick Caching**: Signal scores are computed once per tick and cached, eliminating redundant calculations across position management, trailing, and dashboard systems.
-- **Range Filter** _(off by default)_: `MinEfficiencyToTrade` blocks entries unless the last `RangeFilterPeriod` closed bars moved efficiently **in the signal's direction** (directional efficiency ratio = net move ÷ path travelled). In a sideways market the momentum score peaks right at the range edges — buying the top, selling the bottom — and this filter refuses those entries. Try `0.30` with a 20-bar lookback.
+- **Range Filter** _(off by default)_: `MinEfficiencyToTrade` blocks entries unless the last `RangeFilterPeriod` closed bars moved efficiently **in the signal's direction** (directional efficiency ratio = net move ÷ path travelled). In a sideways market the score peaks right at the range edges — buying the top, selling the bottom — and this filter refuses those entries. Try `0.30` with a 20-bar lookback.
 - **ATR-Based Stops** _(opt-in)_: every distance input type (`SLInputType`, `TPInputType`, `TSInputType`) accepts **ATR Multiple**, so stops and trailing scale with current volatility instead of fixed dollars that become too tight as price and volatility rise. `BreakEvenTriggerATR` and `TrailStartATR` delay the break-even lock and trailing until the trade has moved that many ATRs in its favor (0 = legacy dollar/spread triggers).
-- **Regime & Trend Filters**:
-  - **`EnableHTFTrendFilter`** _(on in the default profile, D1 EMA50)_: only allows buys above a rising higher-timeframe EMA, and sells below a falling one. `HTFMinDistancePct` (0.5 in the default profile, 0 = off) also requires the last closed higher-timeframe bar to close at least that % beyond the EMA, so entries are skipped while price hugs it and the trend is unclear.
-  - **`RegimeScoreMode = Efficiency Ratio`** _(off, uncalibrated)_: replaces the ATR-expansion "chop" score with a directional Kaufman Efficiency Ratio (net move in the signal direction ÷ path travelled). This separates a clean trend from a volatile whipsaw.
+- **Higher-Timeframe Trend Filter** (`EnableHTFTrendFilter`, _on in the default profile, D1 EMA50_): only allows buys above a rising higher-timeframe EMA, and sells below a falling one. `HTFMinDistancePct` (0.5 in the default profile, 0 = off) also requires the last closed higher-timeframe bar to close at least that % beyond the EMA, so entries are skipped while price hugs it and the trend is unclear.
 
 ### Risk & Equity Management
 
@@ -75,7 +66,7 @@ The EA scores buys and sells from 0.0 to 10.0 on every tick. `ScoreModel` choose
 
 > **What to expect:** a hedge is a new bet in the opposite direction, against the trend the original trade followed, so it cannot recover losses for free. A covered chain ends near break-even, a stopped chain loses its cap. With the trend-turn gate and the 1.5× SL cap it was roughly neutral in backtests; with a loose gate and a 5%-of-equity cap it lost noticeably.
 
-When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-direction signal confirms** (`HedgeRequireSignal`: the opposite-side score ≥ `HedgeMinSignalScore`, default 6.5: with the Trend score, the multi-hour trend has clearly turned against the position), the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time. The signal gate is an **anti-spike filter**: a wick that crosses the ATR trigger intrabar but isn't a real reversal won't have a strong opposite-side score, so no hedge is opened — the chain waits for the move to be confirmed (or the position to recover).
+When a position moves into loss by `HedgeTriggerATR × ATR` **and the reverse-direction signal confirms** (`HedgeRequireSignal`: the opposite-side score ≥ `HedgeMinSignalScore`, default 6.5: the multi-hour trend has clearly turned against the position), the EA opens a reversed **hedge** and manages the pair as a *rolling chain* — at most two legs open at a time. The signal gate is an **anti-spike filter**: a wick that crosses the ATR trigger intrabar but isn't a real reversal won't have a strong opposite-side score, so no hedge is opened — the chain waits for the move to be confirmed (or the position to recover).
 
 - **Recovery Sizing** (`HedgeAutoLot`): each hedge lot is *computed* so its profit covers `HedgeRecoveryPct%` of the leg it hedges within a `HedgeRecoveryATR × ATR` favorable move — instead of a blind fixed multiplier (which often can't catch up before price reverses). Falls back to `HedgeLotMultiplier` when auto-sizing is off, and is always clamped to `HedgeMaxLot`.
 - **Covered**: hedge profit covers the older leg's current loss → close the older leg; the hedge graduates and trails to ride for more. Two safeguards on the graduated hedge:
@@ -113,9 +104,9 @@ Chain state is saved to disk (see **Restart-Safe State**), so a restart doesn't 
 
 ## Strategy Logic
 
-The EA scores both sides from **0.0 to 10.0** and opens a trade when a side's score reaches `MinBuySignalScore` / `MinSellSignalScore` (default **5.0**), only in the direction the D1 trend filter allows. `ScoreModel` chooses how the score is built.
+The EA scores both sides from **0.0 to 10.0** and opens a trade when a side's score reaches `MinBuySignalScore` / `MinSellSignalScore` (default **5.0**), only in the direction the D1 trend filter allows.
 
-### Trend Score (`ScoreModel = Trend`, default)
+### Trend Score
 
 Four readings of the closed bars, each from -1 (strong down) to +1 (strong up), averaged into `s`:
 
@@ -129,51 +120,20 @@ Four readings of the closed bars, each from -1 (strong down) to +1 (strong up), 
 - **Buy score = 5 + 5s, sell score = 5 - 5s**, so the two always add up to 10: 5 means no trend, 7.5 a clear uptrend for buys (2.5 for sells).
 - A small price change moves the score a little, never in fixed jumps, and nothing adds points for volatility alone.
 - With the default minimum of 5.0 the EA buys while the multi-hour trend leans up and the D1 filter allows buys, and the mirror for sells. On M5 the lookbacks cover about 8 to 17 hours; scale them for other timeframes.
+- On XAUUSDm M5 (2022-2026) the buy score's median was 4.7-5.9 per year, following gold's direction, and the score spread fairly evenly from 1 to 9: it spends little time near 5.
 - The checkpoint hold (`CheckpointHoldMode = Score`) keeps a trade while its side still scores higher, i.e. while the multi-hour trend agrees.
 - The dashboard shows the four parts as `Rng`, `EMA`, `Eff` and `Mom`.
 
-> **Why it is the default:** on XAUUSDm M5 history, the legacy parts that only look at the last few bars (EMA 5/12, RSI 8, candle shape) and its direction-blind volatility points barely separated winning entries from losing ones, and the score jumped 1 to 3 points on tiny price changes. Multi-hour trend readings carried the most information. It is still a modest edge: the score measures trend strength, it is not a probability.
+> **Why a multi-hour score:** up to v53.0 the EA also offered an older short-term score (EMA 5/12, RSI 8, candle body and wicks, breakouts, volatility points). On XAUUSDm M5 history it barely separated winning entries from losing ones, and it jumped 1 to 3 points on tiny price changes; multi-hour trend readings carried the most information. v54.0 removed it with its inputs. It is still a modest edge: the score measures trend strength, it is not a probability.
 
-### Legacy Score (`ScoreModel = Legacy`)
-
-The original short-term confluence score; use a minimum of about 6.0 with it. It sums weights from these components:
-
-1.  **Trend Score (Max 3.0)**:
-    - **Alignment (+1.5)**: Fast EMA > Slow EMA (Buy) or Fast EMA < Slow EMA (Sell).
-    - **Slope (+1.5)**: Fast EMA is rising (Buy) or falling (Sell).
-
-2.  **Momentum Score (Max 3.0)**:
-    - **RSI Sweet Spot (+1.0)**: RSI between 50-80 (Buy) or 20-50 (Sell).
-    - **RSI Breakout (+0.5)**: RSI crossing key levels (60 for Buy, 40 for Sell).
-    - **Body Momentum (+1.5)**: Current candle body is larger than the recent average.
-    - **Impulse Boost**: Momentum score is multiplied by `(1 + ImpulseStrength)` where impulse combines:
-      - Body acceleration (current vs. average body size)
-      - Range expansion (current vs. average candle range)
-      - Directional continuity (consecutive same-direction candles)
-
-3.  **Volatility & Structure (Max 4.0)**:
-    - **Chop Filter (Max 2.0)**: By default (`RegimeScoreMode = ATR Expansion`) the ATR ratio classifies the regime. Note this measures volatility *expansion*, not direction — a volatile whipsaw can score as a trend. `RegimeScoreMode = Efficiency Ratio` scores directional efficiency instead (`ERHighThreshold` / `ERMedThreshold`). In a low tier the score contributes `0.0` by default — no free points.
-    - **Volatility (Max 1.0)**: Expanding volatility (ATR ratio > 1.2) adds to the score; a quiet market adds `0.0` by default.
-    - **Dead-Market Block**: If the last closed candle's `ATR/AvgATR < MinVolRatioToTrade`, entries are blocked (the market is too quiet to scalp).
-    - **Peak Breakout (+1.0)**: Price breaking above/below local extremes (recent 5-bar high/low).
-
-4.  **Penalties (Deductions)**:
-    - **Wick Rejection**: Long opposing wicks (e.g., long upper wick on a Buy signal) reduce the final score by the wick-to-body ratio.
-
-> **Calibration note:** The Chop and Volatility components add nothing in a dead or quiet market (their low tiers default to `0.0`), so the score separates market regimes rather than rewarding every market. When `ATR/AvgATR` falls below `MinVolRatioToTrade`, the score is forced to `0` (no trade).
-
-**Note:** All scoring weights (Trend, Momentum, Volatility, etc.) are **fully adjustable** in the EA settings, allowing you to customize the strategy's sensitivity to different market conditions.
-
-> **What the legacy score is (and isn't):** most components — EMA alignment and slope, RSI, candle body, breakout, consecutive candles — all measure "price has been rising/falling over the last few bars", so they are strongly correlated. The 0-10 score is a momentum confluence count, not a probability. Thresholds are best treated as tuning knobs to validate out-of-sample, not as confidence levels.
-
-### Both Models
+### Score Smoothing & Filters
 
 - **Dead-Market Block**: if the last closed candle's `ATR/AvgATR < MinVolRatioToTrade`, entries are blocked (off by default).
 - **Velocity Tracking** _(informational)_: tracks the _change_ in signal score between bars and shows it on the dashboard (`Vel`). It does not drive trailing or lot sizing.
 - **Signal Smoothing (Blended Weighted Average)**:
   - Combines weighted average of recent closed candles with a dampened current candle contribution.
   - **SignalSmoothingCandles**: Number of closed candles to average (1-10, default 2).
-  - **CurrentCandleBlend**: Weight factor for the forming candle (0.0-1.0, where 0.0 = closed candles only, 1.0 = current candle only). Used for position management. With `EnableNewBarEntryOnly` (default), **entry decisions use closed candles only** — on the first tick of a bar the forming candle has no body or range yet and would only drag the score down.
+  - **CurrentCandleBlend**: Weight factor for the forming candle (0.0-1.0, where 0.0 = closed candles only, 1.0 = current candle only). It applies to the live dashboard score and to the loss-management and trailing features that compare the score with the entry score. Entries (with `EnableNewBarEntryOnly`, default), the checkpoint hold and the trend-flip exit use **closed candles only**.
   - Results in smooth yet responsive signal scoring that adapts to market conditions.
 
 **Entry Condition**: the side's score >= `MinBuySignalScore` / `MinSellSignalScore` (plus the HTF trend filter and the entry guards)

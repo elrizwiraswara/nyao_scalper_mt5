@@ -62,17 +62,6 @@ enum ENUM_CHECKPOINT_HOLD
     CP_HOLD_BOTH                                         // Trend AND Score
 };
 
-enum ENUM_REGIME_MODE
-{
-    REGIME_ATR_EXPANSION,                                // ATR Expansion (legacy)
-    REGIME_EFFICIENCY_RATIO                              // Directional Efficiency Ratio
-};
-enum ENUM_SCORE_MODEL
-{
-    SCORE_LEGACY,                                        // Short-Term Confluence (legacy)
-    SCORE_TREND                                          // Multi-Hour Trend Strength
-};
-
 enum ENUM_DRAWDOWN_SCOPE
 {
     DD_SCOPE_ACCOUNT,                                    // Whole Account Equity
@@ -88,23 +77,15 @@ input group "+-----------------------------------------+"
 // | Input Parameters                                                 |
 // +------------------------------------------------------------------+
 input group "📊 Indicator Settings"
-input int DirectionalBodyLookback = 10;                   // Lookback for directional body analysis
-input int EMAFastPeriod = 5;                              // EMA Fast Period
-input int EMASlowPeriod = 12;                             // EMA Slow Period
-input int SlopeLookback = 3;                              // EMA Slope Lookback Bars (noise reduction)
-input int RSIPeriod = 8;                                  // RSI Period
-input int ATRPeriod = 8;                                  // ATR Period
-input int ATRAvgLookback = 10;                            // ATR Average Lookback
+input int EMAFastPeriod = 5;                              // EMA Fast Period (Loss Management health, limit-entry EMA anchor)
+input int EMASlowPeriod = 12;                             // EMA Slow Period (Loss Management health)
+input int RSIPeriod = 8;                                  // RSI Period (Loss Management health)
+input int ATRPeriod = 8;                                  // ATR Period (ATR-based distances, hedge, auto spread cap, dead market)
+input int ATRAvgLookback = 10;                            // ATR Average Lookback (dead-market check)
 input double MinVolRatioToTrade = 0.0;                    // Min ATR/AvgATR Ratio to Trade (0 = Disabled, blocks dead market)
-input int ImpulseLookback = 3;                            // Impulse Lookback
-input double ImpulseBoostWeight = 1.0;                    // Impulse Boost Weight
 input int SignalSmoothingCandles = 2;                     // Closed Candles for Weighted Average (1-10)
 input double CurrentCandleBlend = 0.40;                   // Current Candle Blend Factor (0.0-1.0)
 input double VelocityWindow = 2.0;                        // Velocity Window (Score Delta)
-input int RSIOverbought = 80;                             // RSI Overbought Level (Max Buy)
-input int RSIOversold = 20;                               // RSI Oversold Level (Min Sell)
-input int RSIMomentumBuy = 60;                            // RSI Momentum Buy Trigger
-input int RSIMomentumSell = 40;                           // RSI Momentum Sell Trigger
 input bool EnableHTFTrendFilter = true;                   // Only Enter With Higher-Timeframe Trend (HTF EMA)
 input ENUM_TIMEFRAMES HTFTimeframe = PERIOD_D1;           // Higher Timeframe for Trend Filter
 input int HTFEMAPeriod = 50;                              // Higher Timeframe EMA Period
@@ -112,31 +93,12 @@ input double HTFMinDistancePct = 0.5;                     // HTF Filter: Close M
 input double HTFMinSlopePct = 0.0;                        // HTF Filter: EMA Must Move >= this % Over HTFSlopeBars (0 = Off)
 input int HTFSlopeBars = 5;                               // HTF Filter: Bars Used for the EMA Slope Check
 
-input group "⚖️ Score Weight Settings"
-input ENUM_SCORE_MODEL ScoreModel = SCORE_TREND;          // Score Model (Trend: range, EMA, efficiency and momentum over hours)
-input int TrendRangeBars = 200;                           // Trend Score: Range Position Lookback (bars)
+input group "⚖️ Trend Score Settings"
+input int TrendRangeBars = 200;                          // Trend Score: Range Position Lookback (bars)
 input int TrendEMAPeriod = 200;                           // Trend Score: EMA Period
 input int TrendERBars = 100;                              // Trend Score: Efficiency Ratio Lookback (bars)
 input int TrendROCBars = 192;                             // Trend Score: Momentum Lookback (bars)
 input int TrendATRPeriod = 14;                            // Trend Score: ATR Period (distance unit)
-input double TrendWeight = 1.5;                           // Trend Alignment Initial Weight
-input double SlopeWeight = 1.5;                           // Trend Slope Confirmation Weight
-input double MomentumBaseWeight = 1.0;                    // Momentum Base Weight (RSI Sweet Spot)
-input double MomentumTriggerWeight = 0.5;                 // Momentum Trigger Weight (RSI Breakout)
-input double BodyMomentumWeight = 1.5;                    // Body Momentum Weight
-input bool DirectionalBodyMomentum = true;                // Body / Impulse Momentum Only Counts Candles Moving the Trade's Way
-input ENUM_REGIME_MODE RegimeScoreMode = REGIME_ATR_EXPANSION; // Regime (Chop) Score Mode
-input int ERPeriod = 10;                                  // Efficiency Ratio Period (Regime Mode = ER)
-input double ERHighThreshold = 0.50;                      // ER >= this -> Chop Score High (Regime Mode = ER)
-input double ERMedThreshold = 0.30;                       // ER >= this -> Chop Score Med (Regime Mode = ER)
-input double ChopScoreHigh = 2.0;                         // Chop Score High (Strong Trend)
-input double ChopScoreMed = 1.0;                          // Chop Score Med (Weak Trend)
-input double ChopScoreLow = 0.0;                          // Chop Score Low (Chop Risk - no free points)
-input double VolatilityScoreHigh = 1.0;                   // Volatility Score High
-input double VolatilityScoreLow = 0.0;                    // Volatility Score Low (no free points)
-input double PeakScoreWeight = 1.0;                       // Peak Breakout Score Weight
-input double WickRejectionWeight = 1.0;                   // Wick Rejection Penalty Weight
-input double MinBodyRatio = 1.5;                          // Min Body Ratio for Wick Calculation
 
 input group "📝 Order & Position Settings"
 input int PointInputDigits = 3;                           // Point Inputs Are Written for N-Decimal Quotes, Rescaled to This Symbol (0 = As-Is)
@@ -158,7 +120,6 @@ input double BuyDuplicateMultiplier  = 1.5;               // Min Distance Multip
 input double SellDuplicateMultiplier = 1.5;               // Min Distance Multiplier to Avoid Duplicate Sell Signals
 input double MinBreakEvenProfit = 0.5;                    // Min Profit to Trigger Break-Even ($ | 0 = Disabled)
 input double ProfitThresholdMultiplier = 1.5;             // Threshold Multiplier for Min Break-Even Profit
-input double LossThresholdMultiplier = 2.0;               // Threshold Multiplier for Max Break-Even Loss
 input double MinBuySignalScore = 5.0;                     // Min Signal Strength Score to Buy (0.0 - 10.0)
 input double MinSellSignalScore = 5.0;                    // Min Signal Strength Score to Sell (0.0 - 10.0)
 
@@ -214,7 +175,7 @@ input group "🔀 Hedge Chain (Rolling Martingale Recovery) Settings"
 input bool EnableHedgeChain = false;                      // Enable Hedge Chain (MARTINGALE - high risk)
 input double HedgeTriggerATR = 1.5;                       // Adverse Move (ATR) to Start the Chain
 input bool HedgeRequireSignal = true;                     // Only Hedge if Reverse Signal Confirms (anti-spike)
-input double HedgeMinSignalScore = 6.5;                   // Min Reverse-Direction Score to Open Hedge (Trend score: the trend has turned)
+input double HedgeMinSignalScore = 6.5;                   // Min Reverse-Direction Score to Open Hedge (the trend has turned)
 input bool HedgeAutoLot = true;                           // Auto-size Hedge Lot to Recover (else Multiplier)
 input double HedgeRecoveryATR = 1.0;                      // Favorable Move (ATR) to Recover Within
 input double HedgeLotMultiplier = 2.0;                    // Fixed Hedge Lot Multiplier (Auto-size OFF)
@@ -398,32 +359,17 @@ int atrSignalHandle = INVALID_HANDLE;                     // Handle for Signal A
 int trendEmaHandle = INVALID_HANDLE;                      // Handle for the Trend Score EMA
 int trendAtrHandle = INVALID_HANDLE;                      // Handle for the Trend Score ATR
 
-// Signal Strength Structure - Indicator-Based Scoring System
-// Weights are adjustable via Score Weight Settings inputs
+// Signal Strength Structure - Trend Score of one side
 struct SignalStrength
 {
-    double avgBody;                                       // Average body size of matching candles
-    double bodySignal;                                    // Body size of signal candle
-    double ratio;                                         // Ratio of bodySignal / avgBody
-    double upperWick;                                     // Upper wick size
-    double lowerWick;                                     // Lower wick size
-    double rejection;                                     // Wick to body ratio
-    double penaltyBody;                                   // Penalty from body ratio
-    double penaltyWick;                                   // Penalty from wick rejection
     double finalScore;                                    // 0.00-10.00 Score
-    double trendScore;                                    // Trend Component (0-3)
-    double momentumScore;                                 // Momentum Component (0-3)
-    double chopScore;                                     // Chop Component (0-2)
-    double peakScore;                                     // Peak Component (0-1)
-    double volatilityScore;                               // Volatility Component (0-1)
-    double impulseStrength;                               // 0.0-1.0 Impulse Strength
     double velocity;                                      // Current Score - Previous Score (informational)
     double normalizedVelocity;                            // 0.0-1.0 Normalized Velocity (informational)
     bool deadMarket;                                      // Last closed candle failed MinVolRatioToTrade
-    double trendRange;                                    // Trend model: position in the range (-1..+1, + = bullish)
-    double trendEma;                                      // Trend model: distance from the EMA (-1..+1)
-    double trendEfficiency;                               // Trend model: directional efficiency (-1..+1)
-    double trendMomentum;                                 // Trend model: move over the lookback (-1..+1)
+    double trendRange;                                    // Trend score: position in the range (-1..+1, + = bullish)
+    double trendEma;                                      // Trend score: distance from the EMA (-1..+1)
+    double trendEfficiency;                               // Trend score: directional efficiency (-1..+1)
+    double trendMomentum;                                 // Trend score: move over the lookback (-1..+1)
     string reasoning;                                     // Detailed explanation
 };
 
@@ -673,13 +619,12 @@ int InitializeEA()
 
     // Inputs used as divisors or loop lengths
     if(EMAFastPeriod < 1 || EMASlowPeriod < 1 || RSIPeriod < 1 || ATRPeriod < 1 || ATRAvgLookback < 1 ||
-       SlopeLookback < 1 || DirectionalBodyLookback < 1 || ImpulseLookback < 1 || SignalSmoothingCandles < 1 ||
-       VelocityWindow <= 0)
+       SignalSmoothingCandles < 1 || VelocityWindow <= 0)
     {
         Alert("ERROR: indicator periods / lookbacks must be >= 1 and VelocityWindow > 0");
         return(INIT_PARAMETERS_INCORRECT);
     }
-    if(ScoreModel == SCORE_TREND && (TrendRangeBars < 2 || TrendEMAPeriod < 1 || TrendERBars < 2 || TrendROCBars < 1 || TrendATRPeriod < 1))
+    if(TrendRangeBars < 2 || TrendEMAPeriod < 1 || TrendERBars < 2 || TrendROCBars < 1 || TrendATRPeriod < 1)
     {
         Alert("ERROR: Trend Score lookbacks must be >= 2 (range, efficiency) and >= 1 (EMA, momentum, ATR)");
         return(INIT_PARAMETERS_INCORRECT);
@@ -777,15 +722,12 @@ int InitializeEA()
         return(INIT_FAILED);
     }
 
-    if(ScoreModel == SCORE_TREND)
+    trendEmaHandle = iMA(_Symbol, _Period, TrendEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+    trendAtrHandle = iATR(_Symbol, _Period, TrendATRPeriod);
+    if(trendEmaHandle == INVALID_HANDLE || trendAtrHandle == INVALID_HANDLE)
     {
-        trendEmaHandle = iMA(_Symbol, _Period, TrendEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
-        trendAtrHandle = iATR(_Symbol, _Period, TrendATRPeriod);
-        if(trendEmaHandle == INVALID_HANDLE || trendAtrHandle == INVALID_HANDLE)
-        {
-            Print("Error creating Trend Score indicator handles!");
-            return(INIT_FAILED);
-        }
+        Print("Error creating Trend Score indicator handles!");
+        return(INIT_FAILED);
     }
 
     if(EnableHTFTrendFilter)
@@ -1856,11 +1798,6 @@ double DirectionSignal(bool isBuy)
     {
         LogPrint((isBuy ? "BUY" : "SELL"), " SIGNAL RECEIVED (Score: ", DoubleToString(e.strength.finalScore, 1),
                  " | Adjusted: ", DoubleToString(e.score, 1), " / Threshold: ", DoubleToString(e.threshold, 1), ")");
-        LogPrint("Details: Body=", DoubleToString(e.strength.bodySignal, _Digits),
-                 ", AvgBody=", DoubleToString(e.strength.avgBody, _Digits),
-                 ", Ratio=", DoubleToString(e.strength.ratio, 2),
-                 ", PenBody=", DoubleToString(e.strength.penaltyBody, 1),
-                 ", PenWick=", DoubleToString(e.strength.penaltyWick, 1));
         LogPrint("Reasoning: ", e.strength.reasoning);
         LogPrint("Price: ", currentPrice);
         return e.score;
@@ -1932,7 +1869,7 @@ string EntryConditionsBlock(ENUM_POSITION_TYPE dir, double price, bool checkDupl
         }
     }
 
-    // Range filter (opt-in): in a sideways market the momentum score peaks exactly at the range
+    // Range filter (opt-in): in a sideways market the score peaks exactly at the range
     // edges, so entries land at the top/bottom right before the reversal. Require the recent
     // closes to have actually travelled efficiently IN the signal direction.
     if(MinEfficiencyToTrade > 0)
@@ -2069,250 +2006,6 @@ void ManagePositions()
 }
 
 // +------------------------------------------------------------------+
-// | Compute Raw Score - Internal Helper                              |
-// | Computes the raw signal score for a given candle index           |
-// | signalIndex: 0 = current forming candle, 1+ = closed candles     |
-// +------------------------------------------------------------------+
-double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex)
-{
-    SignalStrength dummy;
-    return ComputeRawScore(orderType, signalIndex, dummy, false);
-}
-
-double ComputeRawScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrength &components, bool fillComponents)
-{
-    if(ScoreModel == SCORE_TREND) return ComputeTrendScore(orderType, signalIndex, components, fillComponents);
-
-    bool isBuy = (orderType == ORDER_TYPE_BUY);
-    bool isSell = (orderType == ORDER_TYPE_SELL);
-
-    double bufEMA_Fast[], bufEMA_Slow[], bufRSI[], bufATR[];
-    ArraySetAsSeries(bufEMA_Fast, true);
-    ArraySetAsSeries(bufEMA_Slow, true);
-    ArraySetAsSeries(bufRSI, true);
-    ArraySetAsSeries(bufATR, true);
-
-    // Copy minimal buffers
-    int needed = MathMax(ImpulseLookback, MathMax(DirectionalBodyLookback, ATRAvgLookback)) + 5;
-    int erBars = MathMax(2, ERPeriod);
-    if(RegimeScoreMode == REGIME_EFFICIENCY_RATIO) needed = MathMax(needed, erBars + 2);
-
-    // Fast EMA needs enough history for a multi-bar slope (SlopeLookback bars back)
-    int slopeBars = (SlopeLookback < 1) ? 1 : SlopeLookback;
-    int emaFastCopy = MathMax(3, slopeBars + 1);
-
-    if(CopyBuffer(emaFastHandle, 0, signalIndex, emaFastCopy, bufEMA_Fast) < emaFastCopy) return 0;
-    if(CopyBuffer(emaSlowHandle, 0, signalIndex, 3, bufEMA_Slow) < 3) return 0;
-    if(CopyBuffer(rsiHandle, 0, signalIndex, 3, bufRSI) < 3) return 0;
-    if(CopyBuffer(atrSignalHandle, 0, signalIndex, needed, bufATR) < needed) return 0;
-
-    // Fetch Price Data
-    MqlRates rates[];
-    ArraySetAsSeries(rates, true);
-    if(CopyRates(_Symbol, _Period, signalIndex, needed, rates) < needed) return 0;
-
-    // 1. TREND SCORE (Max 3)
-    double emaFast = bufEMA_Fast[0];
-    double emaSlow = bufEMA_Slow[0];
-    // Multi-bar slope: compare current Fast EMA against its value SlopeLookback bars ago
-    // (less whipsaw than a single-bar slope on noisy M1 data)
-    double emaFastPrev = bufEMA_Fast[slopeBars];
-    double trendScore = 0;
-
-    bool trendAligned = false;
-    if (isBuy) trendAligned = (emaFast > emaSlow);
-    else trendAligned = (emaFast < emaSlow);
-    if (trendAligned) trendScore += TrendWeight;
-
-    bool slopeAligned = false;
-    if (isBuy) slopeAligned = (emaFast > emaFastPrev);
-    else slopeAligned = (emaFast < emaFastPrev);
-    if (slopeAligned) trendScore += SlopeWeight;
-    if(trendScore > 3.0) trendScore = 3.0;
-
-    // 2. MOMENTUM SCORE (Max 3) + IMPULSE
-    double currentBody = MathAbs(rates[0].close - rates[0].open);
-    double sumBody = 0;
-    int validCandles = 0;
-    for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
-    {
-        sumBody += MathAbs(rates[i].close - rates[i].open);
-        validCandles++;
-    }
-    double avgRecentBody = (validCandles > 0) ? sumBody / validCandles : currentBody;
-
-    double rsi = bufRSI[0];
-    double baseMomentum = 0;
-
-    // A big candle is momentum for the side it moved: with DirectionalBodyMomentum a large bearish
-    // candle no longer adds body / impulse points to the BUY score (and vice versa)
-    bool candleWithTrade = isBuy ? (rates[0].close > rates[0].open) : (rates[0].close < rates[0].open);
-    bool bodyCounts = (!DirectionalBodyMomentum || candleWithTrade);
-
-    if (isBuy)
-    {
-        if (rsi > 50 && rsi < RSIOverbought) baseMomentum += MomentumBaseWeight;
-        if (rsi > RSIMomentumBuy) baseMomentum += MomentumTriggerWeight;
-        if (currentBody > avgRecentBody && bodyCounts) baseMomentum += BodyMomentumWeight;
-    }
-    else
-    {
-        if (rsi < 50 && rsi > RSIOversold) baseMomentum += MomentumBaseWeight;
-        if (rsi < RSIMomentumSell) baseMomentum += MomentumTriggerWeight;
-        if (currentBody > avgRecentBody && bodyCounts) baseMomentum += BodyMomentumWeight;
-    }
-
-    double momentumScore = baseMomentum;
-
-    // IMPULSE DETECTION
-    double bodyAccel = 0;
-    if (avgRecentBody > 0) bodyAccel = currentBody / avgRecentBody;
-    if (bodyAccel > 3.0) bodyAccel = 3.0;
-
-    double currentRange = rates[0].high - rates[0].low;
-    double sumRange = 0;
-    for(int i=1; i<=DirectionalBodyLookback && i<needed; i++)
-    {
-        sumRange += (rates[i].high - rates[i].low);
-    }
-    double avgRecentRange = (validCandles > 0) ? sumRange / validCandles : currentRange;
-
-    double rangeAccel = 0;
-    if (avgRecentRange > 0) rangeAccel = currentRange / avgRecentRange;
-    if (rangeAccel > 3.0) rangeAccel = 3.0;
-    if (!bodyCounts) { bodyAccel = 0; rangeAccel = 0; }    // a counter-move candle is no impulse for this side
-
-    int sameDirCount = 0;
-    for(int i=0; i<ImpulseLookback && i<needed; i++)
-    {
-        bool candleBullish = (rates[i].close > rates[i].open);
-        bool candleBearish = (rates[i].close < rates[i].open);
-
-        if (isBuy && candleBullish) sameDirCount++;
-        else if (isSell && candleBearish) sameDirCount++;
-        else break;
-    }
-    double continuityScore = (double)sameDirCount / ImpulseLookback;
-    if(continuityScore > 1.0) continuityScore = 1.0;
-
-    double rawImpulse = (0.5 * bodyAccel + 0.3 * rangeAccel + 0.2 * continuityScore) / 2.0;
-    if (rawImpulse > 1.0) rawImpulse = 1.0;
-    if (rawImpulse < 0.0) rawImpulse = 0.0;
-
-    momentumScore = momentumScore * (1.0 + ImpulseBoostWeight * rawImpulse);
-    if (momentumScore > 3.0) momentumScore = 3.0;
-
-    // 3. CHOP SCORE (Max 2)
-    double currentATR = bufATR[0];
-    double avgATR = 0;
-    if (needed >= ATRAvgLookback) {
-         double sumATR = 0;
-         for(int i=0; i<ATRAvgLookback && i<needed; i++) sumATR += bufATR[i];
-         avgATR = sumATR / ATRAvgLookback;
-    } else {
-         avgATR = currentATR;
-    }
-
-    double volRatio = 0;
-    if(avgATR > 0) volRatio = currentATR / avgATR;
-
-    // DEAD-MARKET FILTER: when ATR has collapsed relative to its average the
-    // market is too quiet to scalp profitably (costs dominate). Block the signal.
-    // Guard volRatio > 0 so we don't block when ATR data is unavailable.
-    // GetSignalStrength zeroes the WHOLE signal when the last closed candle trips this.
-    if(MinVolRatioToTrade > 0 && volRatio > 0 && volRatio < MinVolRatioToTrade)
-    {
-        if(fillComponents) components.deadMarket = true;
-        return 0;
-    }
-
-    double chopScore = 0;
-    if(RegimeScoreMode == REGIME_EFFICIENCY_RATIO)
-    {
-        // Directional Kaufman Efficiency Ratio: net move IN the signal direction divided by
-        // the total path travelled. Unlike ATR expansion it separates a clean trend (ER near 1)
-        // from a volatile whipsaw (ER near 0), and it is independent of the momentum inputs.
-        double path = 0;
-        for(int k = 0; k < erBars && k + 1 < needed; k++)
-            path += MathAbs(rates[k].close - rates[k + 1].close);
-        double net = isBuy ? (rates[0].close - rates[erBars].close)
-                           : (rates[erBars].close - rates[0].close);
-        double er = (path > 0) ? MathMax(0.0, net) / path : 0;
-
-        if (er >= ERHighThreshold) chopScore = ChopScoreHigh;
-        else if (er >= ERMedThreshold) chopScore = ChopScoreMed;
-        else chopScore = ChopScoreLow;
-    }
-    else
-    {
-        // Legacy: ATR expansion vs its average (measures volatility, not direction)
-        if (volRatio > 1.0) chopScore = ChopScoreHigh;
-        else if (volRatio > 0.8) chopScore = ChopScoreMed;
-        else chopScore = ChopScoreLow;
-    }
-    if (chopScore > 2.0) chopScore = 2.0;
-
-    // 4. PEAK & VOLATILITY SCORES (Max 1 each)
-    double volatilityScore = (volRatio > 1.2) ? VolatilityScoreHigh : VolatilityScoreLow;
-
-    bool breakout = false;
-    double localExtreme = isBuy ? rates[1].high : rates[1].low;
-    for(int i=2; i<=5; i++)
-    {
-         if(isBuy) localExtreme = MathMax(localExtreme, rates[i].high);
-         else localExtreme = MathMin(localExtreme, rates[i].low);
-    }
-
-    double peakScore = 0;
-    if(isBuy && rates[0].close > localExtreme) breakout = true;
-    if(isSell && rates[0].close < localExtreme) breakout = true;
-    if(breakout) peakScore = PeakScoreWeight;
-
-    // 5. WICK / REJECTION PENALTY
-    double maxOpenClose = MathMax(rates[0].open, rates[0].close);
-    double minOpenClose = MathMin(rates[0].open, rates[0].close);
-    double upperWick = rates[0].high - maxOpenClose;
-    double lowerWick = minOpenClose - rates[0].low;
-
-    double safeBody = MathMax(currentBody, avgRecentBody * MinBodyRatio);
-    double penaltyWick = 0;
-    double rejection = 0;
-
-    if (safeBody > 0)
-    {
-        if (isBuy) rejection = upperWick / safeBody;
-        else rejection = lowerWick / safeBody;
-        penaltyWick = rejection * WickRejectionWeight;
-    }
-
-    // FINAL SCORE AGGREGATION
-    double rawScore = trendScore + momentumScore + chopScore + peakScore + volatilityScore;
-    rawScore -= penaltyWick;
-
-    if (rawScore < 0) rawScore = 0;
-    if (rawScore > 10.0) rawScore = 10.0;
-
-    // Fill component details for dashboard reporting
-    if(fillComponents)
-    {
-        components.trendScore = trendScore;
-        components.momentumScore = momentumScore;
-        components.chopScore = chopScore;
-        components.peakScore = peakScore;
-        components.volatilityScore = volatilityScore;
-        components.impulseStrength = rawImpulse;
-        components.avgBody = avgRecentBody;
-        components.bodySignal = currentBody;
-        components.upperWick = upperWick;
-        components.lowerWick = lowerWick;
-        components.rejection = rejection;
-        components.penaltyWick = penaltyWick;
-    }
-
-    return rawScore;
-}
-
-// +------------------------------------------------------------------+
 // | Trend Score Model - Multi-Hour Trend Strength                    |
 // | Four continuous readings of the same bar, each -1 (strong down)  |
 // | to +1 (strong up), averaged into s:                             |
@@ -2372,7 +2065,7 @@ bool ReadTrend(int signalIndex, TrendReading &r)
     r.momentum = MathTanh((c - close[rocBars]) / (12.0 * atr[0]));
     r.s = (r.range + r.ema + r.efficiency + r.momentum) / 4.0;
 
-    // Same dead-market gate as the legacy model (ATR collapsed vs its average)
+    // Dead-market gate (ATR collapsed vs its average)
     r.dead = false;
     if(MinVolRatioToTrade > 0)
     {
@@ -2394,6 +2087,13 @@ bool ReadTrend(int signalIndex, TrendReading &r)
         trendCacheNext = (trendCacheNext + 1) % ArraySize(trendCache);
     }
     return true;
+}
+
+// One candle's score. signalIndex: 0 = current forming candle, 1+ = closed candles
+double ComputeTrendScore(ENUM_ORDER_TYPE orderType, int signalIndex)
+{
+    SignalStrength unused;
+    return ComputeTrendScore(orderType, signalIndex, unused, false);
 }
 
 double ComputeTrendScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStrength &components, bool fillComponents)
@@ -2418,9 +2118,8 @@ double ComputeTrendScore(ENUM_ORDER_TYPE orderType, int signalIndex, SignalStren
 // | Combines weighted avg of N closed candles + dampened current     |
 // | candle for smooth yet responsive signal scoring                  |
 // | entryMode: in new-bar mode, entry decisions run on the first     |
-// | tick of a bar where the forming candle is still ~empty (no body, |
-// | range or breakout yet). Blending it in would only drag the score |
-// | down, so entry mode scores CLOSED candles only (blend = 0).      |
+// | tick of a bar and score CLOSED candles only (blend = 0), so the  |
+// | decision doesn't hang on the one tick the new candle holds.      |
 // +------------------------------------------------------------------+
 SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = false, bool forceClosedOnly = false)
 {
@@ -2433,22 +2132,8 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = fal
 
     SignalStrength strength;
     strength.finalScore = 0;
-    strength.trendScore = 0;
-    strength.momentumScore = 0;
-    strength.chopScore = 0;
-    strength.peakScore = 0;
-    strength.volatilityScore = 0;
-    strength.impulseStrength = 0;
     strength.velocity = 0;
     strength.normalizedVelocity = 0;
-    strength.avgBody = 0;
-    strength.bodySignal = 0;
-    strength.ratio = 0;
-    strength.upperWick = 0;
-    strength.lowerWick = 0;
-    strength.rejection = 0;
-    strength.penaltyBody = 0;
-    strength.penaltyWick = 0;
     strength.deadMarket = false;
     strength.trendRange = 0;
     strength.trendEma = 0;
@@ -2475,8 +2160,8 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = fal
     {
         // Fill component details on candle[1] for dashboard reporting
         double score_i = (i == 1)
-            ? ComputeRawScore(orderType, i, strength, true)
-            : ComputeRawScore(orderType, i);
+            ? ComputeTrendScore(orderType, i, strength, true)
+            : ComputeTrendScore(orderType, i);
         double weight = (double)(N - i + 1); // Linear decay
         weightedSum += score_i * weight;
         weightTotal += weight;
@@ -2485,7 +2170,7 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = fal
     double baseScore = (weightTotal > 0) ? weightedSum / weightTotal : 0;
 
     // Step 2: Compute current candle score (dampened contribution; skipped when blend = 0)
-    double currentScore = (blend > 0) ? ComputeRawScore(orderType, 0) : 0;
+    double currentScore = (blend > 0) ? ComputeTrendScore(orderType, 0) : 0;
 
     // Step 3: Blend
     double finalScore = baseScore * (1.0 - blend) + currentScore * blend;
@@ -2522,15 +2207,9 @@ SignalStrength GetSignalStrength(ENUM_ORDER_TYPE orderType, bool entryMode = fal
     if(strength.normalizedVelocity > 1.0) strength.normalizedVelocity = 1.0;
 
     // Debug Construction
-    if(ScoreModel == SCORE_TREND)
-        strength.reasoning = StringFormat("Rng:%+.2f EMA:%+.2f Eff:%+.2f Mom:%+.2f | Vel:%.2f [Smooth:%d Blend:%.0f%%]%s",
-            strength.trendRange, strength.trendEma, strength.trendEfficiency, strength.trendMomentum,
-            strength.normalizedVelocity, N, blend * 100, strength.deadMarket ? " DEAD" : "");
-    else
-        strength.reasoning = StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f [Smooth:%d Blend:%.0f%%]%s",
-            strength.trendScore, strength.momentumScore, strength.impulseStrength,
-            strength.chopScore, strength.peakScore, strength.volatilityScore, strength.normalizedVelocity,
-            N, blend * 100, strength.deadMarket ? " DEAD" : "");
+    strength.reasoning = StringFormat("Rng:%+.2f EMA:%+.2f Eff:%+.2f Mom:%+.2f | Vel:%.2f [Smooth:%d Blend:%.0f%%]%s",
+        strength.trendRange, strength.trendEma, strength.trendEfficiency, strength.trendMomentum,
+        strength.normalizedVelocity, N, blend * 100, strength.deadMarket ? " DEAD" : "");
 
     // Cache result for this tick
     _strengthCache[slot] = strength;
@@ -8253,12 +7932,8 @@ string DashboardEntryGate(bool isBuy, EntryScore &e, string riskBlock)
 // Score components for the dashboard (the log keeps the full reasoning with the smoothing settings)
 string DashReasonText(SignalStrength &s)
 {
-    if(ScoreModel == SCORE_TREND)
-        return StringFormat("Rng:%+.2f EMA:%+.2f Eff:%+.2f Mom:%+.2f | Vel:%.2f%s", s.trendRange, s.trendEma,
-                            s.trendEfficiency, s.trendMomentum, s.normalizedVelocity, s.deadMarket ? " DEAD" : "");
-    return StringFormat("T:%.1f M:%.1f(Imp:%.2f) C:%.1f P:%.1f V:%.1f | Vel:%.2f%s", s.trendScore, s.momentumScore,
-                        s.impulseStrength, s.chopScore, s.peakScore, s.volatilityScore, s.normalizedVelocity,
-                        s.deadMarket ? " DEAD" : "");
+    return StringFormat("Rng:%+.2f EMA:%+.2f Eff:%+.2f Mom:%+.2f | Vel:%.2f%s", s.trendRange, s.trendEma,
+                        s.trendEfficiency, s.trendMomentum, s.normalizedVelocity, s.deadMarket ? " DEAD" : "");
 }
 
 // $1.23 / -$1.23

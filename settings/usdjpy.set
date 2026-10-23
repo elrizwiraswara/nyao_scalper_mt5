@@ -23,54 +23,27 @@
 ;   - Alone, USDJPY is a weak earner (lost in 2025 and 2026): use it as gold's partner, not instead.
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
-DirectionalBodyLookback=10
 EMAFastPeriod=5
 EMASlowPeriod=12
-SlopeLookback=3
 RSIPeriod=8
 ATRPeriod=8
 ATRAvgLookback=10
 MinVolRatioToTrade=0.0
-ImpulseLookback=3
-ImpulseBoostWeight=1.0
 SignalSmoothingCandles=2
 CurrentCandleBlend=0.40
 VelocityWindow=2.0
-RSIOverbought=80
-RSIOversold=20
-RSIMomentumBuy=60
-RSIMomentumSell=40
 EnableHTFTrendFilter=true
 HTFTimeframe=16408
 HTFEMAPeriod=50
 HTFMinDistancePct=0.309
 HTFMinSlopePct=0.0
 HTFSlopeBars=5
-; ⚖️ Score Weight Settings
-ScoreModel=1
+; ⚖️ Trend Score Settings
 TrendRangeBars=200
 TrendEMAPeriod=200
 TrendERBars=100
 TrendROCBars=192
 TrendATRPeriod=14
-TrendWeight=1.5
-SlopeWeight=1.5
-MomentumBaseWeight=1.0
-MomentumTriggerWeight=0.5
-BodyMomentumWeight=1.5
-DirectionalBodyMomentum=true
-RegimeScoreMode=0
-ERPeriod=10
-ERHighThreshold=0.50
-ERMedThreshold=0.30
-ChopScoreHigh=2.0
-ChopScoreMed=1.0
-ChopScoreLow=0.0
-VolatilityScoreHigh=1.0
-VolatilityScoreLow=0.0
-PeakScoreWeight=1.0
-WickRejectionWeight=1.0
-MinBodyRatio=1.5
 ; 📝 Order & Position Settings
 PointInputDigits=0
 EnableBuyOrders=true
@@ -91,7 +64,6 @@ BuyDuplicateMultiplier=1.5
 SellDuplicateMultiplier=1.5
 MinBreakEvenProfit=0.5
 ProfitThresholdMultiplier=1.5
-LossThresholdMultiplier=2.0
 MinBuySignalScore=5.0
 MinSellSignalScore=5.0
 ; 🎯 Limit Entry Settings
