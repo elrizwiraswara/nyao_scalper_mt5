@@ -3,8 +3,8 @@
   "title": "High-risk profile - XAUUSDm M1 vs M5, real ticks Jan-Sep 2026",
   "ea": "nyao_scalper.mq5",
   "set": "settings/high-risk.set",
-  "version": "882a821",
-  "ea_version": "53.0",
+  "version": "e559f24",
+  "ea_version": "54.0",
   "symbol": "XAUUSDm",
   "periods": [
     "M1",
@@ -26,7 +26,7 @@
   "deposit": 2000,
   "currency": "USD",
   "leverage": 500,
-  "generated": "2026-10-22 19:32",
+  "generated": "2026-10-23 16:58",
   "runs": [
     {
       "period": "M1",

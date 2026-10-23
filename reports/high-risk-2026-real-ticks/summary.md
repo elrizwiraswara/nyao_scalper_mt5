@@ -2,14 +2,14 @@
 
 | Setting | Value |
 |---|---|
-| EA | Nyao Scalper v53.0 (`nyao_scalper.mq5`) |
+| EA | Nyao Scalper v54.0 (`nyao_scalper.mq5`) |
 | Settings | `settings/high-risk.set` |
-| Git commit | 882a821 |
+| Git commit | e559f24 |
 | Symbol / timeframes | XAUUSDm / M1, M5 |
 | Tick data | Every tick based on real ticks |
 | Deposit / leverage | 2,000 USD / 1:500 |
 | Runs | One run per month, each starting from a fresh deposit |
-| Generated | 2026-10-22 19:32 with `tools/backtest/nyao_backtest.py` |
+| Generated | 2026-10-23 16:58 with `tools/backtest/nyao_backtest.py` |
 
 ## Summary
 
@@ -17,7 +17,7 @@ Total return is the sum of the monthly returns (each month starts from the same 
 
 | Timeframe | Total return | Profitable | Best / worst run | Max drawdown | Trades | Win rate | Avg win / loss | Profit factor | Tick data |
 |---|---|---|---|---|---|---|---|---|---|
-| M1 | +20.8% | 5/9 | +50.3% / -24.7% | 47.4% | 1,428 | 36% | $43.07 / -$23.33 | 1.02 | 100% real ticks |
+| M1 | +20.9% | 5/9 | +50.3% / -24.7% | 47.4% | 1,428 | 36% | $43.08 / -$23.33 | 1.02 | 100% real ticks |
 | M5 | +187.6% | 4/9 | +100.6% / -14.4% | 35.5% | 1,071 | 43% | $46.16 / -$28.86 | 1.21 | 100% real ticks |
 
 ## Results per run
