@@ -228,22 +228,22 @@ Doubling the risk doubles the size of the edge, not the edge itself: the return 
 
 ### Gold + USDJPY on One Account
 
-The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold moves sideways (their prices move opposite: monthly correlation -0.36 since 2022). `settings/usdjpy.set` is the default profile with every distance scaled by USDJPY's daily volatility, nothing tuned: a 786-point (0.786 yen) stop and checkpoint, 393-point entry spacing, a 0.309% D1 trend distance, a 2-pip spread cap, `PointInputDigits` 0 and `MaxLotSize` 0.20 (about $100 at the stop, like gold's 0.05 lot).
+The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold moves sideways (their prices move opposite: monthly correlation -0.36 since 2022). `settings/usdjpy.set` is the default profile with every distance scaled by USDJPY's daily volatility, nothing tuned: a 786-point (0.786 yen) stop and checkpoint, entries at least 590 points apart (`ZonePoints` 393), a 0.309% D1 trend distance, a 2-pip spread cap, `PointInputDigits` 0, `MaxLotSize` 0.20 (about $100 at the stop, like gold's 0.05 lot) and gold's smallest-profit lock at 75% of the checkpoint (`CheckpointBreakEvenPct` 75).
 
 | M5, $2,000 per month, 1.25% risk each | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Drawdown across months |
 |---|---|---|---|---|---|---|---|---|---|
-| Gold (`default.set`) | -11.6% | -14.0% | +6.0% | +66.0% | +83.3% | +129.7% | 27/57 | -5.7% | 28.2% |
-| USDJPY (`usdjpy.set`) | +54.6% | +0.8% | +43.8% | -9.7% | -7.8% | +81.6% | 26/57 | -6.9% | 23.1% |
-| **Both on one account** | +42.9% | -13.2% | +49.8% | +56.2% | +75.5% | **+211.3%** | 32/57 | -6.9% | **30.4%** |
+| Gold (`default.set`) | -5.3% | -9.8% | +1.0% | +66.2% | +93.9% | +145.9% | 27/57 | -6.2% | 24.0% |
+| USDJPY (`usdjpy.set`) | +55.8% | +1.3% | +38.9% | -6.8% | -5.2% | +84.0% | 25/57 | -6.9% | 18.8% |
+| **Both on one account** | +50.5% | -8.5% | +39.9% | +59.4% | +88.6% | **+229.9%** | 33/57 | -6.9% | **26.7%** |
 
-"Both" is the sum of the two monthly runs (the tester runs one EA at a time), measured with the v51.0 gold rules before the +$15 lock. The gold row is a later re-run of the same profile and differs from the table above by up to 0.2 points per year. To run it:
+"Both" is the sum of the two monthly runs (the tester runs one EA at a time), measured with v54.0; 2022-2025 use ticks generated from 1-minute bars, 2026 real ticks. The smallest-profit lock helped USDJPY the way it helped gold: without it, USDJPY made +81.5% with a 23.2% drawdown across months, and both together +227.4% (27.3%). To run it:
 
 1. One **hedging** account, two M5 charts: XAUUSDm with `default.set`, USDJPYm with `usdjpy.set`.
 2. On the gold chart set **`DrawdownScope` = This EA's Own Trades** (`usdjpy.set` already has it). Otherwise one symbol's losing streak raises the other's entry score, which the backtest above did not do.
 3. Each EA only touches its own symbol's positions, so both can keep the same `MagicNumber`. The per-trade, basket and total-loss stops count only the chart's own trades; the account-wide checks (`MinEquityPercent` drawdown pause, `MinimumEquity`, `TargetEquity`, leverage pause) watch the whole account, and each EA then closes only its own positions.
 4. Expect up to 4 positions and about 5% of equity at risk at the same time.
 
-Alone, USDJPY is a weak earner (it lost in 2025 and 2026); it is a partner for gold, not a replacement. Using the opposite movement as a filter instead (gold buys only while USDJPY falls, and back) was tested and rejected: it cut gold to +86-112% and USDJPY to +12-14%, because the two also trend together at times (2024). The same scaled test on EURUSD, GBPUSD, AUDUSD, silver and platinum found no useful partner (EURUSD -49%, AUDUSD -145%, silver -185%; GBPUSD +11% added nothing); US stock indices were not tested.
+Alone, USDJPY is a weak earner (it lost in 2025 and 2026); it is a partner for gold, not a replacement. Using the opposite movement as a filter instead (gold buys only while USDJPY falls, and back) was tested and rejected: it cut gold to +86-112% and USDJPY to +12-14%, because the two also trend together at times (2024). The same scaled test (57 months) found no other partner: EURUSD -49%, AUDUSD -145%, silver -185%, platinum -518% and GBPUSD +11% (added nothing); US stock indices US500 -70%, USTEC -35%, US30 -46%; crypto BTCUSD -18% and ETHUSD -1% (both raised the combined drawdown), XRPUSD and LTCUSD far worse (their spread is 35-62% of the scaled stop). The edge of these rules is gold's, with USDJPY as the one partner that balances it.
 
 > **Brokers with other quote decimals**: point values are written for a 3-digit gold quote (0.001), and `PointInputDigits` (default 3) rescales them to the symbol's own decimals so every distance keeps the same price meaning. Where gold is quoted with 2 decimals, 20000 points become 2000, still a $20 move, instead of a $200 stop with 10× the risk. This covers `SLValue`, `TPValue`, `TrailingDistanceValue` and `RRRiskValue` when their type is Points, plus `ZonePoints` and `MaxSpreadPoints`. The EA prints a `[POINTS]` line at start-up when it rescales. Set `PointInputDigits = 0` to use point values exactly as typed (for example on forex, where your own values are written for that symbol).
 
