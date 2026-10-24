@@ -207,7 +207,7 @@ Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (se
 | Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; break-even lock at +$15, so a trade that got that far can't end as a loss; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
 | Hedge chain | Off |
-| Account | **Standard account: $2,000 or more recommended** (0.01 lot risks $20, about 1%). Below about $1,600 the 0.01 minimum lot risks more than 1.25%: the EA still trades it down to about $400 (up to 5% per trade, `MaxRiskPerTradePct`, shown in orange on the dashboard) and opens nothing below that. **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%) |
+| Account | **Standard account: $2,000 or more recommended** (0.01 lot risks $20, about 1%). Below about $1,600 the 0.01 minimum lot risks more than 1.25%: the EA still trades it down to about $400 (up to 5% per trade, `MaxRiskPerTradePct`, shown in orange on the dashboard) and opens nothing below that. **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%). See [Account Size, Risk & Account Type](#account-size-risk--account-type) |
 
 ### High-Risk Profile
 
@@ -232,7 +232,7 @@ The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold 
 
 | M5, $2,000 per month, 1.25% risk each | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Drawdown across months |
 |---|---|---|---|---|---|---|---|---|---|
-| Gold (`default.set`) | -5.3% | -9.8% | +1.0% | +66.2% | +93.9% | +145.9% | 27/57 | -6.2% | 24.0% |
+| Gold (`default.set`) | -5.3% | -9.8% | +1.0% | +66.2% | +93.8% | +145.9% | 27/57 | -6.2% | 24.0% |
 | USDJPY (`usdjpy.set`) | +55.8% | +1.3% | +38.9% | -6.8% | -5.2% | +84.0% | 25/57 | -6.9% | 18.8% |
 | **Both on one account** | +50.5% | -8.5% | +39.9% | +59.4% | +88.6% | **+229.9%** | 33/57 | -6.9% | **26.7%** |
 
@@ -246,6 +246,34 @@ The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold 
 Alone, USDJPY is a weak earner (it lost in 2025 and 2026); it is a partner for gold, not a replacement. Using the opposite movement as a filter instead (gold buys only while USDJPY falls, and back) was tested and rejected: it cut gold to +86-112% and USDJPY to +12-14%, because the two also trend together at times (2024). The same scaled test (57 months) found no other partner: EURUSD -49%, AUDUSD -145%, silver -185%, platinum -518% and GBPUSD +11% (added nothing); US stock indices US500 -70%, USTEC -35%, US30 -46%; crypto BTCUSD -18% and ETHUSD -1% (both raised the combined drawdown), XRPUSD and LTCUSD far worse (their spread is 35-62% of the scaled stop). The edge of these rules is gold's, with USDJPY as the one partner that balances it.
 
 > **Brokers with other quote decimals**: point values are written for a 3-digit gold quote (0.001), and `PointInputDigits` (default 3) rescales them to the symbol's own decimals so every distance keeps the same price meaning. Where gold is quoted with 2 decimals, 20000 points become 2000, still a $20 move, instead of a $200 stop with 10× the risk. This covers `SLValue`, `TPValue`, `TrailingDistanceValue` and `RRRiskValue` when their type is Points, plus `ZonePoints` and `MaxSpreadPoints`. The EA prints a `[POINTS]` line at start-up when it rescales. Set `PointInputDigits = 0` to use point values exactly as typed (for example on forex, where your own values are written for that symbol).
+
+### Account Size, Risk & Account Type
+
+The EA sizes every trade from equity: it uses the largest lot whose stop-out loses at most `RiskPerTradePct` of equity, capped at `MaxLotSize`. When even the broker's minimum lot (0.01) is over that budget, it still trades the minimum lot as long as its stop-out loses no more than `MaxRiskPerTradePct` (5%), and opens nothing above that. With gold's $20 stop, 0.01 lot loses $20. Both profiles need a **hedging** account; leverage changes only the margin a trade needs, not what it risks.
+
+**Standard account** (balance in dollars):
+
+| Equity | `default.set` (1.25% per trade) | `high-risk.set` (2.5% per trade) |
+|---|---|---|
+| under $400 | no trades (0.01 lot would lose more than 5%) | no trades |
+| $400 | 0.01 lot, 5% per trade | 0.01 lot, 5% |
+| $800 | 0.01 lot, 2.5% | 0.01 lot, 2.5% |
+| $1,600 | 0.01 lot, 1.25% | 0.02 lot, 2.5% |
+| **$2,000** (as in the reports) | **0.01 lot, 1.0%** | **0.02 lot, 2.0%** |
+| $4,000 | 0.02 lot, 1.0% | 0.05 lot, 2.5% |
+| $8,000 | 0.05 lot (the cap), 1.25% | 0.10 lot (the cap), 2.5% |
+| $16,000 | 0.05 lot, 0.6% | 0.10 lot, 1.25% |
+
+- **Minimum $400, recommended $2,000 or more.** Below $1,600 the default trades the 0.01 minimum lot above its 1.25% budget (up to 5%); the dashboard shows this as an orange **Lot** line and the Experts tab gets a `[RISK SIZING]` note.
+- **Above $8,000** the lot cap (0.05 for the default, 0.10 for high-risk) holds each trade below the set percentage. Raise `MaxLotSize` if you want the risk to keep scaling with the account.
+
+**Cent account** (balance in US cents, e.g. 10,000 = $100):
+
+- The EA reads every amount in the account currency, so a cent account is sized like a standard account with 100× the number: on a **$100 cent account** the default trades **0.05 lot (about 1% per trade)** and `high-risk.set` 0.10 lot (about 2%). **$100 or more is recommended**; above about $80 the 0.05 cap keeps the default below 1.25%.
+- This assumes the cent gold symbol has the standard lot size with profit counted in cents (the usual setup). The EA calculates from the symbol's own values either way, so check the dashboard's **Lot** line: it shows the lot and the % it risks. A cent symbol has not been backtested.
+- Money inputs are also read in cents: `MinimumEquity` 20 means 20 cents, so set it to 2000 for a $20 floor. Cent gold spreads can be wider: above 500 points ($0.50) the spread filter blocks entries.
+
+**Gold + USDJPY:** USDJPY's 0.786-yen stop costs about $5 per 0.01 lot (it moves with the yen rate), so on $2,000 the USDJPY chart trades about 0.04 lot (about 1%) and is blocked only below about $100. The pair needs gold's minimums above; with both charts running (up to 2 positions each), about 4-5% of equity can be at risk at once.
 
 ## Installation
 
