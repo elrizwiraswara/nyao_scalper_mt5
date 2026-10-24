@@ -5,18 +5,21 @@
 ; The default gold rules on USDJPY (USDJPYm, 3 decimals), meant to run NEXT TO gold on the same account.
 ; EXPERIMENTAL - backtested only; demo forward-test before using real money. Attach it to an M5 chart.
 ; Not tuned: every distance is gold's, scaled by USDJPY's daily volatility (median D1 ATR, 2022-2026):
-;   Stop / checkpoint : 786 points = 0.786 yen (gold: $20), entry spacing 393 points (half of it).
+;   Stop / checkpoint : 786 points = 0.786 yen (gold: $20); ZonePoints 393 (half of it): entries at least 590 points apart.
 ;   D1 trend filter   : close at least 0.309% beyond the EMA50 (gold: 0.5%).
 ;   Spread cap        : 20 points (2 pips).
 ;   PointInputDigits=0 (points are USDJPY's own), MaxLotSize 0.20 (about $100 at the stop, like gold's 0.05).
 ;   DrawdownScope = This EA's Own Trades: gold's losses don't raise this chart's entry score (and back).
-; Backtest v50.0, M5, $2,000 per month (each month a fresh run), 1.25% risk sizing, sums of monthly returns:
-;   2022 +54.6% / 2023 +0.8% / 2024 +43.8% / 2025 -9.7% / Jan-Sep 2026 -7.8%
-;   57 months: +81.6%, 26/57 months up, worst month -6.9%; monthly correlation with the gold EA -0.18.
+;   Lock              : once +590 points in profit (75% of the checkpoint, like gold's +$15), the SL moves
+;                       to the smallest profit (CheckpointBreakEvenPct 75).
+; Backtest v54.0, M5, $2,000 per month (each month a fresh run), 1.25% risk sizing, sums of monthly returns
+; (2022-2025 ticks generated from 1-minute bars, 2026 real ticks):
+;   2022 +55.8% / 2023 +1.3% / 2024 +38.9% / 2025 -6.8% / Jan-Sep 2026 -5.2%
+;   57 months: +84.0%, 25/57 months up, worst month -6.9%, drawdown across months 18.8%;
+;   monthly correlation with the gold EA -0.15. Without the lock: +81.5%, drawdown across months 23.2%.
 ;   USDJPY makes its money in its own big trends (2022, 2024) - often when gold goes sideways.
-; Gold (default.set, v51.0 rules before the +$15 lock) + this profile on one account, both at 1.25%
-; risk (sum of the monthly runs):
-;   +211.3% vs gold alone +129.7%, drawdown across months 30.4% vs 28.2%, 2022 +42.9% vs -11.6%.
+; Gold (default.set) + this profile on one account, both at 1.25% risk (sum of the monthly runs):
+;   +229.9% vs gold alone +145.9%, drawdown across months 26.7% vs 24.0%, 2022 +50.5% vs -5.3%.
 ; Requirements / warnings:
 ;   - Same hedging account as gold; on the gold chart set DrawdownScope = This EA's Own Trades too.
 ;   - With both running, up to 4 positions and about 5% of equity can be at risk at the same time.
@@ -178,7 +181,7 @@ CheckpointMaxSkips=0
 TrendFlipExitScore=6.0
 CheckpointTrailPct=100
 CheckpointTrailStartPct=50
-CheckpointBreakEvenPct=0.0
+CheckpointBreakEvenPct=75.0
 ; 💸 Trailing TP/SL Settings
 EnableTrailing=false
 TrailingEnableBreakEvenLock=true
