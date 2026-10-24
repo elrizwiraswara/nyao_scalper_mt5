@@ -1,6 +1,6 @@
 # Nyao Scalper v54.0
 
-![Nyao Scalper MT5: a trade from a 7.3 signal score with stop loss, break-even, partial close, trailing stop and exit](assets/cover.png)
+![Nyao Scalper MT5: a gold trade on a 7.4 trend score, the stop climbing behind the price at each $20 checkpoint until the exit](assets/cover.png)
 
 **Indicator-Based Signal Strength EA for MetaTrader 5**
 
