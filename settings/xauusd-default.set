@@ -1,31 +1,46 @@
 ; +-----------------------------------------+
-; Nyao Scalper v54.0 - HIGH-RISK PROFILE
+; Nyao Scalper v54.0 - DEFAULT PROFILE
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
-; The default profile's rules with twice the risk per trade: higher return, deeper drawdowns.
-; EXPERIMENTAL - backtested only; demo forward-test before using real money. Attach it to an M5 chart.
-; Differences from settings/default.set (everything else is identical):
-;   RiskPerTradePct 2.5 (default 1.25): the lot loses at most 2.5% at the $20 stop - 0.02 lot on
-;           $2,000 (2%), 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more
-;           than 2.5% and is still traded down to about $400 (MaxRiskPerTradePct 5, as in the default).
-;   MaxLotSize 0.10 (default 0.05): lets a $100 cent account trade 0.10 lot (2%).
-;   (Same exits as the default, including the +$15 break-even lock.)
+; D1-trend entries + checkpoint exit + trailing stop (= the EA's built-in input defaults, except
+; DrawdownScope = This EA's Own Trades, which gives the same results alone and lets it share an account).
+; EXPERIMENTAL - backtested only; demo forward-test before using real money.
+; Built for gold quoted with 3 decimals (XAUUSDm), hedge OFF. Attach it to an M5 chart.
+; Point values are written for 3-decimal gold quotes (PointInputDigits=3) and rescaled automatically:
+; where gold is quoted with 2 decimals, 20000 points become 2000, the same $20 move.
+;   Entry : trend score >= 5 (the multi-hour trend agrees), only in the D1 trend direction
+;           (close at least 0.5% beyond a rising / falling EMA50).
+;   Stop  : fixed $20 move (20000 points on 3-decimal quotes).
+;   Size  : the largest lot that loses at most 1.25% at the stop (RiskPerTradePct), max 0.05 lot:
+;           0.01 lot on $2,000 (about 1%), 0.05 lot on a $100 cent account (10,000 cents).
+;           When even 0.01 lot risks more than 1.25%, it is still traded up to 5% (MaxRiskPerTradePct).
+;   Exit  : +$20 is a checkpoint - score still agrees -> keep the trade, lock 50% of the move,
+;           next checkpoint $20 further; otherwise close.
+;   Trail : once +$10 in profit (50% of the checkpoint distance), the SL follows the price
+;           $20 behind (100% of it) and never moves back.
+;   Lock  : once +$15 in profit (75% of the checkpoint distance), the SL moves to the smallest
+;           profit, so a trade that got that far can no longer end as a loss (CheckpointBreakEvenPct).
+;   Flip  : a losing trade is closed early once the opposite score reaches 6 (the trend turned).
+;   Pause : after 4 losses in a row, paper-trade until a paper win, then trade again.
 ; Backtest v54.0, Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run),
-; sums of monthly returns (reports/high-risk-2026-real-ticks):
-;     M5: +187.6%, 4/9 months up, worst month -14.4%, max DD 35.5%, PF 1.21
-;     M1: +20.9%, 5/9 months up, worst month -24.7%, max DD 47.4%, PF 1.02
-;   Before the +$15 lock (v51.0 rules, M5; 2022-2025 ticks generated from 1-minute bars):
-;   2022 -15.1% / 2023 -7.9% / 2024 -4.7% / 2025 +97.4% / Jan-Sep 2026 +176.4%;
-;   57 months +246.1% (default.set +130.2%), 30/57 months up, worst month -16.4%
-;   (default -5.7%), max drawdown 36.3% (default 20.0%).
-;   Doubling the risk doubled the size of the edge, not the edge itself: return per unit of
-;   drawdown stayed the same. 3.75% and 5% risk made more but with 52-64% drawdowns. Frequent M1
-;   trading (entries during the bar, 4 positions, $1.50 apart) lost up to 60% in a month at 2.5%.
-;   Both were rejected. Like the default, the profile loses in years when gold moves sideways.
+; 1.25% risk sizing (= 0.01 lot), sums of monthly returns (reports/xauusd-default-2026-real-ticks):
+;     M5: +93.8%, 5/9 months up, worst month -2.7%, max DD 19.2%, PF 1.23
+;         (Jan-Jun +100.0%, Jul-Sep -6.2%)
+;     M1: +24.1%, 5/9 months up, worst month -13.5%, max DD 31.4%, PF 1.05
+;   The +$15 lock added about 10 points on M5 vs v51.0 (+83.3%) with a smaller drawdown
+;   (20.0% -> 19.2%); it gained in the trend months and gave a little back in Jul-Sep.
+;   Before the lock (v51.0 rules, M5, ticks generated from 1-minute bars, not real ticks):
+;   2022 -11.6% / 2023 -13.9% / 2024 +6.2% / 2025 +66.2%.
+;   The profile makes its money when gold trends hard (2025-2026) and loses in sideways years.
+;   It was designed on data that includes 2026, so that year is not a blind test.
 ; Requirements / warnings:
-;   - Account: $2,000+ standard, or $100+ cent (balance in cents). Expect -16% months.
+;   - Account: the reports use $2,000 standard; a $100 cent account (balance in cents) is the same. On a standard
+;     account below about $1,600 the 0.01 minimum lot risks more than 1.25%: it is still traded
+;     down to about $400 (up to 5% per trade, orange Lot line on the dashboard), nothing below.
 ;   - Needs a hedging account (up to 2 positions open).
-;   - Use M5: on M1 the same rules made almost nothing in 2026 with -27% months.
+;   - Tested on M5: on M1 the same rules trade more often with deeper drawdowns.
+;   - Can share one hedging account with any other profile in settings/ (own MagicNumber 6926268;
+;     DrawdownScope = This EA's Own Trades, so another chart's losses don't move this one's entry score).
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
 EMAFastPeriod=5
@@ -83,7 +98,7 @@ MaxLosingPositionsSameDir=2
 LosingPosScorePenalty=1.5
 DrawdownThresholdPct=3.0
 DrawdownScoreBoost=2.0
-DrawdownScope=0
+DrawdownScope=1
 ConsecutiveLossesBeforeCooldown=3
 ConsecutiveLossCooldownBars=3
 LossStreakPauseCount=4
@@ -139,14 +154,14 @@ HedgeMaxChainLossSL=1.5
 HedgeClearRootSL=true
 HedgeTrailATR=1.0
 ; 🧮 Dynamic Lot Sizing Settings
-RiskPerTradePct=2.5
+RiskPerTradePct=1.25
 MaxRiskPerTradePct=5.0
 EnableDynamicLots=false
 EquityDropPercent=5.0
 MaxEquityDropLotSteps=2
 MinSignalStrengthForLot=8.0
 LotStepSize=0.01
-MaxLotSize=0.10
+MaxLotSize=0.05
 ; 🏦 Equity Settings
 EnableBasketStop=true
 MaxBasketLossPct=8.0

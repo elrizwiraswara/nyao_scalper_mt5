@@ -18,12 +18,14 @@
 ;   57 months: +84.0%, 25/57 months up, worst month -6.9%, drawdown across months 18.8%;
 ;   monthly correlation with the gold EA -0.15. Without the lock: +81.5%, drawdown across months 23.2%.
 ;   USDJPY makes its money in its own big trends (2022, 2024) - often when gold goes sideways.
-; Gold (default.set) + this profile on one account, both at 1.25% risk (sum of the monthly runs):
+; Gold (xauusd-default.set) + this profile on one account, both at 1.25% risk (sum of the monthly runs):
 ;   +229.9% vs gold alone +145.9%, drawdown across months 26.7% vs 24.0%, 2022 +50.5% vs -5.3%.
 ; Requirements / warnings:
-;   - Same hedging account as gold; on the gold chart set DrawdownScope = This EA's Own Trades too.
+;   - Same hedging account as gold (the gold profiles also use DrawdownScope = This EA's Own Trades).
+;   - Can share one hedging account with any other profile in settings/ (own MagicNumber 6926270;
+;     DrawdownScope = This EA's Own Trades, so another chart's losses don't move this one's entry score).
 ;   - With both running, up to 4 positions and about 5% of equity can be at risk at the same time.
-;   - Alone, USDJPY is a weak earner (lost in 2025 and 2026): use it as gold's partner, not instead.
+;   - Alone, USDJPY was a weak earner (lost in 2025 and 2026); it was tested as gold's partner.
 ; +-----------------------------------------+
 ; 📊 Indicator Settings
 EMAFastPeriod=5
@@ -193,7 +195,7 @@ TrailingDistanceValue=0.20
 TrailingValueMultiplier=0.20
 TrailStartATR=0.0
 ; 🤖 Robot Settings
-MagicNumber=6926268
+MagicNumber=6926270
 EnableDiscordAlerts=false
 DiscordWebhookURL=
 EnableTradingHours=false

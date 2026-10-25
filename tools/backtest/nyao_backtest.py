@@ -797,7 +797,7 @@ def main():
     r.add_argument('--name', required=True, help='report folder name: reports/<name>/')
     r.add_argument('--title', help='report title')
     r.add_argument('--ea', default='nyao_scalper.mq5', help='EA source in this repo (default: nyao_scalper.mq5)')
-    r.add_argument('--set', default='settings/default.set', help='settings file in this repo (default: settings/default.set)')
+    r.add_argument('--set', default='settings/xauusd-default.set', help='settings file in this repo (default: settings/xauusd-default.set)')
     r.add_argument('--symbol', default='XAUUSDm')
     r.add_argument('--periods', default='M1', help='comma-separated timeframes, e.g. M1,M5')
     r.add_argument('--from', dest='from_month', required=True, help='first month, YYYY-MM')
