@@ -1,0 +1,76 @@
+; +-----------------------------------------+
+; Nyao Straddle v1.5 - DEFAULT PROFILE (nyao_straddle.mq5)
+; © Copyright Nyao Scalper by Elriz Wiraswara
+; +-----------------------------------------+
+; Volatility breakout straddle for gold (= the EA's built-in input defaults). Attach it to an
+; XAUUSD M1 chart. EXPERIMENTAL - backtested on one year of real ticks; demo forward-test first.
+; Rules:
+;   Extreme markets only: H1 ATR(14) of closed bars >= $34 (gold's most extreme 10% of 2026)
+;           AND the last 7 minutes' ATR >= 2x its average over the last 288 minutes.
+;   Entry : a buy stop $1 above and a sell stop $1 below the price; the first fill cancels the other.
+;   Exit  : $1 stop, trailing $1 behind the price from the fill (no take profit).
+;   Again : a new pair goes out as soon as the position closes, while the market stays extreme.
+;   Pause : after 10 losing trades in a row, no new orders for 30 minutes.
+;   Lot   : fixed 0.01 (about $1 at the stop, plus slippage).
+; Backtest v1.5, Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run), 0.01 lot,
+; sums of monthly returns (reports/xauusd-straddle-2026-real-ticks):
+;     M1: +239.0%, PF 2.02, max DD 2.7%, 9,985 trades, win rate 45%, avg win $2.12 / loss -$0.85
+;         Jan +120.0, Feb +75.5, Mar +33.0, Apr +10.7, Jun -0.2; no trades in May, Jul-Oct
+;     M5: +184.5%, PF 1.74, max DD 4.0%, 10,486 trades (Jan +109.7, Feb +27.7, Mar +45.5, Apr +1.5)
+;   82% of the profit came from one event: the late-January crash and its aftermath. Outside it
+;   the edge is small (cents per trade). In 2025 the $34 level was reached only in October.
+;   Coin flip test passed: random-direction versions made +14% to +52% (see the README, Nyao Straddle).
+; Requirements / warnings:
+;   - Hedging account. Can share it with any Nyao Scalper profile, also on the same gold symbol
+;     (own MagicNumber 25102501; it only touches its own orders and positions).
+;   - Up to one position at a time; about $1 at risk per trade at 0.01 lot, more on fast-market
+;     slippage (tester average about $0.10 per fill, real brokers can be worse).
+;   - It may not trade for weeks: the chart status shows the H1 ATR next to the $34 it needs.
+;   - Gold only: on USDJPY the spread is too large next to its moves (tested, lost every month).
+; +-----------------------------------------+
+; Volatility Filter
+VolTimeframe=0
+VolATRPeriod=7
+VolBaseBars=288
+VolMinRatio=2.0
+VolMinATR=0.0
+CancelWhenCalm=true
+; Extreme Market Filter
+RegimeTimeframe=16385
+RegimeATRPeriod=14
+RegimeMinATR=34.0
+; Trading Sessions
+EnableSessions=false
+SessionUTCOffset=0
+TradeAsia=true
+AsiaStartUTC=0
+AsiaEndUTC=9
+TradeLondon=true
+LondonStartUTC=7
+LondonEndUTC=16
+TradeNewYork=true
+NewYorkStartUTC=12
+NewYorkEndUTC=21
+; Orders
+Lots=0.01
+RiskPercent=0.0
+DistanceUnit=1
+EntryDistance=1.0
+StopLoss=1.0
+TakeProfit=0.0
+MaxSpread=0.0
+PendingExpiryBars=0
+; Trailing Stop
+TrailStart=0.0
+TrailDistance=1.0
+TrailStep=0.1
+BreakEvenTrigger=0.0
+BreakEvenLock=0.2
+; Losing Streak Pause
+LossStreakPause=10
+LossStreakPauseMinutes=30
+; Other
+EntryMode=0
+CoinFlipSeed=1
+MagicNumber=25102501
+TesterEquityLog=true
