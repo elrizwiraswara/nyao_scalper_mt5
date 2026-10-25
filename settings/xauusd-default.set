@@ -29,8 +29,9 @@
 ;     M1: +24.1%, 5/9 months up, worst month -13.5%, max DD 31.4%, PF 1.05
 ;   The +$15 lock added about 10 points on M5 vs v51.0 (+83.3%) with a smaller drawdown
 ;   (20.0% -> 19.2%); it gained in the trend months and gave a little back in Jul-Sep.
-;   Before the lock (v51.0 rules, M5, ticks generated from 1-minute bars, not real ticks):
-;   2022 -11.6% / 2023 -13.9% / 2024 +6.2% / 2025 +66.2%.
+;   Earlier years, v54.0, M5, ticks generated from 1-minute bars (reports/xauusd-default-2022-2024-
+;   generated-ticks and -2025-generated-ticks): 2022 -5.3% / 2023 -9.0% / 2024 +0.9% / 2025 +65.3%;
+;   57 months +145.8%, 27/57 months up, worst month -6.5%, drawdown across months 24.0%.
 ;   The profile makes its money when gold trends hard (2025-2026) and loses in sideways years.
 ;   It was designed on data that includes 2026, so that year is not a blind test.
 ; Requirements / warnings:

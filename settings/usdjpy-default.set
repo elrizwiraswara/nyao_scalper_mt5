@@ -16,10 +16,10 @@
 ; (2022-2025 ticks generated from 1-minute bars, 2026 real ticks):
 ;   2022 +55.8% / 2023 +1.3% / 2024 +38.9% / 2025 -6.8% / Jan-Sep 2026 -5.2%
 ;   57 months: +84.0%, 25/57 months up, worst month -6.9%, drawdown across months 18.8%;
-;   monthly correlation with the gold EA -0.15. Without the lock: +81.5%, drawdown across months 23.2%.
+;   monthly correlation with the gold EA -0.16. Without the lock: +81.5%, drawdown across months 23.2%.
 ;   USDJPY makes its money in its own big trends (2022, 2024) - often when gold goes sideways.
 ; Gold (xauusd-default.set) + this profile on one account, both at 1.25% risk (sum of the monthly runs):
-;   +229.9% vs gold alone +145.9%, drawdown across months 26.7% vs 24.0%, 2022 +50.5% vs -5.3%.
+;   +229.8% vs gold alone +145.8%, drawdown across months 26.7% vs 24.0%, 2022 +50.5% vs -5.3%.
 ; Requirements / warnings:
 ;   - Same hedging account as gold (the gold profiles also use DrawdownScope = This EA's Own Trades).
 ;   - Can share one hedging account with any other profile in settings/ (own MagicNumber 6926270;

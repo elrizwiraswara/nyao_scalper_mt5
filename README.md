@@ -219,12 +219,12 @@ Profiles are named after their symbol (`xauusd-…`, `usdjpy-…`), and reports 
 
 Jan-Sep 2026, real ticks, v54.0 (with the +$15 break-even lock), M5, $2,000 per month: `xauusd-default.set` **+93.8%** (worst month -2.7%, max DD 19.2%), `xauusd-high-risk.set` **+187.6%** (worst month -14.4%, max DD 35.5%).
 
-The longer history below was measured before the +$15 lock (v51.0 rules); 2022-2025 use ticks generated from 1-minute bars, not real ticks:
+Every month since 2022 under v54.0 (2022-2025 ticks generated from 1-minute bars, 2026 real ticks), from the [reports in this repository](#automated-backtests-toolsbacktest):
 
 | M5, $2,000 per month | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Max DD |
 |---|---|---|---|---|---|---|---|---|---|
-| `xauusd-default.set` (1.25%) | -11.6% | -13.9% | +6.2% | +66.2% | +83.3% | +130.2% | 27/57 | -5.7% | 20.0% |
-| `xauusd-high-risk.set` (2.5%) | -15.1% | -7.9% | -4.7% | +97.4% | +176.4% | **+246.1%** | 30/57 | **-16.4%** | **36.3%** |
+| `xauusd-default.set` (1.25%) | -5.3% | -9.0% | +0.9% | +65.3% | +93.8% | +145.8% | 27/57 | -6.5% | 19.2% |
+| `xauusd-high-risk.set` (2.5%) | -17.5% | -4.3% | -9.0% | +95.4% | +187.6% | **+252.2%** | 27/57 | **-15.7%** | **35.5%** |
 
 Monthly reports with every run's balance & equity graph, M1 and M5, real ticks Jan-Sep 2026 (v54.0): [`reports/xauusd-default-2026-real-ticks`](reports/xauusd-default-2026-real-ticks/summary.md) (M5 +93.8%, M1 +24.1%) and [`reports/xauusd-high-risk-2026-real-ticks`](reports/xauusd-high-risk-2026-real-ticks/summary.md) (M5 +187.6%, M1 +20.9%). For 2025, M5 with ticks generated from 1-minute bars (v54.0): [`reports/xauusd-default-2025-generated-ticks`](reports/xauusd-default-2025-generated-ticks/summary.md) (+65.3%, 10/12 months up) and [`reports/xauusd-high-risk-2025-generated-ticks`](reports/xauusd-high-risk-2025-generated-ticks/summary.md) (+95.4%, 10/12 months up).
 
@@ -236,9 +236,9 @@ The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold 
 
 | M5, $2,000 per month, 1.25% risk each | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Drawdown across months |
 |---|---|---|---|---|---|---|---|---|---|
-| Gold (`xauusd-default.set`) | -5.3% | -9.8% | +1.0% | +66.2% | +93.8% | +145.9% | 27/57 | -6.2% | 24.0% |
+| Gold (`xauusd-default.set`) | -5.3% | -9.0% | +0.9% | +65.3% | +93.8% | +145.8% | 27/57 | -6.5% | 24.0% |
 | USDJPY (`usdjpy-default.set`) | +55.8% | +1.3% | +38.9% | -6.8% | -5.2% | +84.0% | 25/57 | -6.9% | 18.8% |
-| **Both on one account** | +50.5% | -8.5% | +39.9% | +59.4% | +88.6% | **+229.9%** | 33/57 | -6.9% | **26.7%** |
+| **Both on one account** | +50.5% | -7.7% | +39.8% | +58.5% | +88.6% | **+229.8%** | 33/57 | -6.9% | **26.7%** |
 
 "Both" is the sum of the two monthly runs (the tester runs one EA at a time), measured with v54.0; 2022-2025 use ticks generated from 1-minute bars, 2026 real ticks. The smallest-profit lock helped USDJPY the way it helped gold: without it, USDJPY made +81.5% with a 23.2% drawdown across months, and both together +227.4% (27.3%). To run it:
 
@@ -324,7 +324,7 @@ Untriggered orders are deleted when the market calms down. The chart shows the c
 | Entry | Buy stop and sell stop $1 from the price; the first fill cancels the other |
 | Exit | $1 stop, trailing $1 behind the price from the fill; no take profit |
 | Pause | 10 losing trades in a row → 30 minutes without new orders |
-| Lot size | 0.01 (`Lots`; `RiskPercent` > 0 sizes from equity, never below `Lots`) |
+| Lot size | 0.01 (`Lots`; `RiskPercent` > 0 sizes from equity, never below `Lots`). On a **cent account** (balance in cents) 0.01 lot loses 1 cent at the stop; 0.05 lot, or `RiskPercent` 0.05, on a $100 cent account is the same ~0.05% per trade as 0.01 lot on $2,000. Cent gold spreads can be wider, and the straddle pays the spread on every trade; a cent symbol has not been backtested |
 | Account | **Hedging** account (it can share gold with Nyao Scalper). At 0.01 lot a trade risks about $1 plus slippage |
 
 ### Straddle Results
@@ -349,7 +349,7 @@ October 2026 (to the 23rd) had no trades either.
 - **82% of the profit is one event:** January 29 - February 9, 2026, the crash and its aftermath. Outside it the edge is a few cents per trade (about $0.09 per 0.01-lot trade in the tests below).
 - **It sits idle most of the time.** It traded in 5 of 10 months in 2026.
 - **The tester fills orders instantly.** It models slippage from real ticks (fills averaged about $0.10 worse than the order price) but not execution delay. In a crash the EA can trade every few seconds; a real broker may fill later, requote, or limit that.
-- **2025 can't be tested properly.** Real ticks only go back to 2026 at the test broker. With ticks generated from 1-minute bars, only October 2025 reached the $34 level (gold was cheaper then, so $34 was a bigger move): +37.6% with an 83% win rate and a profit factor of 41.8. Generated price paths are far smoother than real ones, which makes a $1 trailing stop look almost perfect, so that number is not usable.
+- **2025 can't be tested properly.** Real ticks only go back to 2026 at the test broker. With ticks generated from 1-minute bars, only October 2025 reached the $34 level (gold was cheaper then, so $34 was a bigger move): +37.6% with an 83% win rate and a profit factor of 41.8. Generated price paths are far smoother than real ones, which makes a $1 trailing stop look almost perfect, so that number is not usable ([2025 report](reports/xauusd-straddle-2025-generated-ticks/summary.md)). 2022-2024 on generated ticks: no trades: gold, at about $1,600-2,800 then, never reached a $34 hourly ATR ([report](reports/xauusd-straddle-2022-2024-generated-ticks/summary.md)).
 - **The defaults were chosen on 2026 data.** There is no untouched period left to confirm them on.
 
 ### Straddle Coin Flip Test
@@ -596,17 +596,22 @@ The balance & equity graphs come from the EA's **TesterEquityLog** input (on by 
 
 The **Tick data** column in the summary shows whether each run really used real ticks ("100% real ticks"). Brokers only keep real ticks for a limited period; before that, the tester generates ticks from M1 bars.
 
-**Reports in this repository** (`reports/<symbol>-<profile>-<period>-<tick data>`):
+**Reports in this repository** (`reports/<symbol>-<profile>-<period>-<tick data>`). 2022-2025 use ticks generated from 1-minute bars; 2026 real ticks:
 
 | Report | EA / timeframes | Result (sum of monthly returns) |
 |---|---|---|
-| [`xauusd-default-2026-real-ticks`](reports/xauusd-default-2026-real-ticks/summary.md) | Nyao Scalper, M1 + M5, Jan-Sep 2026 | M5 +93.8%, M1 +24.1% |
-| [`xauusd-high-risk-2026-real-ticks`](reports/xauusd-high-risk-2026-real-ticks/summary.md) | Nyao Scalper, M1 + M5, Jan-Sep 2026 | M5 +187.6%, M1 +20.9% |
-| [`xauusd-default-2025-generated-ticks`](reports/xauusd-default-2025-generated-ticks/summary.md) | Nyao Scalper, M5, 2025 | +65.3%, 10/12 months up |
-| [`xauusd-high-risk-2025-generated-ticks`](reports/xauusd-high-risk-2025-generated-ticks/summary.md) | Nyao Scalper, M5, 2025 | +95.4%, 10/12 months up |
-| [`usdjpy-default-2026-real-ticks`](reports/usdjpy-default-2026-real-ticks/summary.md) | Nyao Scalper, M5, Jan-Sep 2026 | -5.2%, 2/9 months up |
-| [`usdjpy-default-2025-generated-ticks`](reports/usdjpy-default-2025-generated-ticks/summary.md) | Nyao Scalper, M5, 2025 | -6.8%, 5/12 months up |
-| [`xauusd-straddle-2026-real-ticks`](reports/xauusd-straddle-2026-real-ticks/summary.md) | Nyao Straddle, M1 + M5, Jan-Sep 2026 | M1 +239.0%, M5 +184.5% |
+| [`xauusd-default-2022-2024-generated-ticks`](reports/xauusd-default-2022-2024-generated-ticks/summary.md) | Nyao Scalper, M5 | -13.4% (2022 -5.3%, 2023 -9.0%, 2024 +0.9%) |
+| [`xauusd-default-2025-generated-ticks`](reports/xauusd-default-2025-generated-ticks/summary.md) | Nyao Scalper, M5 | +65.3%, 10/12 months up |
+| [`xauusd-default-2026-real-ticks`](reports/xauusd-default-2026-real-ticks/summary.md) | Nyao Scalper, M1 + M5, Jan-Sep | M5 +93.8%, M1 +24.1% |
+| [`xauusd-high-risk-2022-2024-generated-ticks`](reports/xauusd-high-risk-2022-2024-generated-ticks/summary.md) | Nyao Scalper, M5 | -30.8% (2022 -17.5%, 2023 -4.3%, 2024 -9.0%) |
+| [`xauusd-high-risk-2025-generated-ticks`](reports/xauusd-high-risk-2025-generated-ticks/summary.md) | Nyao Scalper, M5 | +95.4%, 10/12 months up |
+| [`xauusd-high-risk-2026-real-ticks`](reports/xauusd-high-risk-2026-real-ticks/summary.md) | Nyao Scalper, M1 + M5, Jan-Sep | M5 +187.6%, M1 +20.9% |
+| [`usdjpy-default-2022-2024-generated-ticks`](reports/usdjpy-default-2022-2024-generated-ticks/summary.md) | Nyao Scalper, M5 | +96.0% (2022 +55.8%, 2023 +1.3%, 2024 +38.9%) |
+| [`usdjpy-default-2025-generated-ticks`](reports/usdjpy-default-2025-generated-ticks/summary.md) | Nyao Scalper, M5 | -6.8%, 5/12 months up |
+| [`usdjpy-default-2026-real-ticks`](reports/usdjpy-default-2026-real-ticks/summary.md) | Nyao Scalper, M5, Jan-Sep | -5.2%, 2/9 months up |
+| [`xauusd-straddle-2022-2024-generated-ticks`](reports/xauusd-straddle-2022-2024-generated-ticks/summary.md) | Nyao Straddle, M1 + M5 | no trades: gold, at about $1,600-2,800 then, never reached a $34 hourly ATR |
+| [`xauusd-straddle-2025-generated-ticks`](reports/xauusd-straddle-2025-generated-ticks/summary.md) | Nyao Straddle, M1 + M5 | M1 +37.6%, M5 +42.1%: only October traded, and generated ticks overstate a $1 trailing stop (83% winners, profit factor 41.8) |
+| [`xauusd-straddle-2026-real-ticks`](reports/xauusd-straddle-2026-real-ticks/summary.md) | Nyao Straddle, M1 + M5, Jan-Sep | M1 +239.0%, M5 +184.5% |
 
 ## Research Log
 

@@ -14,10 +14,10 @@
 ; sums of monthly returns (reports/xauusd-high-risk-2026-real-ticks):
 ;     M5: +187.6%, 4/9 months up, worst month -14.4%, max DD 35.5%, PF 1.21
 ;     M1: +20.9%, 5/9 months up, worst month -24.7%, max DD 47.4%, PF 1.02
-;   Before the +$15 lock (v51.0 rules, M5; 2022-2025 ticks generated from 1-minute bars):
-;   2022 -15.1% / 2023 -7.9% / 2024 -4.7% / 2025 +97.4% / Jan-Sep 2026 +176.4%;
-;   57 months +246.1% (xauusd-default.set +130.2%), 30/57 months up, worst month -16.4%
-;   (default -5.7%), max drawdown 36.3% (default 20.0%).
+;   Every month since 2022, v54.0, M5 (2022-2025 ticks generated from 1-minute bars):
+;   2022 -17.5% / 2023 -4.3% / 2024 -9.0% / 2025 +95.4% / Jan-Sep 2026 +187.6%;
+;   57 months +252.2% (xauusd-default.set +145.8%), 27/57 months up, worst month -15.7%
+;   (default -6.5%), drawdown across months 41.6% (default 24.0%).
 ;   Doubling the risk doubled the size of the edge, not the edge itself: return per unit of
 ;   drawdown stayed the same. 3.75% and 5% risk made more but with 52-64% drawdowns. Frequent M1
 ;   trading (entries during the bar, 4 positions, $1.50 apart) lost up to 60% in a month at 2.5%.
