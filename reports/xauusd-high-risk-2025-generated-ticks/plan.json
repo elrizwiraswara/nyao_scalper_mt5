@@ -1,0 +1,106 @@
+{
+  "name": "xauusd-high-risk-2025-generated-ticks",
+  "title": "High-risk profile - XAUUSDm M5, generated ticks 2025",
+  "ea": "nyao_scalper.mq5",
+  "set": "settings/xauusd-high-risk.set",
+  "version": "b7b5881",
+  "ea_version": "54.0",
+  "symbol": "XAUUSDm",
+  "periods": [
+    "M5"
+  ],
+  "windows": [
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
+    "2025-10",
+    "2025-11",
+    "2025-12"
+  ],
+  "split": "monthly",
+  "model": "every",
+  "deposit": 2000.0,
+  "currency": "USD",
+  "leverage": 500,
+  "generated": "2026-10-26 02:10",
+  "runs": [
+    {
+      "period": "M5",
+      "window": "2025-01",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-01",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-02",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-02",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-03",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-03",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-04",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-04",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-05",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-05",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-06",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-06",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-07",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-07",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-08",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-08",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-09",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-09",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-10",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-10",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-11",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-11",
+      "status": "done"
+    },
+    {
+      "period": "M5",
+      "window": "2025-12",
+      "report": "nyao_bt_xauusd-high-risk-2025-generated-ticks_M5_2025-12",
+      "status": "done"
+    }
+  ]
+}

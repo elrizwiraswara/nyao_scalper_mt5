@@ -10,6 +10,8 @@ Nyao Scalper is an automated trading EA designed for scalping on lower timeframe
 
 It includes position management, adaptive trailing stops, and lot sizing based on equity performance and signal quality.
 
+The repository also contains **Nyao Straddle** (`nyao_straddle.mq5`), a separate and more experimental EA that trades gold only in extreme markets and can run next to Nyao Scalper on the same account. See [Nyao Straddle](#nyao-straddle-companion-ea).
+
 ## Key Features
 
 ### Signal Scoring
@@ -196,7 +198,9 @@ Once set at entry, the **TP is fixed at the R:R level** — the adaptive trailin
 
 ## Settings Profile
 
-Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (see [High-Risk Profile](#high-risk-profile)) and `settings/usdjpy.set`, which runs next to gold on the same account (see [Gold + USDJPY](#gold--usdjpy-on-one-account)). `default.set` holds the same values as the EA's built-in input defaults, so attaching the EA without loading anything gives the same setup. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
+Three profiles are bundled: `settings/xauusd-default.set`, `settings/xauusd-high-risk.set` (see [High-Risk Profile](#high-risk-profile)) and `settings/usdjpy-default.set`, which runs next to gold on the same account (see [Gold + USDJPY](#gold--usdjpy-on-one-account)). `xauusd-default.set` holds the same values as the EA's built-in input defaults, except `DrawdownScope`: the file uses This EA's Own Trades (see [Using the Profiles Together](#using-the-profiles-together)), which gives the same results when the EA trades the account alone. To load it, attach the EA to a chart, open the **Inputs** tab, click **Load** and pick the file (in the Strategy Tester: right-click the inputs list → **Load**). The file lists every input, so loading it fully defines the EA's behavior.
+
+Profiles are named after their symbol (`xauusd-…`, `usdjpy-…`), and reports after the profile and the tick data they were tested on (`reports/xauusd-default-2026-real-ticks`, `reports/usdjpy-default-2025-generated-ticks`, …). `settings/xauusd-straddle.set` belongs to the separate [Nyao Straddle](#nyao-straddle-companion-ea) EA.
 
 | default | |
 |---|---|
@@ -207,43 +211,42 @@ Three profiles are bundled: `settings/default.set`, `settings/high-risk.set` (se
 | Exit | Checkpoint every $20: held while the score agrees (locking 50%), otherwise closed; $20 trailing stop from +$10; break-even lock at +$15, so a trade that got that far can't end as a loss; a losing trade is closed early once the trend flips against it (opposite score ≥ 6) |
 | Loss-streak pause | After 4 losses in a row, paper-trades until a paper win |
 | Hedge chain | Off |
-| Account | **Standard account: $2,000 or more recommended** (0.01 lot risks $20, about 1%). Below about $1,600 the 0.01 minimum lot risks more than 1.25%: the EA still trades it down to about $400 (up to 5% per trade, `MaxRiskPerTradePct`, shown in orange on the dashboard) and opens nothing below that. **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%). See [Account Size, Risk & Account Type](#account-size-risk--account-type) |
+| Account | **Standard account: the reports use $2,000** (0.01 lot risks $20, about 1%). Below about $1,600 the 0.01 minimum lot risks more than 1.25%: the EA still trades it down to about $400 (up to 5% per trade, `MaxRiskPerTradePct`, shown in orange on the dashboard) and opens nothing below that. **Cent account: $100 or more** (10,000 cents, 0.05 lot, the same ~1%). See [Account Size, Risk & Account Type](#account-size-risk--account-type) |
 
 ### High-Risk Profile
 
-`settings/high-risk.set` uses the default rules with twice the risk per trade. Only two inputs differ: `RiskPerTradePct` 2.5 (0.02 lot on $2,000, dropping to 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more than 2.5% and is traded down to about $400, the same 5% cap as the default) and `MaxLotSize` 0.10 (so a $100 cent account can trade 0.10 lot). Use it on **M5**.
+`settings/xauusd-high-risk.set` uses the default rules with twice the risk per trade. Only two inputs differ: `RiskPerTradePct` 2.5 (0.02 lot on $2,000, dropping to 0.01 lot below about $1,600; below about $800 that 0.01 lot risks more than 2.5% and is traded down to about $400, the same 5% cap as the default) and `MaxLotSize` 0.10 (so a $100 cent account can trade 0.10 lot). It was tested on **M5**.
 
-Jan-Sep 2026, real ticks, v54.0 (with the +$15 break-even lock), M5, $2,000 per month: `default.set` **+93.8%** (worst month -2.7%, max DD 19.2%), `high-risk.set` **+187.6%** (worst month -14.4%, max DD 35.5%).
+Jan-Sep 2026, real ticks, v54.0 (with the +$15 break-even lock), M5, $2,000 per month: `xauusd-default.set` **+93.8%** (worst month -2.7%, max DD 19.2%), `xauusd-high-risk.set` **+187.6%** (worst month -14.4%, max DD 35.5%).
 
 The longer history below was measured before the +$15 lock (v51.0 rules); 2022-2025 use ticks generated from 1-minute bars, not real ticks:
 
 | M5, $2,000 per month | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Max DD |
 |---|---|---|---|---|---|---|---|---|---|
-| `default.set` (1.25%) | -11.6% | -13.9% | +6.2% | +66.2% | +83.3% | +130.2% | 27/57 | -5.7% | 20.0% |
-| `high-risk.set` (2.5%) | -15.1% | -7.9% | -4.7% | +97.4% | +176.4% | **+246.1%** | 30/57 | **-16.4%** | **36.3%** |
+| `xauusd-default.set` (1.25%) | -11.6% | -13.9% | +6.2% | +66.2% | +83.3% | +130.2% | 27/57 | -5.7% | 20.0% |
+| `xauusd-high-risk.set` (2.5%) | -15.1% | -7.9% | -4.7% | +97.4% | +176.4% | **+246.1%** | 30/57 | **-16.4%** | **36.3%** |
 
-Monthly reports with every run's balance & equity graph, M1 and M5, real ticks Jan-Sep 2026 (v54.0): [`reports/default-2026-real-ticks`](reports/default-2026-real-ticks/summary.md) (M5 +93.8%, M1 +24.1%) and [`reports/high-risk-2026-real-ticks`](reports/high-risk-2026-real-ticks/summary.md) (M5 +187.6%, M1 +20.9%).
+Monthly reports with every run's balance & equity graph, M1 and M5, real ticks Jan-Sep 2026 (v54.0): [`reports/xauusd-default-2026-real-ticks`](reports/xauusd-default-2026-real-ticks/summary.md) (M5 +93.8%, M1 +24.1%) and [`reports/xauusd-high-risk-2026-real-ticks`](reports/xauusd-high-risk-2026-real-ticks/summary.md) (M5 +187.6%, M1 +20.9%). For 2025, M5 with ticks generated from 1-minute bars (v54.0): [`reports/xauusd-default-2025-generated-ticks`](reports/xauusd-default-2025-generated-ticks/summary.md) (+65.3%, 10/12 months up) and [`reports/xauusd-high-risk-2025-generated-ticks`](reports/xauusd-high-risk-2025-generated-ticks/summary.md) (+95.4%, 10/12 months up).
 
 Doubling the risk doubles the size of the edge, not the edge itself: the return per unit of drawdown stays the same, and the profile still loses when gold moves sideways. Higher risk (3.75% and 5%) returned more but with 52-64% drawdowns. A frequent-trading M1 variant (entries during the bar, up to 4 positions $1.50 apart, a faster trend score) was tested and rejected: at 2.5% risk it lost up to 60% in a single month.
 
 ### Gold + USDJPY on One Account
 
-The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold moves sideways (their prices move opposite: monthly correlation -0.36 since 2022). `settings/usdjpy.set` is the default profile with every distance scaled by USDJPY's daily volatility, nothing tuned: a 786-point (0.786 yen) stop and checkpoint, entries at least 590 points apart (`ZonePoints` 393), a 0.309% D1 trend distance, a 2-pip spread cap, `PointInputDigits` 0, `MaxLotSize` 0.20 (about $100 at the stop, like gold's 0.05 lot) and gold's smallest-profit lock at 75% of the checkpoint (`CheckpointBreakEvenPct` 75).
+The default rules also trend-follow USDJPY, and USDJPY tends to trend when gold moves sideways (their prices move opposite: monthly correlation -0.36 since 2022). `settings/usdjpy-default.set` is the default profile with every distance scaled by USDJPY's daily volatility, nothing tuned: a 786-point (0.786 yen) stop and checkpoint, entries at least 590 points apart (`ZonePoints` 393), a 0.309% D1 trend distance, a 2-pip spread cap, `PointInputDigits` 0, `MaxLotSize` 0.20 (about $100 at the stop, like gold's 0.05 lot) and gold's smallest-profit lock at 75% of the checkpoint (`CheckpointBreakEvenPct` 75).
 
 | M5, $2,000 per month, 1.25% risk each | 2022 | 2023 | 2024 | 2025 | Jan-Sep 2026 | 57 months | Months up | Worst month | Drawdown across months |
 |---|---|---|---|---|---|---|---|---|---|
-| Gold (`default.set`) | -5.3% | -9.8% | +1.0% | +66.2% | +93.8% | +145.9% | 27/57 | -6.2% | 24.0% |
-| USDJPY (`usdjpy.set`) | +55.8% | +1.3% | +38.9% | -6.8% | -5.2% | +84.0% | 25/57 | -6.9% | 18.8% |
+| Gold (`xauusd-default.set`) | -5.3% | -9.8% | +1.0% | +66.2% | +93.8% | +145.9% | 27/57 | -6.2% | 24.0% |
+| USDJPY (`usdjpy-default.set`) | +55.8% | +1.3% | +38.9% | -6.8% | -5.2% | +84.0% | 25/57 | -6.9% | 18.8% |
 | **Both on one account** | +50.5% | -8.5% | +39.9% | +59.4% | +88.6% | **+229.9%** | 33/57 | -6.9% | **26.7%** |
 
 "Both" is the sum of the two monthly runs (the tester runs one EA at a time), measured with v54.0; 2022-2025 use ticks generated from 1-minute bars, 2026 real ticks. The smallest-profit lock helped USDJPY the way it helped gold: without it, USDJPY made +81.5% with a 23.2% drawdown across months, and both together +227.4% (27.3%). To run it:
 
-1. One **hedging** account, two M5 charts: XAUUSDm with `default.set`, USDJPYm with `usdjpy.set`.
-2. On the gold chart set **`DrawdownScope` = This EA's Own Trades** (`usdjpy.set` already has it). Otherwise one symbol's losing streak raises the other's entry score, which the backtest above did not do.
-3. Each EA only touches its own symbol's positions, so both can keep the same `MagicNumber`. The per-trade, basket and total-loss stops count only the chart's own trades; the account-wide checks (`MinEquityPercent` drawdown pause, `MinimumEquity`, `TargetEquity`, leverage pause) watch the whole account, and each EA then closes only its own positions.
-4. Expect up to 4 positions and about 5% of equity at risk at the same time.
+One **hedging** account, two M5 charts: XAUUSD with `xauusd-default.set`, USDJPY with `usdjpy-default.set`. Both profiles already carry their own magic number and `DrawdownScope` = This EA's Own Trades; see [Using the Profiles Together](#using-the-profiles-together). Up to 4 positions and about 5% of equity can be at risk at the same time.
 
-Alone, USDJPY is a weak earner (it lost in 2025 and 2026); it is a partner for gold, not a replacement. Using the opposite movement as a filter instead (gold buys only while USDJPY falls, and back) was tested and rejected: it cut gold to +86-112% and USDJPY to +12-14%, because the two also trend together at times (2024). The same scaled test (57 months) found no other partner: EURUSD -49%, AUDUSD -145%, silver -185%, platinum -518% and GBPUSD +11% (added nothing); US stock indices US500 -70%, USTEC -35%, US30 -46%; crypto BTCUSD -18% and ETHUSD -1% (both raised the combined drawdown), XRPUSD and LTCUSD far worse (their spread is 35-62% of the scaled stop). The edge of these rules is gold's, with USDJPY as the one partner that balances it.
+USDJPY reports (M5, v54.0): [`reports/usdjpy-default-2026-real-ticks`](reports/usdjpy-default-2026-real-ticks/summary.md) (-5.2%, 2/9 months up) and [`reports/usdjpy-default-2025-generated-ticks`](reports/usdjpy-default-2025-generated-ticks/summary.md) (-6.8%, 5/12 months up). The [Nyao Straddle](#nyao-straddle-companion-ea) can be added as a third chart.
+
+Alone, USDJPY was a weak earner (it lost in 2025 and 2026); it was tested as a partner for gold. Using the opposite movement as a filter instead (gold buys only while USDJPY falls, and back) was tested and rejected: it cut gold to +86-112% and USDJPY to +12-14%, because the two also trend together at times (2024). The same scaled test (57 months) found no other partner: EURUSD -49%, AUDUSD -145%, silver -185%, platinum -518% and GBPUSD +11% (added nothing); US stock indices US500 -70%, USTEC -35%, US30 -46%; crypto BTCUSD -18% and ETHUSD -1% (both raised the combined drawdown), XRPUSD and LTCUSD far worse (their spread is 35-62% of the scaled stop). The edge of these rules is gold's, with USDJPY as the one partner that balances it.
 
 > **Brokers with other quote decimals**: point values are written for a 3-digit gold quote (0.001), and `PointInputDigits` (default 3) rescales them to the symbol's own decimals so every distance keeps the same price meaning. Where gold is quoted with 2 decimals, 20000 points become 2000, still a $20 move, instead of a $200 stop with 10× the risk. This covers `SLValue`, `TPValue`, `TrailingDistanceValue` and `RRRiskValue` when their type is Points, plus `ZonePoints` and `MaxSpreadPoints`. The EA prints a `[POINTS]` line at start-up when it rescales. Set `PointInputDigits = 0` to use point values exactly as typed (for example on forex, where your own values are written for that symbol).
 
@@ -253,7 +256,7 @@ The EA sizes every trade from equity: it uses the largest lot whose stop-out los
 
 **Standard account** (balance in dollars):
 
-| Equity | `default.set` (1.25% per trade) | `high-risk.set` (2.5% per trade) |
+| Equity | `xauusd-default.set` (1.25% per trade) | `xauusd-high-risk.set` (2.5% per trade) |
 |---|---|---|
 | under $400 | no trades (0.01 lot would lose more than 5%) | no trades |
 | $400 | 0.01 lot, 5% per trade | 0.01 lot, 5% |
@@ -264,16 +267,207 @@ The EA sizes every trade from equity: it uses the largest lot whose stop-out los
 | $8,000 | 0.05 lot (the cap), 1.25% | 0.10 lot (the cap), 2.5% |
 | $16,000 | 0.05 lot, 0.6% | 0.10 lot, 1.25% |
 
-- **Minimum $400, recommended $2,000 or more.** Below $1,600 the default trades the 0.01 minimum lot above its 1.25% budget (up to 5%); the dashboard shows this as an orange **Lot** line and the Experts tab gets a `[RISK SIZING]` note.
+- **It trades from $400; the reports use $2,000.** Below $1,600 the default trades the 0.01 minimum lot above its 1.25% budget (up to 5%); the dashboard shows this as an orange **Lot** line and the Experts tab gets a `[RISK SIZING]` note.
 - **Above $8,000** the lot cap (0.05 for the default, 0.10 for high-risk) holds each trade below the set percentage. Raise `MaxLotSize` if you want the risk to keep scaling with the account.
 
 **Cent account** (balance in US cents, e.g. 10,000 = $100):
 
-- The EA reads every amount in the account currency, so a cent account is sized like a standard account with 100× the number: on a **$100 cent account** the default trades **0.05 lot (about 1% per trade)** and `high-risk.set` 0.10 lot (about 2%). **$100 or more is recommended**; above about $80 the 0.05 cap keeps the default below 1.25%.
+- The EA reads every amount in the account currency, so a cent account is sized like a standard account with 100× the number: on a **$100 cent account** the default trades **0.05 lot (about 1% per trade)** and `xauusd-high-risk.set` 0.10 lot (about 2%). Above about $80 the 0.05 cap keeps the default below 1.25%.
 - This assumes the cent gold symbol has the standard lot size with profit counted in cents (the usual setup). The EA calculates from the symbol's own values either way, so check the dashboard's **Lot** line: it shows the lot and the % it risks. A cent symbol has not been backtested.
 - Money inputs are also read in cents: `MinimumEquity` 20 means 20 cents, so set it to 2000 for a $20 floor. Cent gold spreads can be wider: above 500 points ($0.50) the spread filter blocks entries.
 
 **Gold + USDJPY:** USDJPY's 0.786-yen stop costs about $5 per 0.01 lot (it moves with the yen rate), so on $2,000 the USDJPY chart trades about 0.04 lot (about 1%) and is blocked only below about $100. The pair needs gold's minimums above; with both charts running (up to 2 positions each), about 4-5% of equity can be at risk at once.
+
+### Using the Profiles Together
+
+Every profile in `settings/` can share one **hedging** account with any of the others, each on its own chart:
+
+| Profile | EA | Chart | `MagicNumber` |
+|---|---|---|---|
+| `xauusd-default.set` | Nyao Scalper | XAUUSD M5 | 6926268 |
+| `xauusd-high-risk.set` | Nyao Scalper | XAUUSD M5 | 6926269 |
+| `usdjpy-default.set` | Nyao Scalper | USDJPY M5 | 6926270 |
+| `xauusd-straddle.set` | Nyao Straddle | XAUUSD M1 | 25102501 |
+
+- **Separate trades.** Each chart manages only the positions and orders with its own magic number on its own symbol, so two profiles on gold never touch each other's trades. Nyao Scalper's saved state (`EnablePersistState`) is also kept per symbol and magic number.
+- **Separate drawdown.** The Nyao Scalper profiles use `DrawdownScope` = This EA's Own Trades: another chart's losses don't raise this chart's entry score. When one EA trades the account alone, this gives the same results as measuring the whole account.
+- **Shared account checks.** The per-trade, basket and total-loss stops count only the chart's own trades. The account-wide checks (`MinEquityPercent` drawdown pause, `MinimumEquity`, `TargetEquity`, leverage pause) watch the whole account, and each EA then closes only its own positions.
+- **The risk adds up.** Every chart sizes its lots from the whole account's equity. Gold + USDJPY can hold up to 4 positions with about 5% of equity at risk at once; the straddle adds one more position, about $1 at 0.01 lot.
+- **What was tested together** (sums of separate monthly tester runs, since the tester runs one EA at a time): gold + USDJPY over 57 months ([above](#gold--usdjpy-on-one-account)) and gold + the straddle in 2026 ([below](#next-to-nyao-scalper)). `xauusd-default` and `xauusd-high-risk` on the same account take the same trades twice, which amounts to a higher risk setting, not a second strategy.
+- **Load the files.** The magic numbers and the drawdown setting come from the profile files. An EA attached without loading a profile uses its built-in magic number (6926268 for Nyao Scalper) and measures drawdown on the whole account.
+
+## Nyao Straddle (Companion EA)
+
+[`nyao_straddle.mq5`](nyao_straddle.mq5) is a second, separate EA for **gold on M1**, built on a different idea from Nyao Scalper. Nyao Scalper trades with the daily trend and makes its money in steady trends. Nyao Straddle stays out of the market almost all the time and trades only when gold becomes extremely volatile, the kind of market where a $1 move tends to keep going. It can run on the same account as the Nyao Scalper profiles (see [Using the Profiles Together](#using-the-profiles-together)).
+
+> **More experimental than Nyao Scalper.** It has been backtested on one year of real ticks (2026), and most of its profit comes from a single event, the gold crash of late January 2026. Trading CFDs involves significant risk; past results are not indicative of future results.
+
+Profile: [`settings/xauusd-straddle.set`](settings/xauusd-straddle.set) (= the EA's built-in input defaults). Report: [`reports/xauusd-straddle-2026-real-ticks`](reports/xauusd-straddle-2026-real-ticks/summary.md).
+
+### How It Works
+
+1. **Extreme markets only.** Gold's H1 ATR(14), measured on closed bars, must be at least **$34**. That was gold's most extreme 10% of the time in 2026. In January, March and April 2026 it held for hours or days; in May and July-October it never happened.
+2. **The market must be speeding up.** The ATR of the last 7 one-minute bars must be at least **2×** its average over the last 288 bars.
+3. **Straddle.** While both hold, the EA keeps a **buy stop $1 above** and a **sell stop $1 below** the price. The first one to fill cancels the other.
+4. **Exit.** The position has a **$1 stop** that trails **$1 behind the price** from the moment it fills. There is no take profit: the trailing stop ends every trade.
+5. **Again.** As soon as the position closes, a new pair goes out, as long as the market is still extreme. In a crash this means many trades an hour.
+6. **Pause.** After **10 losing trades in a row** it places nothing for **30 minutes**.
+7. **Lot.** Fixed **0.01**: about $1 at the stop, plus slippage.
+
+Untriggered orders are deleted when the market calms down. The chart shows the current ATR values next to the levels they need, so you can see why it is or isn't trading.
+
+| `xauusd-straddle.set` | |
+|---|---|
+| Symbol / timeframe | Gold (XAUUSD) on **M1** |
+| Extreme-market filter | H1 ATR(14) ≥ $34 (`RegimeMinATR`) |
+| Speed-up filter | M1 ATR(7) ≥ 2× its 288-bar average (`VolATRPeriod`, `VolMinRatio`) |
+| Entry | Buy stop and sell stop $1 from the price; the first fill cancels the other |
+| Exit | $1 stop, trailing $1 behind the price from the fill; no take profit |
+| Pause | 10 losing trades in a row → 30 minutes without new orders |
+| Lot size | 0.01 (`Lots`; `RiskPercent` > 0 sizes from equity, never below `Lots`) |
+| Account | **Hedging** account (it can share gold with Nyao Scalper). At 0.01 lot a trade risks about $1 plus slippage |
+
+### Straddle Results
+
+Real ticks, Jan-Sep 2026, $2,000 per month (each month a fresh run), 0.01 lot, sums of monthly returns ([full report](reports/xauusd-straddle-2026-real-ticks/summary.md)):
+
+| Month | M1 (the timeframe it was tuned on) | M5 |
+|---|---|---|
+| January | +120.0% | +109.7% |
+| February | +75.5% | +27.7% |
+| March | +33.0% | +45.5% |
+| April | +10.7% | +1.5% |
+| June | -0.2% | no trades |
+| May, July-September | no trades | no trades |
+| **Total** | **+239.0%** | **+184.5%** |
+| Profit factor / max drawdown | 2.02 / 2.7% | 1.74 / 4.0% |
+| Trades / win rate | 9,985 / 45% | 10,486 / 43% |
+| Avg win / loss | $2.12 / -$0.85 | $1.93 / -$0.84 |
+
+October 2026 (to the 23rd) had no trades either.
+
+- **82% of the profit is one event:** January 29 - February 9, 2026, the crash and its aftermath. Outside it the edge is a few cents per trade (about $0.09 per 0.01-lot trade in the tests below).
+- **It sits idle most of the time.** It traded in 5 of 10 months in 2026.
+- **The tester fills orders instantly.** It models slippage from real ticks (fills averaged about $0.10 worse than the order price) but not execution delay. In a crash the EA can trade every few seconds; a real broker may fill later, requote, or limit that.
+- **2025 can't be tested properly.** Real ticks only go back to 2026 at the test broker. With ticks generated from 1-minute bars, only October 2025 reached the $34 level (gold was cheaper then, so $34 was a bigger move): +37.6% with an 83% win rate and a profit factor of 41.8. Generated price paths are far smoother than real ones, which makes a $1 trailing stop look almost perfect, so that number is not usable.
+- **The defaults were chosen on 2026 data.** There is no untouched period left to confirm them on.
+
+### Straddle Coin Flip Test
+
+A control test: the EA trades at exactly the same moments, with the same filters and exits, but a coin flip picks the direction (`EntryMode` input, three random seeds each). If random directions did about as well, the profit would come from the market and the exits, not from the straddle.
+
+| Jan-Sep 2026, M1, $2,000 per month | Total | Profit factor | Max drawdown | Trades |
+|---|---|---|---|---|
+| **Straddle** | **+239.0%** | **2.02** | 2.7% | 9,985 |
+| Coin flip, market order now (3 seeds) | +16.9% / +33.3% / +51.5% | 1.08-1.20 | 13-17% | 6,400-8,600 |
+| Coin flip, one stop order $1 away (3 seeds) | +13.7% / +23.7% / +27.0% | 1.53-2.09 | 1-1.5% | about 1,030 |
+
+The straddle beats all six. The comparison also shows where the edge is: **entering only after price has already moved $1**. A single random stop order earns about the same per trade as the straddle (it also waits for a $1 move), while random market orders barely make money and lost 13-16% in March. The straddle catches every breakout in either direction, so it gets about 10 times as many of those trades.
+
+### Gold Only
+
+The straddle needs price to run well past its entry *after* paying the spread. On gold in 2026 a typical minute moved about 8 times the spread ($2.17 vs $0.26); on USDJPY only 1.8 times (1.8 pips vs 1 pip).
+
+| USDJPY, Jan-Sep 2026, M1, $2,000 per month, about $1 per stop | Total | Months up | Profit factor |
+|---|---|---|---|
+| $1 scaled by 1-minute volatility (0.83-pip stop, inside the 1-pip spread) | -165.2% | 0/10 | 0.06 |
+| $1 scaled by daily volatility, like `usdjpy-default.set` (3.9-pip stop) | -16.3% | 0/10 | 0.68 |
+
+Both used USDJPY's own most extreme 10% (H1 ATR ≥ 0.303 yen) as the extreme-market level. Nyao Scalper works on USDJPY because its distances are wide (78.6 pips); a $1-style straddle needs gold's large moves next to its cost.
+
+### Next to Nyao Scalper
+
+The two earn at different times: Nyao Scalper in steady trends (January, March, June 2026), the straddle in the crash (late January - early February).
+
+| Jan-Sep 2026, $2,000 per month | Nyao Scalper (M5, `xauusd-default.set`) | Straddle (M1, `xauusd-straddle.set`) | Both on one account |
+|---|---|---|---|
+| Total | +93.8% | +239.0% | **+332.8%** |
+| Months up | 5/9 | 4/9 | 6/9 |
+| Worst point within a month | -14.7% (March) | -0.8% | -14.8% (March) |
+
+"Both" adds up the two monthly test runs (the tester runs one EA at a time). The straddle added its profit without deepening Nyao Scalper's worst dip. The earlier 1.5× version of the straddle did deepen it: it lost in early March at the same time as Nyao Scalper (worst point -$610 together vs -$293 alone), which the 2× filter avoided. October 2026 (Nyao Scalper -6.5%, straddle no trades) is not in the table. How to run them together: [Using the Profiles Together](#using-the-profiles-together).
+
+### What a Demo Test Should Check
+
+- **Fills during fast markets.** Compare the fills with the order prices. Fills much worse than about $0.10, especially in fast moves, shrink the straddle's edge (about $0.48 per 0.01-lot trade in 2026) quickly.
+- **Broker limits.** In a crash it opens a new trade every few seconds to minutes.
+- **Spread.** The test broker's gold spread was $0.16 in January 2026 and $0.24-0.36 later. The straddle pays it on every trade.
+- **Latency.** The straddle reacts to every tick, so the delay between the terminal and the broker matters more for it than for Nyao Scalper.
+- **Idle time.** Weeks without a trade are normal. The chart status shows the H1 ATR next to the $34 it needs.
+- **Gold's price level.** $34 and $1 are dollar distances set at a gold price of about $4,500. If gold moves far from that, the same distances describe a different market.
+
+### How the Straddle's Defaults Were Found
+
+Each change below was tested in the Strategy Tester on 2026 real ticks and kept only when it held up (usually with a pass rule written down before the run). The numbers come from the version current at the time, so rows aren't always comparable with each other.
+
+**The idea and the first versions**
+
+| Version / test | Result |
+|---|---|
+| v1.0: straddle whenever the M1 or M5 ATR was 1.5× its recent average, stops in ATR multiples, 0.50 lot | M5: 8 of 9 months lost the whole $2,000 (only April +$4,691). M1 with a 0.5-ATR stop: profit factor 0.83-0.95 |
+| Fixed $1 / $2 / $3 stops instead of ATR (M1, 0.50 lot) | Still 8 of 9 months drained. February made +$123k / +$71k / +$35k, all of it in the week after the crash |
+| Why February? Hourly profit vs the H1 ATR at that hour | Below $30 every level lost (-$40k); from $30 up it won (+$156k). The crash also had the year's lowest spread ($0.16) |
+| What separated winning hours from losing ones (H1 ATR ≥ $30)? | Crash hours won 79% of the time, other periods 12-37%: the crash had bigger moves next to the $1 distances and the year's lowest spread. One-way vs back-and-forth movement made no difference (directional efficiency 0.103 vs 0.101), and more ticks or bigger bars helped in the crash but hurt from April on |
+| v1.1: H1 ATR ≥ $30 filter | Profitable in the crash; outside it about 3 cents per trade, with a March drawdown that a $2,000 account at 0.50 lot couldn't survive |
+
+**Filters**
+
+| Test | Result | Decision |
+|---|---|---|
+| Which volatility window? M1, M15, H1, D1 ATR, each allowed its most extreme 5/10/20% of 2026 | Minute windows lost outside the crash; D1 was too slow (caught a third of the crash); hour-scale windows worked. **H1 ATR(14), top 10% (≥ $33.77)** was the only one positive in all three non-crash periods | **H1 ATR(14) ≥ $34** |
+| $34 vs $30 (0.05 lot, one account) | $53,069 vs $50,896, profit factor 1.63 vs 1.47, drawdown 3.6% vs 7.0%; outside the crash +$1,216 vs +$699 per 0.01 lot | $34 |
+| Speed-up level 1× / 1.5× / 2× | +674.9% / +400.1% / +207.2%, drawdown 20.2% / 7.3% / 1.9%. 1×'s extra profit all came from the crash | **2×** |
+| ATR period of the speed-up filter: 5 / 7 / 14 / 21 / 30 / 60 minutes (at 1.5×) | +417% / +414% / +400% / +365% / +349% / +296%: shorter is slightly better; drawdowns jumped around (one March path decides them) | **7** |
+| 7 minutes at 2× | +239.0%, profit factor 2.02, drawdown 2.7%, no month below -0.8% | **default (v1.5)** |
+| London + New York hours only | $7,972 vs $12,214 for all hours (0.01 lot, one account); Asia hours carried much of the crash, and the quiet hours after New York were profitable | rejected (`EnableSessions`, off) |
+| Spread cap | Within each period, low-spread trades did not do consistently better (spreads widen exactly when the market spikes) | rejected |
+
+**Stops, trailing and locks** (0.01 lot, one account from $2,000, Jan-Oct 2026)
+
+| Test | Net | Profit factor | Drawdown | Decision |
+|---|---|---|---|---|
+| **$1 stop, $1 trail from the fill** | **+$10,214** | **1.63** | **-3.1%** | **kept** |
+| $1 + lock at entry +$0.20 once +$0.50 | +$10,332 | 1.66 | -4.5% | rejected: the gain was all crash, worse elsewhere |
+| $2 stop and trail | +$7,101 | 1.49 | -2.4% | rejected |
+| $2 + lock once +$1 | +$7,425 | 1.54 | -2.8% | rejected |
+| $5 stop + lock once +$0.50 (trail from +$1.20) | +$6,878 | 1.52 | -2.9% | rejected (82% winners, but about 2,500 full -$5.30 stops) |
+| $5 stop + lock once +$1.00 / no lock | +$6,267 / +$5,818 | 1.45 / 1.40 | -4.1% | rejected |
+
+In fast markets a tight stop that is hit often but costs little beat a wide one. The break-even lock inputs (`BreakEvenTrigger`, `BreakEvenLock`) stay in the EA, off.
+
+**Trade frequency and risk**
+
+| Test | Result | Decision |
+|---|---|---|
+| One trade per candle | Same edge per trade (about $0.31), 93% fewer trades, profit /14 | removed |
+| **Pause after 10 losses in a row for 30 minutes** (also 10/120, 15/30) | Net -22%, drawdown halved (-$171 vs -$344), profit factor 1.63 → 1.81. All three settings beat no pause | **adopted (v1.4)** |
+| Daily loss limit (stop for the day after -$5 to -$40) | No change to the worst drawdown (it builds over several days) | rejected |
+| Lot size on a fresh $2,000 month | 0.50 lot: most months lost the account. 0.05: March fell to $405 (-80%) before recovering. 0.01: worst month -16% before the pause, -0.8% with it | **0.01** default |
+
+**Research options left in the EA (off by default):** `EntryMode` (coin flip control tests: a market order or one stop order in a random direction, `CoinFlipSeed`), `EnableSessions` (Asia / London / New York hours in UTC, `SessionUTCOffset` for the server clock), `BreakEvenTrigger` / `BreakEvenLock`, `DistanceUnit` = ATR multiples, `VolMinATR`, `PendingExpiryBars`, `TakeProfit` and `RiskPercent`.
+
+### Straddle Inputs
+
+| Group | Input | Default | Meaning |
+|---|---|---|---|
+| Volatility Filter | `VolTimeframe` / `VolATRPeriod` / `VolBaseBars` | chart (M1) / 7 / 288 | Current ATR and its normal level (average over the last N bars) |
+| | `VolMinRatio` | 2.0 | Trade only when the current ATR is at least this many times the normal level (0 = always) |
+| | `VolMinATR` | 0 | Also require this ATR as a price distance (0 = off) |
+| | `CancelWhenCalm` | true | Delete untriggered orders when the market calms down |
+| Extreme Market Filter | `RegimeTimeframe` / `RegimeATRPeriod` / `RegimeMinATR` | H1 / 14 / 34 | Trade only while this ATR is at least $34 (0 = off) |
+| Trading Sessions | `EnableSessions` and the session hours | off | Asia 0-9, London 7-16, New York 12-21 (UTC) |
+| Orders | `Lots` / `RiskPercent` | 0.01 / 0 | Lot size; `RiskPercent` > 0 sizes from equity at the stop, never below `Lots` |
+| | `DistanceUnit` | Price | Distances below in price ($ for gold) or ATR multiples |
+| | `EntryDistance` / `StopLoss` / `TakeProfit` | 1.0 / 1.0 / 0 | Pending order distance, initial stop, take profit (0 = none) |
+| | `MaxSpread` / `PendingExpiryBars` | 0 / 0 | Spread cap; re-place an untriggered pair after N bars (0 = off) |
+| Trailing Stop | `TrailStart` / `TrailDistance` / `TrailStep` | 0 / 1.0 / 0.1 | Start trailing at this profit (0 = from the fill), distance, minimum move |
+| | `BreakEvenTrigger` / `BreakEvenLock` | 0 / 0.2 | Lock the stop at entry + `BreakEvenLock` once profit reaches the trigger (0 = off) |
+| Losing Streak Pause | `LossStreakPause` / `LossStreakPauseMinutes` | 10 / 30 | Pause after this many losing trades in a row (0 = off) |
+| Other | `EntryMode` / `CoinFlipSeed` | Straddle / 1 | Research control test |
+| | `MagicNumber` | 25102501 | Different from every Nyao Scalper profile |
+| | `TesterEquityLog` | true | Strategy Tester only: balance & equity log for the report graphs |
+
+The [backtest tool](#automated-backtests-toolsbacktest) runs it with `--ea nyao_straddle.mq5`. Use real ticks only: with ticks generated from 1-minute bars the $1 trailing stop looks far better than it is.
 
 ## Installation
 
@@ -291,10 +485,11 @@ The EA sizes every trade from equity: it uses the largest lot whose stop-out los
 
 4.  **Compile**:
     Open the file in MetaEditor and press `F7` or click "Compile".
+    - **Nyao Straddle** (optional): copy `nyao_straddle.mq5` to the same `Experts` folder and compile it the same way, then attach it to an XAUUSD **M1** chart. It needs no extra libraries.
 
 5.  **Run**:
-    Drag the EA onto an **M5** chart. Its built-in defaults are the `default.set` profile.
-    - The built-in defaults (= `default.set`) are made for **XAUUSDm on M5** with 3-digit quotes and a **$2,000+ standard** or **$100+ cent** account (see the Account row above).
+    Drag the EA onto an **M5** chart. Its built-in defaults are the `xauusd-default.set` profile.
+    - The built-in defaults (= `xauusd-default.set`) are made for **XAUUSDm on M5** with 3-digit quotes and a **$2,000+ standard** or **$100+ cent** account (see the Account row above).
     - 2-digit gold quotes are rescaled automatically (`PointInputDigits`); for other symbols set your own distances (see [Settings Profile](#settings-profile)).
     - Requires a **hedging** account (the EA refuses to start on netting accounts).
     - When an equity stop fires (Min Equity, Target Equity or Max Times Trigger), the EA closes all its positions and pending orders and then **removes itself from the chart**. Other EAs in the terminal keep running.
@@ -335,6 +530,17 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 
 > Capture your own report with the tool below (real ticks + your broker's costs, out-of-sample) before running the EA on a funded account.
 
+### Coin Flip Test
+
+Does the EA's direction choice beat chance? A research copy of v54.0 opened its trades at exactly the same moments but let a coin flip pick buy or sell (three random seeds). The trend-flip exit was off in all runs, because it would otherwise close every random trade placed against the score within a minute. Fixed 0.01 lot, one account from $2,000, M5, Jan-Oct 2026 real ticks:
+
+| | Result | Profit factor | Max drawdown | Trades |
+|---|---|---|---|---|
+| **Nyao Scalper (its own direction)** | **+78.7%** | **1.18** | **13.2%** | 1,152 |
+| Coin flip, seeds 1 / 2 / 3 | -30.0% / -15.2% / +14.3% | 0.95 / 0.97 / 1.02 | 42.1% / 50.0% / 39.3% | 1,451-1,532 |
+
+The direction is the edge. With random directions wins and losses cancel out (profit factor about 1.0) and the drawdown triples. The profit comes from the trend months: per 0.01 lot, January +$928, June +$543, March +$399. The Nyao Straddle passed the same kind of test ([Straddle Coin Flip Test](#straddle-coin-flip-test)).
+
 ### Automated Backtests (`tools/backtest`)
 
 [`tools/backtest/nyao_backtest.py`](tools/backtest/nyao_backtest.py) runs Strategy Tester passes from the command line and writes a report to `reports/<name>/`.
@@ -346,17 +552,23 @@ Results in the Strategy Tester only mean something if the test mirrors live cond
 
 ```bash
 # Default profile on M1 and M5, one real-tick run per month (each month starts from a fresh $2,000)
-python tools/backtest/nyao_backtest.py run --name default-2026-real-ticks --periods M1,M5 --from 2026-01 --to 2026-09
+python tools/backtest/nyao_backtest.py run --name xauusd-default-2026-real-ticks --periods M1,M5 --from 2026-01 --to 2026-09
+
+# USDJPY profile on M5
+python tools/backtest/nyao_backtest.py run --name usdjpy-default-2026-real-ticks --set settings/usdjpy-default.set --symbol USDJPYm --periods M5 --from 2026-01 --to 2026-09
+
+# Nyao Straddle (the --ea option picks the EA source)
+python tools/backtest/nyao_backtest.py run --name xauusd-straddle-2026-real-ticks --ea nyao_straddle.mq5 --set settings/xauusd-straddle.set --periods M1,M5 --from 2026-01 --to 2026-09
 
 # Your own settings file, one timeframe, quick 1-minute-OHLC sweep
 python tools/backtest/nyao_backtest.py run --name my-settings-m5 --set settings/my-settings.set --periods M5 --from 2026-03 --to 2026-06 --model ohlc
 
 # Rebuild reports/<name>/ from the tester reports already in the terminal folder
-python tools/backtest/nyao_backtest.py report --name default-2026-real-ticks
+python tools/backtest/nyao_backtest.py report --name xauusd-default-2026-real-ticks
 ```
 
 **What `run` does:**
-1. Compiles `nyao_scalper.mq5` from this repo into `MQL5\Experts\NyaoBacktest\`. Your own compiled EA is not touched.
+1. Compiles the EA (`--ea`, default `nyao_scalper.mq5`) from this repo into `MQL5\Experts\NyaoBacktest\`. Your own compiled EA is not touched.
 2. Installs the `.set` file as a tester profile.
 3. **Closes MetaTrader 5**, the way clicking X does. It never force-closes, so save your work first. The tester can't start while the terminal is open.
 4. Runs one test per timeframe × month at below-normal priority on half the CPU cores. The tester window opens on its **Graph** tab.
@@ -371,7 +583,7 @@ The balance & equity graphs come from the EA's **TesterEquityLog** input (on by 
 | Option | Default | Meaning |
 |---|---|---|
 | `--name` | (required) | Report folder `reports/<name>/` |
-| `--set` / `--ea` | `settings/default.set` / `nyao_scalper.mq5` | Settings file and EA source in this repo |
+| `--set` / `--ea` | `settings/xauusd-default.set` / `nyao_scalper.mq5` | Settings file and EA source in this repo |
 | `--periods` | `M1` | Comma-separated timeframes, e.g. `M1,M5` |
 | `--from` / `--to` | (required) | First and last month, `YYYY-MM` |
 | `--split` | `monthly` | `monthly` (fresh deposit each month) or `whole` (one run over the range) |
@@ -383,6 +595,151 @@ The balance & equity graphs come from the EA's **TesterEquityLog** input (on by 
 | `--no-reopen` / `--timeout-min` | off / `30` | Leave the terminal closed afterwards; abort a single run after N minutes |
 
 The **Tick data** column in the summary shows whether each run really used real ticks ("100% real ticks"). Brokers only keep real ticks for a limited period; before that, the tester generates ticks from M1 bars.
+
+**Reports in this repository** (`reports/<symbol>-<profile>-<period>-<tick data>`):
+
+| Report | EA / timeframes | Result (sum of monthly returns) |
+|---|---|---|
+| [`xauusd-default-2026-real-ticks`](reports/xauusd-default-2026-real-ticks/summary.md) | Nyao Scalper, M1 + M5, Jan-Sep 2026 | M5 +93.8%, M1 +24.1% |
+| [`xauusd-high-risk-2026-real-ticks`](reports/xauusd-high-risk-2026-real-ticks/summary.md) | Nyao Scalper, M1 + M5, Jan-Sep 2026 | M5 +187.6%, M1 +20.9% |
+| [`xauusd-default-2025-generated-ticks`](reports/xauusd-default-2025-generated-ticks/summary.md) | Nyao Scalper, M5, 2025 | +65.3%, 10/12 months up |
+| [`xauusd-high-risk-2025-generated-ticks`](reports/xauusd-high-risk-2025-generated-ticks/summary.md) | Nyao Scalper, M5, 2025 | +95.4%, 10/12 months up |
+| [`usdjpy-default-2026-real-ticks`](reports/usdjpy-default-2026-real-ticks/summary.md) | Nyao Scalper, M5, Jan-Sep 2026 | -5.2%, 2/9 months up |
+| [`usdjpy-default-2025-generated-ticks`](reports/usdjpy-default-2025-generated-ticks/summary.md) | Nyao Scalper, M5, 2025 | -6.8%, 5/12 months up |
+| [`xauusd-straddle-2026-real-ticks`](reports/xauusd-straddle-2026-real-ticks/summary.md) | Nyao Straddle, M1 + M5, Jan-Sep 2026 | M1 +239.0%, M5 +184.5% |
+
+## Research Log
+
+Nyao Scalper went through more than 50 versions. Everything below was tested on gold (XAUUSD) in the Strategy Tester; most tests compare against the default of their day, so numbers from different rows aren't always comparable. 2026 uses real ticks; 2022-2025 use ticks generated from 1-minute bars. "Per 0.01 lot" results come from one continuous run with a fixed 0.01 lot; "profit/DD" is that profit divided by the largest drawdown (the current default scores about 5.0 in 2026). AUC measures how well a signal separates winning from losing trades: 0.50 is a coin flip. Ideas that failed stayed out of the EA; they are listed here so they don't get retried blindly. Most tests had a pass rule written down before the run, usually "more profit and no deeper drawdown than the default".
+
+### Early Versions (v3.1 - v44.0)
+
+The EA started in a private repository on 2026-01-15; its history (v3.1 - v35.0) is merged into this repository's history, without compiled files, third-party files or private data. The public repository started at v32.0 on 2026-02-10.
+
+| Versions | Dates | Strategy and main changes |
+|---|---|---|
+| v3.1 - v9.0 | Jan 15 - 20, 2026 | **EMA + Stochastic** scalping. Equity & risk management and Discord alerts (v3.5), trading hours (v5.0), RSI instead of the EMA/Stochastic signal (v8.0), news filter fixes and better management of losing positions (v9.0) |
+| v10.0 - v14.0 | Jan 22 - 27 | **RSI with reversal & hedge**: hedge pairs (v10.0), managing winning positions, pyramiding and a daily report (v12.0 - v13.0) |
+| v15.0 - v23.0 | Jan 28 - Feb 4 | **Candle prediction** (a signal for every candle). Fast-market and market-close filters (v16.0); hedge, reversal and pyramiding replaced by a multi-entry system with loss management (v17.0); algo-trading status and reports (v19.0) |
+| v25.0 - v35.0 | Feb 5 - 21 | **Indicator-based signal strength**, the base of today's EA: position management and pyramiding reworked (v26.0), a dashboard (v27.0), the signal rewritten (v28.0 - v31.0). v32.0 became the public initial commit; v34.0 - v35.0 (private) tried the v13.0 signal method again |
+| v36.0 - v41.0 | Feb 25 - Mar 12 | Loss management: partial close, SL tightening, break-even lock and re-entry (v36.0); pyramiding removed; position-aware signal dampening; lot sizing reduced to equity-drop recovery; max trades per candle (v37.0); consecutive-candle escalation and profit-offset SL tightening (v38.0); signal smoothing and health checks (v39.0); a filling-mode fix for gold (v40.0); signal scoring tuned for M1 (v41.0); license changed to BSD-3-Clause |
+| v42.0 - v43.0 | May 31 - Jun 11 | Risk safety and signal quality fixes; the rolling hedge chain recovery (v42.0); independent risk:reward TP/SL (v43.0) |
+| v44.0 | Oct 12 | Safety fixes, the checkpoint exit and the D1-trend default profile; from here on every change was backtested on real ticks, see below |
+
+### How the Default Profile Was Built
+
+| Version | Change | Evidence |
+|---|---|---|
+| v45.0 | "Clear trend" D1 filter: close at least 0.5% beyond the EMA50 (`HTFMinDistancePct`) | 0.3 / 0.5 / 0.8% all beat no distance in 2025 and 2026; 0.5% had the best 2025 profit factor (1.37). It helps in a few choppy months |
+| v45.0 | M5 instead of M1 | Jan 2025 - Jun 2026: M5 +123.5% (worst month -7.2%, drawdown 19%) vs M1 +110.3% (worst month -17.1%, drawdown 30%); M15 +40.4% |
+| v46.0 | Trend score (range position, EMA distance, efficiency, net move over several hours) replaces the old 0-10 score; minimum 5 | The old score's AUC was 0.51-0.52: a coin flip. With the trend score M5 2026 made +82.6% vs +51.4% |
+| v46.0 | Trend-flip exit: close a losing trade once the opposite score reaches 6 (`TrendFlipExitScore`) | 2026 +83.3%, 2025 +66.0% (+57.4% without), worst month -3.1% / -2.2%. A score of 4 or less closed too much |
+| v47.0 | `PointInputDigits`: point inputs rescaled to the symbol's decimals | On a 2-decimal gold quote the same point inputs meant a $200 stop. "Better results" there were 10× the risk in a trending month |
+| v48.0 | Lot from equity: 1.25% at the $20 stop, capped at 0.05 | Trade for trade the old fixed 0.01 lot on $2,000. 1.0% was rejected: after one loss the lot rounds down to zero and the EA stops |
+| v50.0 | `MaxRiskPerTradePct` 5: keep trading the 0.01 minimum lot from $400 up | v48 opened nothing below about $1,600 (a $528 demo never traded). M5 unchanged; M1 2026 +8.9% → +19.5% |
+| v50.0 | High-risk profile (2.5%) | See [High-Risk Profile](#high-risk-profile) |
+| v51.0 | USDJPY profile and `DrawdownScope` | See [Gold + USDJPY](#gold--usdjpy-on-one-account) |
+| v52.0 | Smallest-profit lock at +$15 (`CheckpointBreakEvenPct` 75) | One account, per 0.01 lot, 2026: +$1,920 with the lowest drawdown, vs +$1,527 without. A +$5 lock made +$588 (57% of trades closed near zero); +$10 made +$2,141 with a deeper drawdown |
+| v53.0 | Balance & equity log for the backtest reports (`TesterEquityLog`) | The balance-only tester graph hid floating losses (a flat balance while equity fell 93%) |
+| v54.0 | Old score model and its 26 inputs removed | 18 real-tick runs traded identically, deal for deal |
+
+### Entries
+
+| Idea | Result |
+|---|---|
+| The old 0-10 score | AUC 0.51-0.52. Its chop and volatility parts don't know direction; the wick part pointed slightly the wrong way |
+| The trend score as a confidence level (bigger lots on higher scores) | Among taken trades the score is almost always above 7 and doesn't rank them (AUC 0.49 in 2026). Score-weighted lots: profit/DD 4.7 vs 5.0 |
+| 16 more entry features (H4 and H1 trend, volume, candle size, recent push, previous day, D1 range, spread, closes in a row, $10 levels, volatility regime) | None separated winners in both periods (test AUC 0.47-0.52). All of them in one model: 0.60 on the design years, 0.53 on the test year |
+| 10 entry attributes (position number, previous trade, losses in a row, hour, weekday, US data times, week open/close, D1 trend age and distance, time since the last exit) | No loser pattern held in both sideways (2022-24) and trend (2025-26) years. The win rate was 15-25% in every bucket in 2022-24 and 40-45% in 2025-26: the market regime decides, not the entry |
+| A faster trend score (shorter lookbacks) | More whipsaw entries. In a walk-forward test the current lookbacks were best in both halves (×0.5, ×0.75 and ×2 all worse) |
+| One combined score (M5 trend + D1 trend in one number), no other filters | Profit/DD 0.8 vs 5.0. Turning the loss filters off alone: 1.1 |
+| Machine learning (gradient boosting, trained walk-forward) | AUC 0.47-0.58 by year, mean 0.51: it learned sideways-year patterns that reversed in trend years |
+| An external AI decision model (with no examples, then with 500 labelled examples) | AUC 0.49. The trades it approved earned less per trade than all trades (+$1.85 vs +$2.16) |
+| Supply/demand zones and fair value gaps (24 variants) | All lost in 2021-24; the chosen one made +0.07R per trade in 2025-26 vs -0.01R for random entries in the trend direction: no better than random |
+| RSI 30/70 and 20/80 zones | -$203 per 0.01 lot without the trend filter, profit/DD 0.2-0.7 with it; also failed as a second strategy |
+| Reversing the signals | January 2026 -$459 vs +$952 per 0.01 lot |
+| Waiting for a breakout to confirm the entry | +25% vs +83% (2026): it buys near short-term highs |
+| Not buying near the 24-hour high (selling near the low) | +30% on paper over 57 months; in the real EA +78% to +124% vs +130%, because blocked trades came back later, closer to the high |
+| Stricter D1 filter (distance 1-2%, EMA slope) | Best +147% vs +130% over 57 months, but an isolated spike: its neighbours matched the default. Sideways years lose steadily while the D1 trend still looks intact |
+| A gold/USDJPY cross-market filter | Gold +130% → +86-112%, USDJPY +82% → +12-14%: the two also trend together at times |
+| Trading only the London / New York overlap (M1) | -70.0% vs +22.0% (2026). The MT5 "profit by hour" chart counts the hour a trade closed; the trades behind it opened earlier |
+| A mid-month window (week 2 Friday to week 4 Tuesday, M1) | +56.5% vs +22.0% in 2026, but picked on the same months; not adopted without an out-of-sample test |
+
+### Exits
+
+| Idea | Result |
+|---|---|
+| Stops sized by ATR (4× ATR(8) or ATR(50)) | 2026 +106.9% / +90.0% vs +83.4%, but 2025 +60.5% / +23.5% vs +66.2%, 13/21 months up vs 16/21, worst month -25% / -12% vs -3%. The EA enters during fast moves, so 4 ATR became $27-52 in 2026 |
+| Tighter checkpoint stops (lock 80% or trail 80%) | 2026 +17.6% / +16.8% vs +51.4% (v45): they cut the trend runners |
+| Closing early losers after 3-12 bars | +16% to +71% vs +83% (2026): many trend trades dip first |
+| A $40 stop with a $25 checkpoint (modelled on a commercial gold EA that risks about 13% per trade) | Profit/DD 3.1 vs 5.0; with a trail from +$16: 70% winners but 2.6× the drawdown. Its smooth curve came from compounding and an 80% win rate at very high risk |
+| No stop loss, trailing only after break-even | 84-95% winners but 2.7× the drawdown; with the emergency stop also off, two buys were held 244 days and the account lost 93% |
+| Cutting losers that haven't recovered after 4 hours | Saved money in one setup and lost it in another: too fragile. Trades that recover and trades that don't look identical at entry; they only differ in how fast they fall in the first hours |
+| Hedge chain (opposite trades to recover a loser) | 2026 +71% / 2025 +27% vs +83% / +57% without. The best gated version only broke even: the first hedge bets against the D1 trend. It stays in the EA, off |
+
+### Positions, Frequency and Scalping
+
+| Idea | Result |
+|---|---|
+| Pending-order grids, candle-following, tiny targets (separate test EAs) | Grids lost 160-530% over Jan-Jun 2026. The next M1 candle follows the previous one only 49.3% of the time. +$0.10 locks gave 80-85% winners averaging $0.60 against $4-5 losses |
+| An M1 scalping study: session-open breakouts and Asian-session mean reversion (10,240 variants, pre-registered) | None beat random entries minus the ~$0.30 cost per trade |
+| A frequent M1 profile (4 positions $1.50 apart, entries during the bar) | +133% vs +150% for M5 over 21 months, 8/21 months up; at 2.5% risk it lost up to 60% in a month |
+| Adding to winners (up to 4 positions, only while in profit) | Profit/DD 3.8 vs 5.0; with a basket break-even or basket target 0.7-2.3 |
+| A second gold strategy on M1 or H1 next to M5 | Profit/DD 2.6 / 3.3 vs 5.0: the streams move together (daily correlation 0.81 / 0.59) |
+| Fewer open positions | Trades opened next to a running position were the best ones (+$2.38 vs +$1.40 per 0.01 lot in 2026), so the limit stays at 2 |
+| An M15 measured breakout (separate EA: D1 + H1 trend, 10-bar breakout, stop beyond the 5-bar swing, 3R target) | +80% over 18 months with an 18% drawdown, vs the default's +110% and 30% at the time. Kept as an idea |
+| A short-timeframe indicator EA (separate research EA: RSI, MACD, stochastic, EMAs, candle parts, self-learning weights) | Every part alone lost (profit factor 0.57-0.93), mean reversion lost in all forms, learning didn't help. With a D1 / H1 trend gate it met its targets (+35.9%, 88% winners): the daily trend again. The only short-term idea positive in both halves of 2026 was fading volume climaxes (profit factor 1.10 / 1.39), and only weakly |
+| An EMA-pullback M5 EA with 2R targets | Profit factor 0.89-0.98 with a 30-33% win rate (2R needs 33% to break even) |
+
+### Risk and Drawdown
+
+| Idea | Result |
+|---|---|
+| Risk per trade 1.25 / 2.5 / 3.75 / 5% (M5, 21 months) | +150% / +274% / +400% / +521%, drawdown 20 / 36 / 52 / 64%. Return per drawdown stays the same: 2.5% became the high-risk profile |
+| Dynamic lots (bigger lots after a drawdown) | 2026 +105% vs +83%, but worst month -15% vs -3% and drawdown 38% vs 20% |
+| A set tuned on one month (6 positions $0.50 apart, dynamic lots, looser filters) | 2026 +116%, but one month lost 70% and the drawdown reached 87% |
+| A settings search (460+ optimizer runs on 2025-26) | The best candidate beat the default in only 28 of 57 months: a coin flip. Single continuous-run comparisons are path noise |
+| Daily loss cap (no entries after 1-3 losing exits in a day) | Trades after a same-day loss did better than average (+$2.40-2.83 vs +$1.77), so the cap cost profit |
+| Pausing after 2 or 3 losses in a row instead of 4 | Deeper drawdown (563 / 472 vs 400 per 0.01 lot): the pause skips the trades that recover |
+| An equity-curve pause; doubling the lot after a win | Lower profit/DD |
+| Pausing 1-3 days after a big daily candle | 2026 $1,586-1,891 vs $1,920 per 0.01 lot, same drawdown: it cut January's trend gains |
+| An adaptive minimum score (raised after losses, lowered after wins) | 26-46% less profit with the +$15 lock; without a time decay it locked the EA out (19 trades) |
+| Half the risk after a losing 3 months (one account, 2022-2026) | Drawdown 43.5% vs 45.1%: the worst drop came right after the best month |
+| Lots scaled down in volatile markets | 82% of the profit with 82% of the drawdown: the same as a lower risk setting |
+| A $100 standard account at 1:2000 leverage | -80%: 0.01 lot is the smallest lot and still risks about 20% at the $20 stop; leverage only changes the margin |
+
+### Other Markets
+
+Beyond USDJPY and the scaled 57-month test in [Gold + USDJPY](#gold--usdjpy-on-one-account): crude oil and BTC with a grid of stop sizes (2025-26) had no profitable setting; wider stops only shrank the spread cost toward zero.
+
+### October 2026 Checks
+
+| Test | Result |
+|---|---|
+| 2025, ticks generated from 1-minute bars (v54.0, M5) | +65.3%, 10 of 12 months up, worst month -1.5%, drawdown 11.5%, profit factor 1.37 ([report](reports/xauusd-default-2025-generated-ticks/summary.md)); the older v51.0 rules made +66.2% |
+| October 2026 (real ticks, to the 23rd) | -6.5%, 46 trades, 28% winners: the weakest month of 2026, as gold fell with weak trends |
+| An H1 ATR(14) ≥ $34 volatility gate (the straddle's filter) **instead of** the D1 trend filter | +4.5% vs +93.8% (Jan-Sep 2026), worst month -16%, drawdown 28.4%: without the daily direction the edge is gone |
+| The same gate **next to** the D1 filter, trading only extreme hours | +15.9%: Nyao Scalper earns in normal trending hours, not in extreme ones |
+| The D1 filter plus skipping extreme hours (H1 ATR < $34) | +75.4%, drawdown 14.8% vs 19.2%: less profit for less drawdown, the same trade-off as a lower risk setting |
+| A $1 stop with a $1 checkpoint | January -$117 (1,268 trades, 35% winners) vs +$952, February -$103 vs +$117: stopped. Tight stops turn it into a high-frequency trader that loses |
+| Looser entry limits: up to 10 positions, no spacing, no cooldown, loss-streak pause, spread cap or equity pause | Jan-Sep 2026 M5 months summed +1,238% vs +93.9%, but one month lost 80% and the drawdown reached 88% (one account: +1,971% with a 66% drawdown); M1 -257.6%. Positions opened minutes apart hit the $20 stop together |
+| 3 positions and a $10 gap, loss limits kept | +99.2% vs +93.9% with 15% more trades, but the worst month -13.3% vs -2.7% and the drawdown 24.6% vs 19.2%. 4 positions $7.50 apart: +69.1%, drawdown 32.6%. In the tests, adding USDJPY or a higher risk setting added return with less extra drawdown |
+| Smaller locked profit: +$1 instead of +$15 | M5 +97.1% vs +93.9%, but M1 +7.7% vs +24.1% and the drawdown 24.5% vs 19.2%. The +$15 lock's exits often close at about $0 after slippage and count as losses for the cooldown and loss-streak pause; that is useful, because a trade that reached +$15 and fell all the way back marks a choppy market |
+| Closing at +$100, or at +$50 with a +$5 lock, with the trail tightening to $10 | +72% to +94% vs +93.9%. Taking profit earlier raised the win rate (44% → 53%) and lowered the profit factor (1.23 → 1.14): the edge is the few trend trades that run far |
+| Taking half the profit at the first checkpoint ($4,000 account, so the lot can be split) | +131.0% vs +156.3% over 57 months, lower in every year |
+| Closing everything 30 minutes before the weekend | +126.5% vs +146.0% over 57 months (2026 M5 +76.4% vs +93.9%): trades held over the weekend tended to continue the trend |
+| Trading costs | Every $0.05 less spread per 0.01-lot trade adds about 2.85 percentage points over Jan-Sep 2026 (M5) |
+| v54.0: the old legacy score model and its 26 inputs removed | 18 real-tick runs (M1 and M5, Jan-Sep 2026) traded identically, deal for deal |
+| Where does the trend score sit? (M5 bars, 2022-2026) | Median about 5.4 for buys (sells = 10 - buys), but spread almost evenly from 1 to 9, not bunched around 5: only 20% of bars score 4-6. Where the D1 filter allows a side, that side scores 5 or more on 54-59% of bars |
+
+### Testing Lessons
+
+- **Many monthly runs beat one long run.** A settings search that won on continuous runs was a coin flip across 57 separate months: any change reshuffles every later trade.
+- **Paper estimates mislead.** Dropping trades on paper ignored that the EA re-enters later (24-hour filter, big-candle pause), and bar-based simulations overstated trailing exits. Only real EA runs count.
+- **Real ticks for small distances.** Ticks generated from 1-minute bars are acceptable for Nyao Scalper's $20 distances but make $1 trailing stops look far too good.
+- **Reruns drift by cents.** The tester applies today's swap rates, so the same EA rerun later differs by a few cents per month; compare against a same-day rerun of the old version.
+- **Check the quote's decimals.** The same point inputs mean 10× the distance on a 2-decimal gold quote (`PointInputDigits` handles it now).
+- **Write the pass rule first.** "More profit and no deeper drawdown than the default", decided before the run, kept lucky backtests from changing the defaults.
 
 ## Credits
 
