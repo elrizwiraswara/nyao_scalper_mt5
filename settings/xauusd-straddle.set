@@ -1,5 +1,5 @@
 ; +-----------------------------------------+
-; Nyao Straddle v1.5 - DEFAULT PROFILE (nyao_straddle.mq5)
+; Nyao Straddle v1.6 - DEFAULT PROFILE (nyao_straddle.mq5)
 ; © Copyright Nyao Scalper by Elriz Wiraswara
 ; +-----------------------------------------+
 ; Volatility breakout straddle for gold (= the EA's built-in input defaults). Attach it to an
@@ -12,7 +12,7 @@
 ;   Again : a new pair goes out as soon as the position closes, while the market stays extreme.
 ;   Pause : after 10 losing trades in a row, no new orders for 30 minutes.
 ;   Lot   : fixed 0.01 (about $1 at the stop, plus slippage).
-; Backtest v1.5, Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run), 0.01 lot,
+; Backtest v1.5 (v1.6 only adds the dashboard), Jan-Sep 2026, real ticks, $2,000 per month (each month a fresh run), 0.01 lot,
 ; sums of monthly returns (reports/xauusd-straddle-2026-real-ticks):
 ;     M1: +239.0%, PF 2.02, max DD 2.7%, 9,985 trades, win rate 45%, avg win $2.12 / loss -$0.85
 ;         Jan +120.0, Feb +75.5, Mar +33.0, Apr +10.7, Jun -0.2; no trades in May, Jul-Oct

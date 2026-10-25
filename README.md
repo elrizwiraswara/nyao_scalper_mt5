@@ -314,7 +314,16 @@ Profile: [`settings/xauusd-straddle.set`](settings/xauusd-straddle.set) (= the E
 6. **Pause.** After **10 losing trades in a row** it places nothing for **30 minutes**.
 7. **Lot.** Fixed **0.01**: about $1 at the stop, plus slippage.
 
-Untriggered orders are deleted when the market calms down. The chart shows the current ATR values next to the levels they need, so you can see why it is or isn't trading.
+Untriggered orders are deleted when the market calms down.
+
+**On-chart dashboard** (v1.6, the same panel as Nyao Scalper's, refreshed once per second, hidden in non-visual backtests):
+
+- **Status**, balance, equity and the peak since the EA started.
+- **Market Filters**: the lot and what it risks at the stop, the H1 ATR next to the $34 it needs and the M1 speed-up ratio next to the 2× it needs (each turns green when it passes), then **Ready / Blocked** with the first check that stops a new pair, e.g. _calm market_, _not speeding up_, _losing-streak pause_ or _spread > cap_.
+- **Orders**: the open position with its stop and profit, the waiting buy stop / sell stop, and the losing streak against the pause limit.
+- **Statistics**: trades, wins / losses, average win / loss, expectancy, profit factor and net profit of this EA's closed positions (magic number and symbol).
+
+The dashboard changes nothing in the trading: v1.6 trades exactly like v1.5, the version all the results below come from.
 
 | `xauusd-straddle.set` | |
 |---|---|
@@ -368,7 +377,7 @@ The straddle beats all six. The comparison also shows where the edge is: **enter
 
 The straddle needs price to run well past its entry *after* paying the spread. On gold in 2026 a typical minute moved about 8 times the spread ($2.17 vs $0.26); on USDJPY only 1.8 times (1.8 pips vs 1 pip).
 
-| USDJPY, Jan-Sep 2026, M1, $2,000 per month, about $1 per stop | Total | Months up | Profit factor |
+| USDJPY, Jan-Oct 2026, M1, $2,000 per month, about $1 per stop | Total | Months up | Profit factor |
 |---|---|---|---|
 | $1 scaled by 1-minute volatility (0.83-pip stop, inside the 1-pip spread) | -165.2% | 0/10 | 0.06 |
 | $1 scaled by daily volatility, like `usdjpy-default.set` (3.9-pip stop) | -16.3% | 0/10 | 0.68 |
@@ -393,7 +402,7 @@ The two earn at different times: Nyao Scalper in steady trends (January, March, 
 - **Broker limits.** In a crash it opens a new trade every few seconds to minutes.
 - **Spread.** The test broker's gold spread was $0.16 in January 2026 and $0.24-0.36 later. The straddle pays it on every trade.
 - **Latency.** The straddle reacts to every tick, so the delay between the terminal and the broker matters more for it than for Nyao Scalper.
-- **Idle time.** Weeks without a trade are normal. The chart status shows the H1 ATR next to the $34 it needs.
+- **Idle time.** Weeks without a trade are normal. The dashboard shows the H1 ATR next to the $34 it needs.
 - **Gold's price level.** $34 and $1 are dollar distances set at a gold price of about $4,500. If gold moves far from that, the same distances describe a different market.
 
 ### How the Straddle's Defaults Were Found

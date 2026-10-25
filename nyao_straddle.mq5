@@ -1,5 +1,5 @@
 // +------------------------------------------------------------------+
-// | Nyao Straddle v1.5                                               |
+// | Nyao Straddle v1.6                                               |
 // | Volatility breakout straddle for gold (XAUUSD) on M1, the        |
 // | companion EA of Nyao Scalper. Only in extreme markets (H1 ATR    |
 // | >= $34 and the last 7 minutes at least 2x their normal pace) it  |
@@ -11,7 +11,7 @@
 // | © Copyright Nyao Scalper by Elriz Wiraswara                      |
 // +------------------------------------------------------------------+
 #property copyright "© Copyright Nyao Scalper by Elriz Wiraswara"
-#property version "1.5"
+#property version "1.6"
 #property description "Gold M1 breakout straddle, extreme markets only (H1 ATR >= $34)"
 #property description "Buy & sell stop $1 away; first fill cancels the other; $1 trail"
 #property description ""
@@ -21,9 +21,10 @@
 #property description "EXPERIMENTAL - demo forward-test first. No guarantee of profit."
 #property strict
 
-#define EA_TITLE "Nyao Straddle v1.5"
+#define EA_TITLE "Nyao Straddle v1.6"
 
 #include <Trade\Trade.mqh>
+#include <Generic\HashMap.mqh>
 
 // Research control test: same moments, filters and exits, but the direction is a coin flip
 enum ENUM_ENTRY_MODE
@@ -466,22 +467,387 @@ void Manage()
     PlacePair();
 }
 
-void ShowStatus()
+// +------------------------------------------------------------------+
+// | Trade statistics for the dashboard                               |
+// | One trade = one closed position of this EA (magic and symbol),   |
+// | all of its deals summed (entry commission included), the way     |
+// | Nyao Scalper counts them. One history scan when the dashboard    |
+// | first draws, then each position is added when it closes.         |
+// +------------------------------------------------------------------+
+struct TradeStats
 {
+    int count;
+    int won;
+    int lost;
+    double profit;                                        // sum of winning trades
+    double loss;                                          // sum of losing trades (negative)
+};
+TradeStats stats;
+bool statsReady = false;                                  // false until the first history scan
+
+void AddTrade(double net)
+{
+    stats.count++;
+    if(net >= 0) { stats.won++; stats.profit += net; }
+    else { stats.lost++; stats.loss += net; }
+}
+
+void LoadTradeStats()
+{
+    ZeroMemory(stats);
+    statsReady = true;
+    if(!HistorySelect(0, TimeCurrent() + 86400)) return;
+    CHashMap<long, int> index;
+    double net[];
+    bool ours[];
+    bool closed[];
+    int n = 0;
+    int deals = HistoryDealsTotal();
+    for(int i = 0; i < deals; i++)
+    {
+        ulong d = HistoryDealGetTicket(i);
+        if(d == 0 || HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol) continue;
+        long type = HistoryDealGetInteger(d, DEAL_TYPE);
+        if(type != DEAL_TYPE_BUY && type != DEAL_TYPE_SELL) continue;
+        long pos = HistoryDealGetInteger(d, DEAL_POSITION_ID);
+        int k;
+        if(!index.TryGetValue(pos, k))
+        {
+            k = n++;
+            ArrayResize(net, n, 1000);
+            ArrayResize(ours, n, 1000);
+            ArrayResize(closed, n, 1000);
+            net[k] = 0;
+            ours[k] = false;
+            closed[k] = false;
+            index.Add(pos, k);
+        }
+        net[k] += HistoryDealGetDouble(d, DEAL_PROFIT) + HistoryDealGetDouble(d, DEAL_SWAP) + HistoryDealGetDouble(d, DEAL_COMMISSION);
+        long entry = HistoryDealGetInteger(d, DEAL_ENTRY);
+        if(entry == DEAL_ENTRY_IN) ours[k] = HistoryDealGetInteger(d, DEAL_MAGIC) == MagicNumber;
+        else if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY) closed[k] = true;
+    }
+    for(int k = 0; k < n; k++)
+        if(ours[k] && closed[k]) AddTrade(net[k]);
+}
+
+// A position of this EA closed: add its net result (all of its deals) once it is fully closed
+void AddClosedPosition(long positionId)
+{
+    if(!statsReady || PositionSelectByTicket(positionId)) return;
+    if(!HistorySelectByPosition(positionId)) return;
+    double net = 0;
+    for(int i = 0; i < HistoryDealsTotal(); i++)
+    {
+        ulong d = HistoryDealGetTicket(i);
+        net += HistoryDealGetDouble(d, DEAL_PROFIT) + HistoryDealGetDouble(d, DEAL_SWAP) + HistoryDealGetDouble(d, DEAL_COMMISSION);
+    }
+    AddTrade(net);
+}
+
+// +------------------------------------------------------------------+
+// | On-chart dashboard (the same panel as Nyao Scalper's)            |
+// +------------------------------------------------------------------+
+#define DASH "NyaoStraddleDash_"
+int dashTextRight = 0;                                    // right edge (px) of the widest label this redraw
+double peakEquity = 0;                                    // highest equity seen since the EA started
+
+void DrawDashboardLabel(string name, string text, int x, int y, int fontSize, color clr, bool bold = false)
+{
+    name = DASH + name;
+    if(ObjectFind(0, name) < 0)
+    {
+        ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, name, OBJPROP_BACK, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    }
+
+    // MT5 shows at most 63 characters of a label: make a cut visible instead of silent
+    if(StringLen(text) > 63) text = StringSubstr(text, 0, 62) + "\x2026";
+
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+    ObjectSetString(0, name, OBJPROP_FONT, bold ? "Arial Bold" : "Arial");
+
+    // Measure the text the way the label renders it (points, scaled like the chart) for the background
+    uint w = 0, h = 0;
+    if(TextSetFont(bold ? "Arial Bold" : "Arial", -fontSize * 10) && TextGetSize(text, w, h))
+        dashTextRight = MathMax(dashTextRight, x + (int)w);
+    else
+        dashTextRight = MathMax(dashTextRight, x + StringLen(text) * fontSize * 3 / 4);
+}
+
+// Dark panel behind the dashboard. Created before any label so it is drawn underneath them.
+void DrawDashboardBackground(int x, int y, int width, int height, color bg, color border)
+{
+    string name = DASH + "Bg";
+    if(ObjectFind(0, name) < 0)
+    {
+        ObjectsDeleteAll(0, DASH);                        // labels made before the panel would sit under it
+        ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+        ObjectSetInteger(0, name, OBJPROP_BACK, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+    }
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, name, OBJPROP_XSIZE, MathMax(width, 10));
+    ObjectSetInteger(0, name, OBJPROP_YSIZE, MathMax(height, 10));
+    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, border);
+}
+
+// $1.23 / -$1.23
+string Usd(double v)
+{
+    return (v < 0 ? "-$" : "$") + DoubleToString(MathAbs(v), 2);
+}
+
+// A price or price distance with the symbol's digits
+string Price(double v)
+{
+    return DoubleToString(v, _Digits);
+}
+
+// "H1" instead of "PERIOD_H1"
+string TfName(ENUM_TIMEFRAMES tf)
+{
+    string s = EnumToString(tf == PERIOD_CURRENT ? (ENUM_TIMEFRAMES)_Period : tf);
+    StringReplace(s, "PERIOD_", "");
+    return s;
+}
+
+bool TradingAllowed()
+{
+    return MQLInfoInteger(MQL_TESTER) || (TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && MQLInfoInteger(MQL_TRADE_ALLOWED));
+}
+
+int PauseMinutesLeft()
+{
+    return (int)((pausedUntil - TimeCurrent() + 59) / 60);
+}
+
+// The first check that keeps a new pair from going out, in the order Manage() applies them. "" = ready.
+string DashboardGate(int pendings)
+{
+    if(!volReady) return "waiting for ATR history";
+    if(TimeCurrent() < pausedUntil) return StringFormat("losing-streak pause, %d min left", PauseMinutesLeft());
+    if(!InSession()) return "outside the trading sessions";
+    if(RegimeMinATR > 0 && regimeATR < RegimeMinATR)
+        return StringFormat("calm market: %s ATR %s < %s", TfName(RegimeTimeframe), Price(regimeATR), Price(RegimeMinATR));
+    if(VolMinRatio > 0 && (atrNormal <= 0 || atrNow < VolMinRatio * atrNormal))
+        return StringFormat("not speeding up: %.2fx < %.2fx", atrNormal > 0 ? atrNow / atrNormal : 0, VolMinRatio);
+    if(VolMinATR > 0 && atrNow < VolMinATR) return StringFormat("ATR %s < VolMinATR %s", Price(atrNow), Price(VolMinATR));
+    if(pendings > 0) return "";
+    if(!TradingAllowed()) return "algo trading is off";
+    MqlTick tick;
+    if(MaxSpread > 0 && SymbolInfoTick(_Symbol, tick) && tick.ask - tick.bid > MaxSpread)
+        return StringFormat("spread %s > cap %s", Price(tick.ask - tick.bid), Price(MaxSpread));
+    if(TimeCurrent() < retryAfter) return StringFormat("retry in %ds after a failed order", (int)(retryAfter - TimeCurrent()));
+    return "";
+}
+
+// A calm or slow market is the normal waiting state (gray); anything else needs attention (orange)
+color GateColor(string gate)
+{
+    if(gate == "") return clrLime;
+    if(StringFind(gate, "calm market") == 0 || StringFind(gate, "not speeding up") == 0
+       || StringFind(gate, "outside the trading") == 0 || StringFind(gate, "waiting for ATR") == 0) return clrGray;
+    return clrOrange;
+}
+
+void UpdateDashboard()
+{
+    // Nobody can see the chart in a non-visual backtest / optimization - skip the work
     if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) return;
-    uint now = GetTickCount();
-    if(now - lastStatusMs < 1000) return;
-    lastStatusMs = now;
-    string state = !volReady ? "waiting for ATR history"
-                 : TimeCurrent() < pausedUntil ? "paused after a losing streak until " + TimeToString(pausedUntil, TIME_MINUTES)
-                 : !InSession() ? "outside trading sessions - not trading"
-                 : volatileNow ? "VOLATILE - straddle active"
-                 : "calm - not trading";
+
+    // Redraw at most once per second
+    uint nowMs = GetTickCount();
+    if(lastStatusMs != 0 && nowMs - lastStatusMs < 1000) return;
+    lastStatusMs = nowMs;
+
+    if(!statsReady) LoadTradeStats();
+    Comment("");
+
+    // Background first, so every label is drawn on top of it (sized to the content at the end)
+    if(ObjectFind(0, DASH + "Bg") < 0) DrawDashboardBackground(10, 10, 10, 10, C'30,30,30', clrGold);
+    dashTextRight = 0;
+
+    // Layout and colours of Nyao Scalper's dashboard
+    int startX = 20;
+    int startY = 36;                                      // panel top at 30 px: below the chart's symbol / OHLC line
+    int lineHeight = 18;
+    int headersize = 10;
+    int textsize = 9;
+    int detailsSize = 8;
+    color colorHeader = clrGold;
+    color colorText = clrWhite;
+    color colorBuy = clrLime;
+    color colorSell = clrRed;
+    int currentY = startY;
+
+    // Header
+    DrawDashboardLabel("Title", EA_TITLE, startX, currentY, 11, colorHeader, true);
+    currentY += lineHeight + 5;
+
+    // Status (waiting for data, then blocks and pauses, then the session)
+    string status = "Active";
+    color statusColor = clrLime;
+    if(!volReady) { status = "Waiting for ATR history"; statusColor = clrGray; }
+    else if(!TradingAllowed()) { status = "No Entries (Algo Trading Off)"; statusColor = clrOrange; }
+    else if(TimeCurrent() < pausedUntil) { status = StringFormat("PAUSED: losing streak (%dm)", PauseMinutesLeft()); statusColor = clrOrange; }
+    else if(!InSession()) { status = "Closed (Session)"; statusColor = clrGray; }
+    DrawDashboardLabel("Status", "Status: " + status, startX, currentY, textsize, statusColor, true);
+    currentY += lineHeight;
+
+    if(EntryMode != ENTRY_STRADDLE)
+    {
+        DrawDashboardLabel("Mode", EntryMode == ENTRY_COIN_MARKET ? "Mode: coin flip, market orders (research test)"
+                                                                  : "Mode: coin flip, one stop order (research test)",
+                           startX, currentY, textsize, clrOrange);
+        currentY += lineHeight;
+    }
+    else ObjectDelete(0, DASH + "Mode");
+
+    // Account
+    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    peakEquity = MathMax(peakEquity, equity);
+    double equityDrop = peakEquity > 0 ? (peakEquity - equity) / peakEquity * 100.0 : 0;
+    DrawDashboardLabel("Bal", "Balance: " + Usd(balance), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("Eq", "Equity: " + Usd(equity), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("Peak", "Peak: " + Usd(peakEquity) + StringFormat(" (Drop: %.1f%%, since start)", equityDrop),
+                       startX, currentY, textsize, colorText);
+    currentY += lineHeight + 5;
+
+    // Market filters: the lot, the two ATR conditions and the first check that blocks a new pair
+    DrawDashboardLabel("FiltHead", "MARKET FILTERS:", startX, currentY, headersize, colorHeader, true);
+    currentY += lineHeight;
+
+    string lotText = "Lot: waiting for ATR history";
+    double unit = CurrentUnit();
+    if(unit > 0)
+    {
+        double minDist = StopsLevelDistance() + _Point;
+        double slDist = StopLoss > 0 ? MathMax(StopLoss * unit, minDist) : TrailDistance * unit;
+        double vol = LotSize(slDist);
+        double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+        if(tickValue <= 0) tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+        double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+        double risk = tickSize > 0 ? vol * slDist / tickSize * tickValue : 0;
+        lotText = StringFormat("Lot: %.2f (%s, risks %s = %.2f%% at the stop)", vol, RiskPercent > 0 ? "risk-sized" : "fixed",
+                               Usd(risk), equity > 0 ? 100.0 * risk / equity : 0);
+    }
+    DrawDashboardLabel("Lot", lotText, startX, currentY, detailsSize, colorText);
+    currentY += lineHeight;
+
+    bool regimeOk = RegimeMinATR <= 0 || regimeATR >= RegimeMinATR;
+    DrawDashboardLabel("Regime", RegimeMinATR > 0 ? StringFormat("EXTREME MARKET: %s ATR %s", TfName(RegimeTimeframe), Price(regimeATR))
+                                                  : "EXTREME MARKET: off",
+                       startX, currentY, textsize, volReady && regimeOk ? colorBuy : colorText, true);
+    currentY += lineHeight;
+    DrawDashboardLabel("RegimeNeed", RegimeMinATR > 0 ? StringFormat("Need: >= %s (ATR %d of the last closed bar)", Price(RegimeMinATR), RegimeATRPeriod)
+                                                      : "Need: nothing (RegimeMinATR = 0)",
+                       startX, currentY, detailsSize, colorText);
+    currentY += lineHeight;
+
     double ratio = atrNormal > 0 ? atrNow / atrNormal : 0;
-    Comment(StringFormat("%s\nATR %s | normal %s | ratio %.2f (needs %.2f)\n%s ATR %s (needs %s)\n%s",
-                         EA_TITLE, DoubleToString(atrNow, _Digits), DoubleToString(atrNormal, _Digits),
-                         ratio, VolMinRatio, EnumToString(RegimeTimeframe), DoubleToString(regimeATR, _Digits),
-                         RegimeMinATR > 0 ? DoubleToString(RegimeMinATR, 2) : "off", state));
+    bool speedOk = (VolMinRatio <= 0 || ratio >= VolMinRatio) && (VolMinATR <= 0 || atrNow >= VolMinATR);
+    DrawDashboardLabel("Speed", VolMinRatio > 0 ? StringFormat("SPEED-UP: %.2fx normal", ratio) : "SPEED-UP: off",
+                       startX, currentY, textsize, volReady && speedOk ? colorBuy : colorText, true);
+    currentY += lineHeight;
+    DrawDashboardLabel("SpeedNeed", StringFormat("Need: >= %.2fx | %s ATR(%d) %s vs avg %s (%d bars)", VolMinRatio, TfName(volTF),
+                                                 VolATRPeriod, Price(atrNow), Price(atrNormal), VolBaseBars),
+                       startX, currentY, detailsSize, colorText);
+    currentY += lineHeight;
+
+    // Our position and pending orders
+    int buyStops, sellStops;
+    datetime oldest;
+    int pendings = CountPendings(buyStops, sellStops, oldest);
+    bool inTrade = false;
+    string posText = "Position: none";
+    color posColor = colorText;
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(PositionGetTicket(i) == 0) continue;
+        if(!IsOurs(PositionGetInteger(POSITION_MAGIC), PositionGetString(POSITION_SYMBOL))) continue;
+        double pl = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+        posText = StringFormat("Position: %s %.2f @ %s | SL %s | %s%s",
+                               PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL", PositionGetDouble(POSITION_VOLUME),
+                               Price(PositionGetDouble(POSITION_PRICE_OPEN)), Price(PositionGetDouble(POSITION_SL)),
+                               pl >= 0 ? "+" : "", Usd(pl));
+        posColor = pl >= 0 ? colorBuy : colorSell;
+        inTrade = true;
+        break;
+    }
+    double buyStopPrice = 0, sellStopPrice = 0;
+    for(int i = OrdersTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = OrderGetTicket(i);
+        if(ticket == 0 || !IsOurs(OrderGetInteger(ORDER_MAGIC), OrderGetString(ORDER_SYMBOL))) continue;
+        if(OrderGetInteger(ORDER_TYPE) == ORDER_TYPE_BUY_STOP) buyStopPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+        if(OrderGetInteger(ORDER_TYPE) == ORDER_TYPE_SELL_STOP) sellStopPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+    }
+
+    string gate = inTrade ? "" : DashboardGate(pendings);
+    string gateText = inTrade ? "> In trade: the trailing stop exits, then a new pair"
+                    : gate != "" ? "> Blocked: " + gate
+                    : pendings > 0 ? (EntryMode == ENTRY_STRADDLE ? "> Ready: buy stop + sell stop waiting" : "> Ready: stop order waiting")
+                    : "> Ready: places a pair now";
+    DrawDashboardLabel("Gate", gateText, startX, currentY, detailsSize, GateColor(gate));
+    currentY += lineHeight + 10;
+
+    DrawDashboardLabel("OrdHead", "ORDERS:", startX, currentY, headersize, colorHeader, true);
+    currentY += lineHeight;
+    DrawDashboardLabel("Pos", posText, startX, currentY, textsize, posColor, inTrade);
+    currentY += lineHeight;
+    string pendText = pendings == 0 ? "Pending: none"
+                    : StringFormat("Buy stop: %s | Sell stop: %s", buyStopPrice > 0 ? Price(buyStopPrice) : "-",
+                                   sellStopPrice > 0 ? Price(sellStopPrice) : "-");
+    DrawDashboardLabel("Pend", pendText, startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("Streak", LossStreakPause > 0 ? StringFormat("Loss streak: %d / %d (then a %d min pause)", lossStreak, LossStreakPause, LossStreakPauseMinutes)
+                                                     : StringFormat("Loss streak: %d (pause off)", lossStreak),
+                       startX, currentY, textsize, colorText);
+    currentY += lineHeight + 10;
+
+    // Statistics, as on Nyao Scalper's dashboard
+    double netProfit = stats.profit + stats.loss;
+    DrawDashboardLabel("StatHead", "STATISTICS:", startX, currentY, headersize, colorHeader, true);
+    currentY += lineHeight;
+    DrawDashboardLabel("Trades", StringFormat("Trades: %d (W:%d / L:%d)", stats.count, stats.won, stats.lost), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("PL", "Profit: " + Usd(stats.profit) + " | Loss: " + Usd(stats.loss), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    DrawDashboardLabel("AvgWL", "Avg Win: " + Usd(stats.won > 0 ? stats.profit / stats.won : 0)
+                                + " | Avg Loss: " + Usd(stats.lost > 0 ? stats.loss / stats.lost : 0), startX, currentY, textsize, colorText);
+    currentY += lineHeight;
+    double expectancy = stats.count > 0 ? netProfit / stats.count : 0;
+    string pf = stats.loss < 0 ? DoubleToString(stats.profit / -stats.loss, 2) : stats.profit > 0 ? "inf" : "-";
+    DrawDashboardLabel("Expect", "Expectancy: " + Usd(expectancy) + "/trade | PF: " + pf, startX, currentY, textsize,
+                       expectancy >= 0 ? colorText : colorSell);
+    currentY += lineHeight;
+    DrawDashboardLabel("Net", "NET PROFIT: " + Usd(netProfit), startX, currentY, textsize, netProfit >= 0 ? colorBuy : colorSell, true);
+
+    // Panel around everything drawn above
+    int pad = 10;
+    DrawDashboardBackground(startX - pad, startY - pad, dashTextRight - startX + 2 * pad,
+                            currentY + lineHeight - startY + 2 * pad, C'30,30,30', clrGold);
+    ChartRedraw(0);
 }
 
 // +------------------------------------------------------------------+
@@ -566,6 +932,7 @@ void OnDeinit(const int reason)
     EquityLogStop();
     if(atrHandle != INVALID_HANDLE) IndicatorRelease(atrHandle);
     if(regimeHandle != INVALID_HANDLE) IndicatorRelease(regimeHandle);
+    ObjectsDeleteAll(0, DASH);
     Comment("");
 }
 
@@ -575,7 +942,7 @@ void OnTick()
     UpdateVolatility();
     TrailPositions();
     Manage();
-    ShowStatus();
+    UpdateDashboard();                                    // on-chart dashboard (once per second, visual only)
 }
 
 // Was the position this deal belongs to opened by this EA? (stop-loss closes may not carry the magic)
@@ -591,7 +958,7 @@ bool PositionWasOurs(long positionId)
 }
 
 // One side filled: cancel the other at once instead of waiting for the next tick.
-// A trade closed: count the losing streak and start a pause when it gets long enough.
+// A trade closed: add it to the statistics, count the losing streak and start a pause when it gets long enough.
 void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
 {
     if(trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.symbol != _Symbol) return;
@@ -606,7 +973,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
     if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY) return;
     double pnl = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) + HistoryDealGetDouble(trans.deal, DEAL_SWAP)
                + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
-    if(magic != MagicNumber && !PositionWasOurs(HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID))) return;
+    long positionId = HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
+    if(magic != MagicNumber && !PositionWasOurs(positionId)) return;
+    AddClosedPosition(positionId);                        // dashboard statistics
     lossStreak = pnl <= 0 ? lossStreak + 1 : 0;
     if(LossStreakPause > 0 && lossStreak >= LossStreakPause)
     {
